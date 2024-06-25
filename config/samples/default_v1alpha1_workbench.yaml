@@ -1,0 +1,11 @@
+apiVersion: default.chorus-tre.ch/v1alpha1
+kind: Workbench
+metadata:
+  labels:
+    app.kubernetes.io/name: workbench-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: workbench-sample
+spec:
+  serverVersion: "0.0.1"
+  apps:
+    - name: brainstorm

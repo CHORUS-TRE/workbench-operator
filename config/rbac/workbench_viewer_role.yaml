@@ -1,0 +1,23 @@
+# permissions for end users to view workbenches.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: workbench-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: workbench-viewer-role
+rules:
+- apiGroups:
+  - default.chorus-tre.ch
+  resources:
+  - workbenches
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - default.chorus-tre.ch
+  resources:
+  - workbenches/status
+  verbs:
+  - get

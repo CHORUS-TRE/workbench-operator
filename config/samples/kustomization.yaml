@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- default_v1alpha1_workbench.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
