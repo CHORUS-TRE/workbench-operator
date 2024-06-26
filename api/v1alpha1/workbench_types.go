@@ -25,17 +25,28 @@ import (
 
 // Important: Run "make" to regenerate code after modifying this file
 
-// WorkbenchAppStatus tells which status the application is in.
-type WorkbenchAppStatus string
+// WorkbenchAppState tells which status the application is in.
+//
+// An app always goes from Running to Stopped or Killed if it's externally stopped or killed.
+// Otherwise, the actual status is found in the /status section.
+type WorkbenchAppState string
 
-// WorkbenchAppStatusRunning is used to create a running application.
-var WorkbenchAppStatusRunning = "Running"
+// WorkbenchAppStateRunning is used to create a running application.
+var WorkbenchAppStateRunning = "Running"
 
-// WorkbenchAppStatusStopped is used to stop a running application.
-var WorkbenchAppStatusStopped = "Stopped"
+// WorkbenchAppStateStopped is used to stop a running application.
+var WorkbenchAppStateStopped = "Stopped"
 
-// WorkbenchAppStatusKilled is used to force kill a running application.
-var WorkbenchAppStatusKilled = "Killed"
+// WorkbenchAppStateKilled is used to force kill a running application.
+var WorkbenchAppStateKilled = "Killed"
+
+// WorkbenchServer defines the server configuration.
+type WorkbenchServer struct {
+	// Version defines the version to use.
+	Version string `json:"version,omitempty"`
+
+	// TODO: add anything you'd like to configure. E.g. resources, Xpra options, auth, etc.
+}
 
 // WorkbenchApp defines one application running in the workbench.
 type WorkbenchApp struct {
@@ -43,14 +54,16 @@ type WorkbenchApp struct {
 	Name string `json:"name"`
 	// Version defines the version to use.
 	Version string `json:"version,omitempty"`
-	// Status defines the external set status for the application
-	Status WorkbenchAppStatus `json:"status,omitempty"`
+	// State defines the desired state
+	State WorkbenchAppState `json:"state,omitempty"`
+
+	// TODO: add anything you'd like to configure. E.g. resources, (App data) volume, etc.
 }
 
 // WorkbenchSpec defines the desired state of Workbench
 type WorkbenchSpec struct {
-	// ServerVersion defineswith Xpra server to run.
-	ServerVersion string `json:"serverVersion,omitempty"`
+	// Server represents the configuration of the server part.
+	Server WorkbenchServer `json:"server,omitempty"`
 	// Apps represent a list of applications any their state
 	Apps []WorkbenchApp `json:"apps,omitempty"`
 }
@@ -105,6 +118,9 @@ type WorkbenchStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.server.version`
+// +kubebuilder:printcolumn:name="Apps",type=string,JSONPath=`.spec.apps[*].name`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workbench is the Schema for the workbenches API
 type Workbench struct {

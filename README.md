@@ -19,7 +19,7 @@ The goal is to delegate the hard work of wiring the Xpra server and their applic
 - go version v1.22.0+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- Access to a Kubernetes v1.29+ cluster. (or v1.28+ with native sidecars enabled)
 
 ### To Deploy on the cluster
 

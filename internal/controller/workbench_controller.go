@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -38,7 +39,52 @@ import (
 // WorkbenchReconciler reconciles a Workbench object
 type WorkbenchReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
+}
+
+// finalizer used to control the clean up the deployments.
+const finalizer = "default.k8s.chorus-tre.ch/finalizer"
+
+// matchingLabel to search for sub-resources.
+const matchingLabel = "xpra-server"
+
+// deleteExternalResources removes the underlying Deployment(s).
+func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workbench *defaultv1alpha1.Workbench) (int, error) {
+	log := log.FromContext(ctx)
+
+	// Find all the deployments linked with the workbench.
+	deploymentList := appsv1.DeploymentList{}
+
+	err := r.List(
+		ctx,
+		&deploymentList,
+		client.MatchingLabels{matchingLabel: workbench.Name},
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	// Delete them.
+	for _, item := range deploymentList.Items {
+		r.Recorder.Event(
+			workbench,
+			"Normal",
+			"DeletingDeployment",
+			fmt.Sprintf(
+				"Deleting deployment %q from the namespace %q",
+				item.Name,
+				item.Namespace,
+			),
+		)
+
+		log.V(1).Info("Delete deployment", "deployment", item.Name)
+		if err := r.Delete(ctx, &item); err != nil {
+			return 0, err
+		}
+	}
+
+	return len(deploymentList.Items), nil
 }
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
@@ -46,73 +92,48 @@ type WorkbenchReconciler struct {
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Workbench object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.2/pkg/reconcile
 func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	log.V(1).Info("Reconcile it", "what", req.NamespacedName)
+	log.V(1).Info("Reconcile", "what", req.NamespacedName)
 
+	// Fetch the workbench to reconcile.
 	workbench := defaultv1alpha1.Workbench{}
-
 	if err := r.Get(ctx, req.NamespacedName, &workbench); err != nil {
 		// Not found means it's been deleted.
 		if !errors.IsNotFound(err) {
 			log.Error(err, "unable to fetch the workbench")
-			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
+
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	finalizer := "default.k8s.chorus-tre.ch/finalizer"
+	// Manage deletion and finalizers.
 	containsFinalizer := controllerutil.ContainsFinalizer(&workbench, finalizer)
 
-	if workbench.DeletionTimestamp.IsZero() {
-		// Object is not being deleted.
-		// verify that the finalizer exists.
-		if !containsFinalizer {
-			controllerutil.AddFinalizer(&workbench, finalizer)
-			if err := r.Update(ctx, &workbench); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	} else {
+	if !workbench.DeletionTimestamp.IsZero() {
+		// Object has been deleted
 		if containsFinalizer {
 			// It first removes the sub-resources, then the finalizer.
-			deploymentList := appsv1.DeploymentList{}
-			err := r.List(
-				ctx,
-				&deploymentList,
-				client.MatchingLabels{"xpra-server": workbench.Name},
-			)
+			count, err := r.deleteExternalResources(ctx, &workbench)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
 
-			for _, item := range deploymentList.Items {
-				log.V(1).Info("Delete deployment", "deployment", item.Name)
-				if err := r.Delete(ctx, &item); err != nil {
-					return ctrl.Result{}, err
-				}
-			}
-
-			if len(deploymentList.Items) > 0 {
-				// Wait for the deployments to be cleaned up.
-				log.V(1).Info("Deployments are hanging", "count", len(deploymentList.Items))
+			// We will get a resource name may not be empty error otherwise.
+			if count > 0 {
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 
-			controllerutil.RemoveFinalizer(&workbench, finalizer)
-
-			if err := r.Update(ctx, &workbench); err != nil {
-				return ctrl.Result{}, err
+			finalizersUpdated := controllerutil.RemoveFinalizer(&workbench, finalizer)
+			if finalizersUpdated {
+				if err := r.Update(ctx, &workbench); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 		}
 
@@ -120,13 +141,24 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	deployment := &appsv1.Deployment{}
+	// verify that the finalizer exists.
+	if !containsFinalizer {
+		finalizersUpdated := controllerutil.AddFinalizer(&workbench, finalizer)
+		if finalizersUpdated {
+			if err := r.Update(ctx, &workbench); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	// The deployment
+	deployment := appsv1.Deployment{}
 	deployment.Name = workbench.Name
 	deployment.Namespace = workbench.Namespace
 
 	// Labels
 	labels := map[string]string{
-		"xpra-server": workbench.Name,
+		matchingLabel: workbench.Name,
 	}
 
 	deployment.Labels = labels
@@ -174,10 +206,11 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// TODO: put default values via the admission webhook.
-	serverVersion := workbench.Spec.ServerVersion
+	serverVersion := workbench.Spec.Server.Version
 	if serverVersion == "" {
 		serverVersion = "latest"
 	}
+
 	// TODO: allow the registry to be specifiec as well.
 	serverImage := fmt.Sprintf("registry.build.chorus-tre.local/xpra-server:%s", serverVersion)
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{
@@ -193,6 +226,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			},
 			Env: []corev1.EnvVar{
 				{
+					// Will be needed for GPU.
 					Name:  "CARD",
 					Value: "",
 				},
@@ -208,44 +242,73 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	foundDeployment := appsv1.Deployment{}
 	err := r.Get(ctx, deploymentNamespacedName, &foundDeployment)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			log.V(1).Error(err, "Deployment is not (not) found.")
+			return ctrl.Result{}, err
+		}
 
-	if err != nil && errors.IsNotFound(err) {
 		log.V(1).Info("Creating the deployment", "deployment", deployment.Name)
 
 		// Link the deployment with the Workbench resource such that we can reconcile it
 		// when it's being changed.
-		if err := controllerutil.SetControllerReference(&workbench, deployment, r.Scheme); err != nil {
+		if err := controllerutil.SetControllerReference(&workbench, &deployment, r.Scheme); err != nil {
+			log.V(1).Error(err, "Error setting the reference")
 			return ctrl.Result{}, err
 		}
 
-		if err := r.Create(ctx, deployment); err != nil {
-			return ctrl.Result{}, err
+		r.Recorder.Event(
+			&workbench,
+			"Normal",
+			"CreatingDeployment",
+			fmt.Sprintf(
+				"Creating deployment %q into the namespace %q",
+				deployment.Name,
+				deployment.Namespace,
+			),
+		)
+
+		if err := r.Create(ctx, &deployment); err != nil {
+			log.V(1).Error(err, "Error creating the deployment")
+			// It's probably has already been created.
+			// FIXME check that it's indeed the case.
 		}
 
-		// It's been created with success.
-		return ctrl.Result{}, nil
+		// It's been created with success, don't loop straight away.
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	if err == nil {
-		initContainers := foundDeployment.Spec.Template.Spec.InitContainers
-		if len(initContainers) != 1 {
-			foundDeployment.Spec.Template.Spec.InitContainers = deployment.Spec.Template.Spec.InitContainers
-		}
+	updated := false
 
-		containers := foundDeployment.Spec.Template.Spec.Containers
-		if len(containers) != 1 {
-			foundDeployment.Spec.Template.Spec.Containers = deployment.Spec.Template.Spec.Containers
-		}
+	initContainers := foundDeployment.Spec.Template.Spec.InitContainers
+	if len(initContainers) != 1 {
+		log.V(2).Info("Missing initContainer")
+		foundDeployment.Spec.Template.Spec.InitContainers = deployment.Spec.Template.Spec.InitContainers
+		updated = true
+	}
 
-		// Use the new server image.
-		if containers[0].Image != serverImage {
-			foundDeployment.Spec.Template.Spec.Containers[0].Image = serverImage
-		}
+	containers := foundDeployment.Spec.Template.Spec.Containers
+	if len(containers) != 1 {
+		log.V(2).Info("Missing container")
+		foundDeployment.Spec.Template.Spec.Containers = deployment.Spec.Template.Spec.Containers
+		updated = true
+	}
 
+	// Use the new server image.
+	if containers[0].Image != serverImage {
+		log.V(2).Info("Updating server image", "image", serverImage)
+		foundDeployment.Spec.Template.Spec.Containers[0].Image = serverImage
+		updated = true
+	}
+
+	if updated {
 		log.V(1).Info("Updating Deployment", "deployment", foundDeployment.Name)
 
 		err2 := r.Update(ctx, &foundDeployment)
-		return ctrl.Result{}, err2
+		if err2 != nil {
+			log.V(1).Error(err2, "Unable to update the deployment")
+			return ctrl.Result{}, err2
+		}
 	}
 
 	return ctrl.Result{}, nil

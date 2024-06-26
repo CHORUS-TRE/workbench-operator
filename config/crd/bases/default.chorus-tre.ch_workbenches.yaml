@@ -14,7 +14,17 @@ spec:
     singular: workbench
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.server.version
+      name: Version
+      type: string
+    - jsonPath: .spec.apps[*].name
+      name: Apps
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Workbench is the Schema for the workbenches API
@@ -49,9 +59,8 @@ spec:
                       description: Name is the application name (likely its OCI image
                         name as well)
                       type: string
-                    status:
-                      description: Status defines the external set status for the
-                        application
+                    state:
+                      description: State defines the desired state
                       type: string
                     version:
                       description: Version defines the version to use.
@@ -60,9 +69,13 @@ spec:
                   - name
                   type: object
                 type: array
-              serverVersion:
-                description: ServerVersion defineswith Xpra server to run.
-                type: string
+              server:
+                description: Server represents the configuration of the server part.
+                properties:
+                  version:
+                    description: Version defines the version to use.
+                    type: string
+                type: object
             type: object
           status:
             description: WorkbenchStatus defines the observed state of Workbench

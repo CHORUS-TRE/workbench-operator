@@ -6,6 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: workbench-sample
 spec:
-  serverVersion: "0.0.1"
+  server:
+    version: "0.0.1"
   apps:
     - name: brainstorm

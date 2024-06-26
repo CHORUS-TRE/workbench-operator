@@ -23,6 +23,13 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - default.chorus-tre.ch
   resources:
   - workbenches

@@ -51,9 +51,7 @@ var _ = Describe("Workbench Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: defaultv1alpha1.WorkbenchSpec{
-						Apps: []defaultv1alpha1.WorkbenchApp{},
-					},
+					Spec: defaultv1alpha1.WorkbenchSpec{},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
