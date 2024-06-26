@@ -22,9 +22,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -151,90 +149,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// The deployment
-	deployment := appsv1.Deployment{}
-	deployment.Name = workbench.Name
-	deployment.Namespace = workbench.Namespace
-
-	// Labels
-	labels := map[string]string{
-		matchingLabel: workbench.Name,
-	}
-
-	deployment.Labels = labels
-	deployment.Spec.Selector = &metav1.LabelSelector{
-		MatchLabels: labels,
-	}
-	deployment.Spec.Template.Labels = labels
-
-	// Shared by the containers
-	volume := corev1.Volume{
-		Name: "x11-unix",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
-		},
-	}
-	volumeMounts := []corev1.VolumeMount{
-		{
-			Name:      volume.Name,
-			MountPath: "/tmp/.X11-unix",
-		},
-	}
-
-	deployment.Spec.Template.Spec.Volumes = []corev1.Volume{volume}
-
-	always := corev1.ContainerRestartPolicyAlways
-
-	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{
-		{
-			Name:            "xpra-server-bind",
-			Image:           "alpine/socat:1.8.0.0",
-			ImagePullPolicy: "IfNotPresent",
-			RestartPolicy:   &always,
-			Ports: []corev1.ContainerPort{
-				{
-					Name:          "x11-socket",
-					ContainerPort: 6080,
-				},
-			},
-			Args: []string{
-				"TCP-LISTEN:6080,fork,bind=0.0.0.0",
-				"UNIX-CONNECT:/tmp/.X11-unix/X80",
-			},
-			VolumeMounts: volumeMounts,
-		},
-	}
-
-	// TODO: put default values via the admission webhook.
-	serverVersion := workbench.Spec.Server.Version
-	if serverVersion == "" {
-		serverVersion = "latest"
-	}
-
-	// TODO: allow the registry to be specifiec as well.
-	serverImage := fmt.Sprintf("registry.build.chorus-tre.local/xpra-server:%s", serverVersion)
-	deployment.Spec.Template.Spec.Containers = []corev1.Container{
-		{
-			Name:            "xpra-server",
-			Image:           serverImage,
-			ImagePullPolicy: "IfNotPresent",
-			Ports: []corev1.ContainerPort{
-				{
-					Name:          "http",
-					ContainerPort: 8080,
-				},
-			},
-			Env: []corev1.EnvVar{
-				{
-					// Will be needed for GPU.
-					Name:  "CARD",
-					Value: "",
-				},
-			},
-			VolumeMounts: volumeMounts,
-		},
-	}
-
+	// The deployment of Xpra
+	deployment := initDeployment(workbench)
 	deploymentNamespacedName := types.NamespacedName{
 		Name:      deployment.Name,
 		Namespace: deployment.Namespace,
@@ -278,31 +194,22 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	updated := false
-
-	initContainers := foundDeployment.Spec.Template.Spec.InitContainers
-	if len(initContainers) != 1 {
-		log.V(2).Info("Missing initContainer")
-		foundDeployment.Spec.Template.Spec.InitContainers = deployment.Spec.Template.Spec.InitContainers
-		updated = true
-	}
-
-	containers := foundDeployment.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
-		log.V(2).Info("Missing container")
-		foundDeployment.Spec.Template.Spec.Containers = deployment.Spec.Template.Spec.Containers
-		updated = true
-	}
-
-	// Use the new server image.
-	if containers[0].Image != serverImage {
-		log.V(2).Info("Updating server image", "image", serverImage)
-		foundDeployment.Spec.Template.Spec.Containers[0].Image = serverImage
-		updated = true
-	}
+	// Update the existing deployment with the model one.
+	updated := updateDeployment(deployment, &foundDeployment)
 
 	if updated {
 		log.V(1).Info("Updating Deployment", "deployment", foundDeployment.Name)
+
+		r.Recorder.Event(
+			&workbench,
+			"Normal",
+			"UpdatingDeployment",
+			fmt.Sprintf(
+				"Updating deployment %q into the namespace %q",
+				deployment.Name,
+				deployment.Namespace,
+			),
+		)
 
 		err2 := r.Update(ctx, &foundDeployment)
 		if err2 != nil {
