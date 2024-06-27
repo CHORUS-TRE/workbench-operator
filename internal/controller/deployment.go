@@ -63,26 +63,21 @@ func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
 
 	deployment.Spec.Template.Spec.Volumes = []corev1.Volume{volume}
 
-	always := corev1.ContainerRestartPolicyAlways
-
-	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{
-		{
-			Name:            "xpra-server-bind",
-			Image:           "alpine/socat:1.8.0.0",
-			ImagePullPolicy: "IfNotPresent",
-			RestartPolicy:   &always,
-			Ports: []corev1.ContainerPort{
-				{
-					Name:          "x11-socket",
-					ContainerPort: 6080,
-				},
+	sidecarContainer := corev1.Container{
+		Name:            "xpra-server-bind",
+		Image:           "alpine/socat:1.8.0.0",
+		ImagePullPolicy: "IfNotPresent",
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "x11-socket",
+				ContainerPort: 6080,
 			},
-			Args: []string{
-				"TCP-LISTEN:6080,fork,bind=0.0.0.0",
-				"UNIX-CONNECT:/tmp/.X11-unix/X80",
-			},
-			VolumeMounts: volumeMounts,
 		},
+		Args: []string{
+			"TCP-LISTEN:6080,fork,bind=0.0.0.0",
+			"UNIX-CONNECT:/tmp/.X11-unix/X80",
+		},
+		VolumeMounts: volumeMounts,
 	}
 
 	// TODO: put default values via the admission webhook.
@@ -93,26 +88,37 @@ func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
 
 	// TODO: allow the registry to be specifiec as well.
 	serverImage := fmt.Sprintf("registry.build.chorus-tre.local/xpra-server:%s", serverVersion)
-	deployment.Spec.Template.Spec.Containers = []corev1.Container{
-		{
-			Name:            "xpra-server",
-			Image:           serverImage,
-			ImagePullPolicy: "IfNotPresent",
-			Ports: []corev1.ContainerPort{
-				{
-					Name:          "http",
-					ContainerPort: 8080,
-				},
+	serverContainer := corev1.Container{
+		Name:            "xpra-server",
+		Image:           serverImage,
+		ImagePullPolicy: "IfNotPresent",
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "http",
+				ContainerPort: 8080,
 			},
-			Env: []corev1.EnvVar{
-				{
-					// Will be needed for GPU.
-					Name:  "CARD",
-					Value: "",
-				},
-			},
-			VolumeMounts: volumeMounts,
 		},
+		Env: []corev1.EnvVar{
+			{
+				// Will be needed for GPU.
+				Name:  "CARD",
+				Value: "",
+			},
+		},
+		VolumeMounts: volumeMounts,
+	}
+
+	// FIXME: Kubernetes 1.29 supports native sidecars as initContainers.
+	//
+	// always := corev1.ContainerRestartPolicyAlways
+	// sidecarContainer.RestartPolicy = &always
+	// deployment.Spec.Template.Spec.InitContainers = []{sidecarContainer}
+	// deployment.Spec.Template.Spec.Containers = []{serverContainer}
+	//
+	// we will use less reliable ones in the meantime.
+	deployment.Spec.Template.Spec.Containers = []corev1.Container{
+		serverContainer,
+		sidecarContainer,
 	}
 
 	return deployment
@@ -123,7 +129,7 @@ func updateDeployment(source appsv1.Deployment, destination *appsv1.Deployment) 
 	updated := false
 
 	containers := destination.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
+	if len(containers) != 2 {
 		destination.Spec.Template.Spec.Containers = source.Spec.Template.Spec.Containers
 		updated = true
 	}
@@ -134,15 +140,9 @@ func updateDeployment(source appsv1.Deployment, destination *appsv1.Deployment) 
 		updated = true
 	}
 
-	initContainers := destination.Spec.Template.Spec.InitContainers
-	if len(initContainers) != 1 {
-		destination.Spec.Template.Spec.InitContainers = source.Spec.Template.Spec.InitContainers
-		updated = true
-	}
-
-	sidecarImage := source.Spec.Template.Spec.InitContainers[0].Image
-	if initContainers[0].Image != sidecarImage {
-		destination.Spec.Template.Spec.InitContainers[0].Image = sidecarImage
+	sidecarImage := source.Spec.Template.Spec.Containers[1].Image
+	if containers[1].Image != sidecarImage {
+		destination.Spec.Template.Spec.Containers[1].Image = sidecarImage
 		updated = true
 	}
 

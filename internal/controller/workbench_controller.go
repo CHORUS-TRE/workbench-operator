@@ -63,6 +63,7 @@ func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workb
 		return 0, err
 	}
 
+	// FIXME: use DeleteAllOf instead.
 	// Delete them.
 	for _, item := range deploymentList.Items {
 		r.Recorder.Event(
