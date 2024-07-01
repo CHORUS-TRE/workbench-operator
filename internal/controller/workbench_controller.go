@@ -195,6 +195,17 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
+	// TODO: to properly follow the deployment we have to dig into the replicaset
+	// via metadata.annotations."deployment.kubernetes.io/revision"
+	// which is also present on the replica. Then the pods, which can be found via
+	// the labels, has said replicas as its owner.
+	statusUpdated := (&workbench).UpdateStatusFromDeployment(foundDeployment)
+	if statusUpdated {
+		if err := r.Status().Update(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+		}
+	}
+
 	// Update the existing deployment with the model one.
 	updated := updateDeployment(deployment, &foundDeployment)
 

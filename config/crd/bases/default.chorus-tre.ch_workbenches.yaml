@@ -85,32 +85,33 @@ spec:
                   description: WorkbenchStatusappStatus informs about the state of
                     the apps.
                   properties:
-                    podName:
-                      description: PodName is the name of the pod
-                      type: string
+                    revision:
+                      description: Revision is the values of the "deployment.kubernetes.io/revision"
+                        metadata.
+                      type: integer
                     status:
                       description: Status informs about the real state of the app.
                       type: string
                   required:
-                  - podName
+                  - revision
                   - status
                   type: object
                 type: array
               server:
                 description: WorkbenchStatusServer represents the server status.
                 properties:
-                  podName:
-                    description: PodName is the name of the pod
-                    type: string
+                  revision:
+                    description: Revision is the values of the "deployment.kubernetes.io/revision"
+                      metadata.
+                    type: integer
                   status:
                     description: Status informs about the real state of the app.
                     type: string
                 required:
-                - podName
+                - revision
                 - status
                 type: object
             required:
-            - apps
             - server
             type: object
         type: object

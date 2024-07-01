@@ -70,32 +70,39 @@ type WorkbenchSpec struct {
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.
 //
-// It matches the PodStatus.
-// See. https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-and-container-status
+// It matches the Deployment Status,
+// See. https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#deployment-status
 type WorkbenchStatusAppStatus string
 
-// WorkbenchStatusAppStatusRunning describes a running app.
-var WorkbenchStatusAppStatusRunning = "Running"
+const (
+	// WorkbenchStatusAppStatusRunning describes a deployed app
+	WorkbenchStatusAppStatusComplete WorkbenchStatusAppStatus = "Complete"
 
-// WorkbenchStatusAppStatusWaiting describes a pending app.
-var WorkbenchStatusAppStatusPending = "Pending"
+	// WorkbenchStatusAppStatusWaiting describes a pending app.
+	WorkbenchStatusAppStatusProgressing WorkbenchStatusAppStatus = "Progressing"
 
-// WorkbenchStatusAppStatusSucceeded describes a terminated app (no errors).
-var WorkbenchStatusAppStatusSucceeded = "Succeeded"
-
-// WorkbenchStatusAppStatusFailed describes a terminated app with errors.
-var WorkbenchStatusAppStatusFailed = "Failed"
-
-// WorkbenchStatusAppStatusUnknown describes the known unknown.
-var WorkbenchStatusAppStatusUnknown = "Unknown"
+	// WorkbenchStatusAppStatusFailed describes a failed app.
+	WorkbenchStatusAppStatusFailed WorkbenchStatusAppStatus = "Failed"
+)
 
 // WorkbenchStatusServerStatus is identical to the App status.
-type WorkbenchStatusServerStatus WorkbenchStatusAppStatus
+type WorkbenchStatusServerStatus string
+
+const (
+	// WorkbenchStatusServerStatusRunning describes a deployed server
+	WorkbenchStatusServerStatusComplete WorkbenchStatusServerStatus = "Complete"
+
+	// WorkbenchStatusServerStatusWaiting describes a pending server.
+	WorkbenchStatusServerStatusProgressing WorkbenchStatusServerStatus = "Progressing"
+
+	// WorkbenchStatusServerStatusFailed describes a failed server.
+	WorkbenchStatusServerStatusFailed WorkbenchStatusServerStatus = "Failed"
+)
 
 // WorkbenchStatusServer represents the server status.
 type WorkbenchStatusServer struct {
-	// PodName is the name of the pod
-	PodName string `json:"podName"`
+	// Revision is the values of the "deployment.kubernetes.io/revision" metadata.
+	Revision int `json:"revision"`
 
 	// Status informs about the real state of the app.
 	Status WorkbenchStatusServerStatus `json:"status"`
@@ -103,8 +110,8 @@ type WorkbenchStatusServer struct {
 
 // WorkbenchStatusappStatus informs about the state of the apps.
 type WorkbenchStatusApp struct {
-	// PodName is the name of the pod
-	PodName string `json:"podName"`
+	// Revision is the values of the "deployment.kubernetes.io/revision" metadata.
+	Revision int `json:"revision"`
 
 	// Status informs about the real state of the app.
 	Status WorkbenchStatusAppStatus `json:"status"`
@@ -113,7 +120,7 @@ type WorkbenchStatusApp struct {
 // WorkbenchStatus defines the observed state of Workbench
 type WorkbenchStatus struct {
 	Server WorkbenchStatusServer `json:"server"`
-	Apps   []WorkbenchStatusApp  `json:"apps"`
+	Apps   []WorkbenchStatusApp  `json:"apps,omitempty"`
 }
 
 // +kubebuilder:object:root=true
