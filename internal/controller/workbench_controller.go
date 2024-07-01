@@ -22,6 +22,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,26 +50,7 @@ const matchingLabel = "xpra-server"
 
 // deleteExternalResources removes the underlying Deployment(s).
 func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workbench *defaultv1alpha1.Workbench) (int, error) {
-	log := log.FromContext(ctx)
-
-	// Find all the deployments linked with the workbench.
-	deploymentList := appsv1.DeploymentList{}
-
-	err := r.List(
-		ctx,
-		&deploymentList,
-		client.MatchingLabels{matchingLabel: workbench.Name},
-	)
-	if err != nil {
-		return 0, err
-	}
-
-	// Done.
-	if len(deploymentList.Items) == 0 {
-		return 0, nil
-	}
-
-	log.V(1).Info("Delete all deployments")
+	// The service is delete automatically due to the owner reference it holds.
 
 	r.Recorder.Event(
 		workbench,
@@ -82,16 +64,8 @@ func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workb
 		),
 	)
 
-	if err := r.DeleteAllOf(
-		ctx,
-		&appsv1.Deployment{},
-		client.InNamespace(workbench.Namespace),
-		client.MatchingLabels{matchingLabel: workbench.Name},
-	); err != nil {
-		return 0, err
-	}
-
-	return len(deploymentList.Items), nil
+	// Deref so it's not *modifiable*.
+	return r.deleteDeployments(ctx, *workbench)
 }
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
@@ -178,7 +152,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Link the deployment with the Workbench resource such that we can reconcile it
 		// when it's being changed.
 		if err := controllerutil.SetControllerReference(&workbench, &deployment, r.Scheme); err != nil {
-			log.V(1).Error(err, "Error setting the reference")
+			log.V(1).Error(err, "Error setting the reference", "deployment", deployment.Name)
 			return ctrl.Result{}, err
 		}
 
@@ -195,6 +169,51 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		if err := r.Create(ctx, &deployment); err != nil {
 			log.V(1).Error(err, "Error creating the deployment")
+			// It's probably has already been created.
+			// FIXME check that it's indeed the case.
+		}
+
+		// It's been created with success, don't loop straight away.
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// The service of the Xpra server
+	service := initService(workbench)
+	serviceNamespacedName := types.NamespacedName{
+		Name:      service.Name,
+		Namespace: service.Namespace,
+	}
+
+	foundService := corev1.Service{}
+	err = r.Get(ctx, serviceNamespacedName, &foundService)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			log.V(1).Error(err, "Service is not (not) found.")
+			return ctrl.Result{}, err
+		}
+
+		log.V(1).Info("Creating the service", "service", service.Name)
+
+		// Link the service with the Workbench resource such that we can reconcile it
+		// when it's being changed.
+		if err := controllerutil.SetControllerReference(&workbench, &service, r.Scheme); err != nil {
+			log.V(1).Error(err, "Error setting the reference", "service", service.Name)
+			return ctrl.Result{}, err
+		}
+
+		r.Recorder.Event(
+			&workbench,
+			"Normal",
+			"CreatingService",
+			fmt.Sprintf(
+				"Creating service %q into the namespace %q",
+				service.Name,
+				service.Namespace,
+			),
+		)
+
+		if err := r.Create(ctx, &service); err != nil {
+			log.V(1).Error(err, "Error creating the service")
 			// It's probably has already been created.
 			// FIXME check that it's indeed the case.
 		}
@@ -237,6 +256,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err2
 		}
 	}
+
+	// The service definition is not affected by the CRD, and the status does have any information from it.
 
 	return ctrl.Result{}, nil
 }

@@ -47,7 +47,7 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 	// It's probably too soon to know, so let's mark it
 	// as progressing a live happily.
 	if len(deployment.Status.Conditions) == 0 {
-		wb.Status.Server.Status = "Progressing"
+		wb.Status.Server.Status = WorkbenchStatusServerStatusProgressing
 		updated = true
 
 		return updated

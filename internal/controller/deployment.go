@@ -17,11 +17,14 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -86,7 +89,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
 		serverVersion = "latest"
 	}
 
-	// TODO: allow the registry to be specifiec as well.
+	// TODO: allow the registry to be specific as well.
 	serverImage := fmt.Sprintf("registry.build.chorus-tre.local/xpra-server:%s", serverVersion)
 	serverContainer := corev1.Container{
 		Name:            "xpra-server",
@@ -147,4 +150,38 @@ func updateDeployment(source appsv1.Deployment, destination *appsv1.Deployment) 
 	}
 
 	return updated
+}
+
+func (r *WorkbenchReconciler) deleteDeployments(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
+	log := log.FromContext(ctx)
+
+	// Find all the deployments linked with the workbench.
+	deploymentList := appsv1.DeploymentList{}
+
+	err := r.List(
+		ctx,
+		&deploymentList,
+		client.MatchingLabels{matchingLabel: workbench.Name},
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	// Done.
+	if len(deploymentList.Items) == 0 {
+		return 0, nil
+	}
+
+	log.V(1).Info("Delete all deployments")
+
+	if err := r.DeleteAllOf(
+		ctx,
+		&appsv1.Deployment{},
+		client.InNamespace(workbench.Namespace),
+		client.MatchingLabels{matchingLabel: workbench.Name},
+	); err != nil {
+		return 0, err
+	}
+
+	return len(deploymentList.Items), nil
 }
