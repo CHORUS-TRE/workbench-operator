@@ -63,24 +63,32 @@ func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workb
 		return 0, err
 	}
 
-	// FIXME: use DeleteAllOf instead.
-	// Delete them.
-	for _, item := range deploymentList.Items {
-		r.Recorder.Event(
-			workbench,
-			"Normal",
-			"DeletingDeployment",
-			fmt.Sprintf(
-				"Deleting deployment %q from the namespace %q",
-				item.Name,
-				item.Namespace,
-			),
-		)
+	// Done.
+	if len(deploymentList.Items) == 0 {
+		return 0, nil
+	}
 
-		log.V(1).Info("Delete deployment", "deployment", item.Name)
-		if err := r.Delete(ctx, &item); err != nil {
-			return 0, err
-		}
+	log.V(1).Info("Delete all deployments")
+
+	r.Recorder.Event(
+		workbench,
+		"Normal",
+		"DeletingDeployments",
+		fmt.Sprintf(
+			`Deleting deployment "%s=%s" from the namespace %q`,
+			matchingLabel,
+			workbench.Name,
+			workbench.Namespace,
+		),
+	)
+
+	if err := r.DeleteAllOf(
+		ctx,
+		&appsv1.Deployment{},
+		client.InNamespace(workbench.Namespace),
+		client.MatchingLabels{matchingLabel: workbench.Name},
+	); err != nil {
+		return 0, err
 	}
 
 	return len(deploymentList.Items), nil
