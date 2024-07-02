@@ -1,15 +1,22 @@
 # workbench-operator
 
-Operator for workbenches
+Operator for workbenches.
 
 ## Description
 
 The goal is to delegate the hard work of wiring the Xpra server and their applications, as well as the volumes to a controller.
 
+A Workbench is composed of:
+
+- A Deployment + ReplicaSet + Pod for the Xpra server
+- A Service handling the HTTP endpoint, and X11 Socket, of Xpra.
+- Many Pods, one for each app. An App being a UI application, it will come and go.
+
 ### TODO
 
-- Allow deploying applications
-- Report various information in the /status
+- Handling whole lifecycle when the user stops the Server from within;
+- Allow deploying applications as Pods;
+- Report various information in the /status for the applications;
 - etc.
 
 ## Getting Started
