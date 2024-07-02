@@ -9,4 +9,9 @@ spec:
   server:
     version: "0.0.1"
   apps:
-    - name: brainstorm
+    - name: wezterm
+      version: "0.0.1"
+    - name: wezterm
+      version: "0.0.1"
+    - name: wezterm
+      version: "0.0.1"

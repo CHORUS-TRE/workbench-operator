@@ -31,14 +31,16 @@ import (
 // Otherwise, the actual status is found in the /status section.
 type WorkbenchAppState string
 
-// WorkbenchAppStateRunning is used to create a running application.
-var WorkbenchAppStateRunning = "Running"
+const (
+	// WorkbenchAppStateRunning is used to create a running application.
+	WorkbenchAppStateRunning WorkbenchAppState = "Running"
 
-// WorkbenchAppStateStopped is used to stop a running application.
-var WorkbenchAppStateStopped = "Stopped"
+	// WorkbenchAppStateStopped is used to stop a running application.
+	WorkbenchAppStateStopped WorkbenchAppState = "Stopped"
 
-// WorkbenchAppStateKilled is used to force kill a running application.
-var WorkbenchAppStateKilled = "Killed"
+	// WorkbenchAppStateKilled is used to force kill a running application.
+	WorkbenchAppStateKilled WorkbenchAppState = "Killed"
+)
 
 // WorkbenchServer defines the server configuration.
 type WorkbenchServer struct {
