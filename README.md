@@ -10,12 +10,12 @@ A Workbench is composed of:
 
 - A Deployment + ReplicaSet + Pod for the Xpra server
 - A Service handling the HTTP endpoint, and X11 Socket, of Xpra.
-- Many Pods, one for each app. An App being a UI application, it will come and go.
+- Many Pods (subject to change), one for each app. An App being a UI application, it will come and go.
 
 ### TODO
 
-- Handling whole lifecycle when the user stops the Server from within;
-- Allow deploying applications as Pods;
+- Handling the whole lifecycle when the user stops the Server from within;
+- Allow deploying applications as Deployment (so stopping an app is possible using `replicas: 0`);
 - Report various information in the /status for the applications;
 - etc.
 
