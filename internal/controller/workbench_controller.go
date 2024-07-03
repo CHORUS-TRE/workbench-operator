@@ -218,79 +218,85 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Don't deploy apps until the deployment is available.
-	if foundDeployment.Status.AvailableReplicas > 0 {
-		for index, app := range workbench.Spec.Apps {
-			app := app
+	for index, app := range workbench.Spec.Apps {
+		app := app
 
-			pod := initPod(workbench, index, app, service)
+		pod := initPod(workbench, index, app, service)
 
-			podNamespacedName := types.NamespacedName{
-				Name:      pod.Name,
-				Namespace: pod.Namespace,
-			}
-
-			foundPod := corev1.Pod{}
-			err = r.Get(ctx, podNamespacedName, &foundPod)
-			if err != nil {
-				if !errors.IsNotFound(err) {
-					log.V(1).Error(err, "Pod is not (not) found.")
-					return ctrl.Result{}, err
-				}
-
-				log.V(1).Info("New pod", "pod", pod.Name)
-
-				// Link the service with the Workbench resource such that we can reconcile it
-				// when it's being changed.
-				if err := controllerutil.SetControllerReference(&workbench, &pod, r.Scheme); err != nil {
-					log.V(1).Error(err, "Error setting the reference", "pod", pod.Name)
-					return ctrl.Result{}, err
-				}
-
-				r.Recorder.Event(
-					&workbench,
-					"Normal",
-					"CreatingPod",
-					fmt.Sprintf(
-						"Creating pod %q into the namespace %q",
-						pod.Name,
-						pod.Namespace,
-					),
-				)
-
-				if err := r.Create(ctx, &pod); err != nil {
-					log.V(1).Error(err, "Error creating the pod", "pod", pod.Name)
-					return ctrl.Result{}, err
-				}
-			}
-
-			// The pod already exists, kill it?
-			appState := app.State
-			if appState == "" {
-				appState = defaultv1alpha1.WorkbenchAppStateRunning
-			}
-
-			log.V(1).Info("Pod state", "pod", pod.Name, "phase", pod.Status.Phase)
-			/*
-				switch pod.Status.Phase {
-				case "Succeeded":
-					// The pod has been stopped.
-				case "Running":
-					// But the state is not running, stop it.
-					if appState == defaultv1alpha1.WorkbenchAppStateStopped {
-						if err := r.Delete(ctx, &foundPod, client.GracePeriodSeconds(10)); err != nil {
-							log.V(1).Error(err, "Error stopping the pod", "pod", pod.Name)
-							return ctrl.Result{}, err
-						}
-					} else if appState == defaultv1alpha1.WorkbenchAppStateKilled {
-						if err := r.Delete(ctx, &foundPod, client.GracePeriodSeconds(0)); err != nil {
-							log.V(1).Error(err, "Error killing the pod", "pod", pod.Name)
-							return ctrl.Result{}, err
-						}
-					}
-				}
-			*/
+		podNamespacedName := types.NamespacedName{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
 		}
+
+		foundPod := corev1.Pod{}
+		err = r.Get(ctx, podNamespacedName, &foundPod)
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				log.V(1).Error(err, "Pod is not (not) found.")
+				return ctrl.Result{}, err
+			}
+
+			log.V(1).Info("New pod", "pod", pod.Name)
+
+			// Link the service with the Workbench resource such that we can reconcile it
+			// when it's being changed.
+			if err := controllerutil.SetControllerReference(&workbench, &pod, r.Scheme); err != nil {
+				log.V(1).Error(err, "Error setting the reference", "pod", pod.Name)
+				return ctrl.Result{}, err
+			}
+
+			r.Recorder.Event(
+				&workbench,
+				"Normal",
+				"CreatingPod",
+				fmt.Sprintf(
+					"Creating pod %q into the namespace %q",
+					pod.Name,
+					pod.Namespace,
+				),
+			)
+
+			if err := r.Create(ctx, &pod); err != nil {
+				log.V(1).Error(err, "Error creating the pod", "pod", pod.Name)
+				return ctrl.Result{}, err
+			}
+		}
+
+		// The pod already exists, reconcile its state.
+		appState := app.State
+		if appState == "" {
+			appState = defaultv1alpha1.WorkbenchAppStateRunning
+		}
+
+		log.V(1).Info("Pod state", "pod", foundPod.Name, "phase", foundPod.Status.Phase)
+
+		switch foundPod.Status.Phase {
+		case "Running":
+			// FIXME: this will restart in loop, because the Pod is in mode: RestartPolicy: OnFailure.
+			// a ReplicaSet scaling to zero is the way to go, maybe a deployment even.
+			switch appState {
+			// The application has been stopped via the CR.
+			case defaultv1alpha1.WorkbenchAppStateStopped:
+				log.V(1).Info("Stopping pod", "pod", foundPod.Name)
+				if err := r.Delete(ctx, &foundPod, client.GracePeriodSeconds(10)); err != nil {
+					log.V(1).Error(err, "Error stopping the pod", "pod", pod.Name)
+					return ctrl.Result{}, err
+				}
+
+			case defaultv1alpha1.WorkbenchAppStateKilled:
+				log.V(1).Info("Killing pod", "pod", foundPod.Name)
+				if err := r.Delete(ctx, &foundPod, client.GracePeriodSeconds(0)); err != nil {
+					log.V(1).Error(err, "Error killing the pod", "pod", pod.Name)
+					return ctrl.Result{}, err
+				}
+			}
+
+		case "Pending":
+		case "Succeeded":
+			// All good
+		}
+
+		// TODO: update status.
 	}
 
 	// TODO: to properly follow the deployment we have to dig into the replicaset
