@@ -115,6 +115,6 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/workbench-operator/<tag
 
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
-## License
+## License and Usage Restrictions
 
 Any use of the software for purposes other than academic research, including for commercial purposes, shall be requested in advance from CHUV.
