@@ -25,6 +25,11 @@ var _ = Describe("Workbench Controller", func() {
 			Namespace: "default", // TODO(user):Modify as needed
 		}
 		workbench := &defaultv1alpha1.Workbench{}
+		workbench.Spec.Apps = []defaultv1alpha1.WorkbenchApp{
+			{
+				Name: "wezterm",
+			},
+		}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind Workbench")
@@ -50,6 +55,7 @@ var _ = Describe("Workbench Controller", func() {
 			By("Cleanup the specific resource instance Workbench")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
+
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &WorkbenchReconciler{

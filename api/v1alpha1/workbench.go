@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 )
 
 // UpdateStatusFromDeployment enriches the workbench status based on the deployment.
@@ -61,6 +62,62 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 	if status != wb.Status.Server.Status {
 		wb.Status.Server.Status = status
 		updated = true
+	}
+
+	return updated
+}
+
+// UpdateStatusAppFromDeployment enriches the workbench status based on the deployment.
+//
+// It's not a *best* practice to do so, but it's very convenient.
+func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
+	updated := false
+
+	// Create the missing StatusApp if needed.
+	if len(wb.Status.Apps) < index+1 {
+		wb.Status.Apps = append(wb.Status.Apps, WorkbenchStatusApp{})
+	}
+
+	statusApp := wb.Status.Apps[index]
+
+	// It's probably too soon to know, so let's mark it
+	// as progressing a live happily.
+	if len(job.Status.Conditions) == 0 {
+		statusApp.Status = WorkbenchStatusAppStatusProgressing
+		updated = true
+		/*
+					} else {
+			       TODO: adapt this for the batchv1.Job
+						condition := job.Status.Conditions[0]
+
+						var status WorkbenchStatusAppStatus
+
+						switch condition.Type {
+						case "Complete":
+							status = "Complete"
+						case "Progressing":
+							if condition.Status != "True" {
+								status = "Failed"
+							} else if condition.Reason == "NewReplicaSetAvailable" {
+								status = "Complete"
+							} else {
+								status = "Progressing"
+							}
+						case "Failed":
+						default:
+							status = "Failed"
+						}
+
+						if status != statusApp.Status {
+							statusApp.Status = status
+							updated = true
+						}
+		*/
+	}
+
+	// Save it back
+	if updated {
+		wb.Status.Apps[index] = statusApp
 	}
 
 	return updated

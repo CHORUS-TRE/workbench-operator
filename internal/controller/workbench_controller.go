@@ -6,6 +6,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,8 +30,8 @@ type WorkbenchReconciler struct {
 // finalizer used to control the clean up the deployments.
 const finalizer = "default.k8s.chorus-tre.ch/finalizer"
 
-// matchingLabel to search for sub-resources.
-const matchingLabel = "xpra-server"
+// matchingLabel is used to catch all the apps of a workbench.
+const matchingLabel = "workbench"
 
 // deleteExternalResources removes the underlying Deployment(s).
 func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workbench *defaultv1alpha1.Workbench) (int, error) {
@@ -48,7 +49,14 @@ func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workb
 		),
 	)
 
+	// First delete the applications, then the server.
+
 	// Deref so it's not *modifiable*.
+	count, err := r.deleteJobs(ctx, *workbench)
+	if count > 0 || err != nil {
+		return count, err
+	}
+
 	return r.deleteDeployments(ctx, *workbench)
 }
 
@@ -116,6 +124,10 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// -------- SERVER ---------------
+	// FIXME: move to a proper method.
+	// -------------------------------
+
 	// The deployment of Xpra
 	deployment := initDeployment(workbench)
 	deploymentNamespacedName := types.NamespacedName{
@@ -154,12 +166,27 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.Create(ctx, &deployment); err != nil {
 			log.V(1).Error(err, "Error creating the deployment")
 			// It's probably has already been created.
-			// FIXME check that it's indeed the case.
+			// FIXME: check that it's indeed the case.
 		}
 
 		// It's been created with success, don't loop straight away.
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+
+	// TODO: to properly follow the deployment we have to dig into the replicaset
+	// via metadata.annotations."deployment.kubernetes.io/revision"
+	// which is also present on the replica. Then the pods, which can be found via
+	// the labels, has said replicas as its owner.
+	statusUpdated := (&workbench).UpdateStatusFromDeployment(foundDeployment)
+	if statusUpdated {
+		if err := r.Status().Update(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+		}
+	}
+
+	// ------- SERVICE ---------------
+	// FIXME: move to a proper method.
+	// -------------------------------
 
 	// The service of the Xpra server
 	service := initService(workbench)
@@ -202,97 +229,69 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// ---------- APPS ---------------
+	// FIXME: move to a proper method.
+	// -------------------------------
+
 	for index, app := range workbench.Spec.Apps {
 		app := app
 
-		pod := initPod(workbench, index, app, service)
+		job := initJob(workbench, index, app, service)
 
-		podNamespacedName := types.NamespacedName{
-			Name:      pod.Name,
-			Namespace: pod.Namespace,
+		jobNamespacedName := types.NamespacedName{
+			Name:      job.Name,
+			Namespace: job.Namespace,
 		}
 
-		foundPod := corev1.Pod{}
-		err = r.Get(ctx, podNamespacedName, &foundPod)
+		foundJob := batchv1.Job{}
+		err = r.Get(ctx, jobNamespacedName, &foundJob)
 		if err != nil {
 			if !errors.IsNotFound(err) {
-				log.V(1).Error(err, "Pod is not (not) found.")
+				log.V(1).Error(err, "Job is not (not) found.", "index", index)
 				return ctrl.Result{}, err
 			}
 
-			log.V(1).Info("New pod", "pod", pod.Name)
+			log.V(1).Info("New job", "job", job.Name)
 
 			// Link the service with the Workbench resource such that we can reconcile it
 			// when it's being changed.
-			if err := controllerutil.SetControllerReference(&workbench, &pod, r.Scheme); err != nil {
-				log.V(1).Error(err, "Error setting the reference", "pod", pod.Name)
+			if err := controllerutil.SetControllerReference(&workbench, &job, r.Scheme); err != nil {
+				log.V(1).Error(err, "Error setting the reference", "job", job.Name)
 				return ctrl.Result{}, err
 			}
 
 			r.Recorder.Event(
 				&workbench,
 				"Normal",
-				"CreatingPod",
+				"CreatingJob",
 				fmt.Sprintf(
-					"Creating pod %q into the namespace %q",
-					pod.Name,
-					pod.Namespace,
+					"Creating job %q into the namespace %q",
+					job.Name,
+					job.Namespace,
 				),
 			)
 
-			if err := r.Create(ctx, &pod); err != nil {
-				log.V(1).Error(err, "Error creating the pod", "pod", pod.Name)
-				return ctrl.Result{}, err
-			}
-		}
-
-		// The pod already exists, reconcile its state.
-		appState := app.State
-		if appState == "" {
-			appState = defaultv1alpha1.WorkbenchAppStateRunning
-		}
-
-		log.V(1).Info("Pod state", "pod", foundPod.Name, "phase", foundPod.Status.Phase)
-
-		switch foundPod.Status.Phase {
-		case "Running":
-			// FIXME: this will restart in loop, because the Pod is in mode: RestartPolicy: OnFailure.
-			// a ReplicaSet scaling to zero is the way to go, maybe a deployment even.
-			switch appState {
-			// The application has been stopped via the CR.
-			case defaultv1alpha1.WorkbenchAppStateStopped:
-				log.V(1).Info("Stopping pod", "pod", foundPod.Name)
-				if err := r.Delete(ctx, &foundPod, client.GracePeriodSeconds(10)); err != nil {
-					log.V(1).Error(err, "Error stopping the pod", "pod", pod.Name)
-					return ctrl.Result{}, err
-				}
-
-			case defaultv1alpha1.WorkbenchAppStateKilled:
-				log.V(1).Info("Killing pod", "pod", foundPod.Name)
-				if err := r.Delete(ctx, &foundPod, client.GracePeriodSeconds(0)); err != nil {
-					log.V(1).Error(err, "Error killing the pod", "pod", pod.Name)
-					return ctrl.Result{}, err
-				}
+			if err := r.Create(ctx, &job); err != nil {
+				log.V(1).Error(err, "Error creating the job", "job", job.Name)
+				// It's probably has already been created.
+				// FIXME check that it's indeed the case.
 			}
 
-		case "Pending":
-		case "Succeeded":
-			// All good
+			// It's been created with success, don't loop straight away.
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 
-		// TODO: update status.
-	}
-
-	// TODO: to properly follow the deployment we have to dig into the replicaset
-	// via metadata.annotations."deployment.kubernetes.io/revision"
-	// which is also present on the replica. Then the pods, which can be found via
-	// the labels, has said replicas as its owner.
-	statusUpdated := (&workbench).UpdateStatusFromDeployment(foundDeployment)
-	if statusUpdated {
-		if err := r.Status().Update(ctx, &workbench); err != nil {
-			log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+		statusUpdated := (&workbench).UpdateStatusFromJob(index, foundJob)
+		if statusUpdated {
+			if err := r.Status().Update(ctx, &workbench); err != nil {
+				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+			}
 		}
 	}
+
+	// -------- SERVER UPDATES ------
+	// FIXME: move to a proper method
+	// ------------------------------
 
 	// Update the existing deployment with the model one.
 	updated := updateDeployment(deployment, &foundDeployment)
@@ -319,6 +318,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// The service definition is not affected by the CRD, and the status does have any information from it.
+
+	// TODO: Apps update, the fun part.
 
 	return ctrl.Result{}, nil
 }
