@@ -33,33 +33,6 @@ const finalizer = "default.k8s.chorus-tre.ch/finalizer"
 // matchingLabel is used to catch all the apps of a workbench.
 const matchingLabel = "workbench"
 
-// deleteExternalResources removes the underlying Deployment(s).
-func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workbench *defaultv1alpha1.Workbench) (int, error) {
-	// The service is delete automatically due to the owner reference it holds.
-
-	r.Recorder.Event(
-		workbench,
-		"Normal",
-		"DeletingDeployments",
-		fmt.Sprintf(
-			`Deleting deployment "%s=%s" from the namespace %q`,
-			matchingLabel,
-			workbench.Name,
-			workbench.Namespace,
-		),
-	)
-
-	// First delete the applications, then the server.
-
-	// Deref so it's not *modifiable*.
-	count, err := r.deleteJobs(ctx, *workbench)
-	if count > 0 || err != nil {
-		return count, err
-	}
-
-	return r.deleteDeployments(ctx, *workbench)
-}
-
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/finalizers,verbs=update
@@ -185,48 +158,20 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// ------- SERVICE ---------------
-	// FIXME: move to a proper method.
-	// -------------------------------
 
 	// The service of the Xpra server
 	service := initService(workbench)
-	serviceNamespacedName := types.NamespacedName{
-		Name:      service.Name,
-		Namespace: service.Namespace,
+
+	// Link the service with the Workbench resource such that we can reconcile it
+	// when it's being changed.
+	if err := controllerutil.SetControllerReference(&workbench, &service, r.Scheme); err != nil {
+		log.V(1).Error(err, "Error setting the reference", "service", service.Name)
+		return ctrl.Result{}, err
 	}
 
-	foundService := corev1.Service{}
-	err = r.Get(ctx, serviceNamespacedName, &foundService)
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			log.V(1).Error(err, "Service is not (not) found.")
-			return ctrl.Result{}, err
-		}
-
-		log.V(1).Info("Creating the service", "service", service.Name)
-
-		// Link the service with the Workbench resource such that we can reconcile it
-		// when it's being changed.
-		if err := controllerutil.SetControllerReference(&workbench, &service, r.Scheme); err != nil {
-			log.V(1).Error(err, "Error setting the reference", "service", service.Name)
-			return ctrl.Result{}, err
-		}
-
-		r.Recorder.Event(
-			&workbench,
-			"Normal",
-			"CreatingService",
-			fmt.Sprintf(
-				"Creating service %q into the namespace %q",
-				service.Name,
-				service.Namespace,
-			),
-		)
-
-		if err := r.Create(ctx, &service); err != nil {
-			log.V(1).Error(err, "Error creating the service", "service", service.Name)
-			return ctrl.Result{}, err
-		}
+	if err := r.createService(ctx, service); err != nil {
+		log.V(1).Error(err, "Error creating the service", "service", service.Name)
+		return ctrl.Result{}, err
 	}
 
 	// ---------- APPS ---------------
@@ -238,60 +183,32 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		job := initJob(workbench, index, app, service)
 
-		jobNamespacedName := types.NamespacedName{
-			Name:      job.Name,
-			Namespace: job.Namespace,
+		// Link the service with the Workbench resource such that we can reconcile it
+		// when it's being changed.
+		if err := controllerutil.SetControllerReference(&workbench, &job, r.Scheme); err != nil {
+			log.V(1).Error(err, "Error setting the reference", "job", job.Name)
+			return ctrl.Result{}, err
 		}
 
-		foundJob := batchv1.Job{}
-		err = r.Get(ctx, jobNamespacedName, &foundJob)
+		foundJob, err := r.createJob(ctx, job)
 		if err != nil {
-			if !errors.IsNotFound(err) {
-				log.V(1).Error(err, "Job is not (not) found.", "index", index)
-				return ctrl.Result{}, err
-			}
+			log.V(1).Error(err, "Error creating the job", "job", job.Name)
 
-			log.V(1).Info("New job", "job", job.Name)
-
-			// Link the service with the Workbench resource such that we can reconcile it
-			// when it's being changed.
-			if err := controllerutil.SetControllerReference(&workbench, &job, r.Scheme); err != nil {
-				log.V(1).Error(err, "Error setting the reference", "job", job.Name)
-				return ctrl.Result{}, err
-			}
-
-			r.Recorder.Event(
-				&workbench,
-				"Normal",
-				"CreatingJob",
-				fmt.Sprintf(
-					"Creating job %q into the namespace %q",
-					job.Name,
-					job.Namespace,
-				),
-			)
-
-			if err := r.Create(ctx, &job); err != nil {
-				log.V(1).Error(err, "Error creating the job", "job", job.Name)
-				return ctrl.Result{}, err
-			}
-
-			// It's been created with success, don't loop straight away.
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			return ctrl.Result{}, err
 		}
 
-		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
-		statusUpdated := (&workbench).UpdateStatusFromJob(index, foundJob)
-		if statusUpdated {
-			if err := r.Status().Update(ctx, &workbench); err != nil {
-				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+		if foundJob != nil {
+			// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
+			statusUpdated := (&workbench).UpdateStatusFromJob(index, *foundJob)
+			if statusUpdated {
+				if err := r.Status().Update(ctx, &workbench); err != nil {
+					log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+				}
 			}
 		}
 	}
 
 	// -------- SERVER UPDATES ------
-	// FIXME: move to a proper method
-	// ------------------------------
 
 	// Update the existing deployment with the model one.
 	updated := updateDeployment(deployment, &foundDeployment)
@@ -322,6 +239,118 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// TODO: Apps update, the fun part.
 
 	return ctrl.Result{}, nil
+}
+
+// deleteExternalResources removes the underlying Deployment(s).
+func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workbench *defaultv1alpha1.Workbench) (int, error) {
+	// The service is delete automatically due to the owner reference it holds.
+
+	r.Recorder.Event(
+		workbench,
+		"Normal",
+		"DeletingDeployments",
+		fmt.Sprintf(
+			`Deleting deployment "%s=%s" from the namespace %q`,
+			matchingLabel,
+			workbench.Name,
+			workbench.Namespace,
+		),
+	)
+
+	// First delete the applications, then the server.
+
+	// Deref so it's not *modifiable*.
+	count, err := r.deleteJobs(ctx, *workbench)
+	if count > 0 || err != nil {
+		return count, err
+	}
+
+	return r.deleteDeployments(ctx, *workbench)
+}
+
+// reconcileService creates the service when missing.
+func (r *WorkbenchReconciler) createService(ctx context.Context, service corev1.Service) error {
+	log := log.FromContext(ctx)
+
+	serviceNamespacedName := types.NamespacedName{
+		Name:      service.Name,
+		Namespace: service.Namespace,
+	}
+
+	foundService := corev1.Service{}
+
+	err := r.Get(ctx, serviceNamespacedName, &foundService)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			log.V(1).Error(err, "Service is not (not) found.")
+
+			return err
+		}
+
+		log.V(1).Info("Creating the service", "service", service.Name)
+
+		/*
+			r.Recorder.Event(
+				&workbench,
+				"Normal",
+				"CreatingService",
+				fmt.Sprintf(
+					"Creating service %q into the namespace %q",
+					service.Name,
+					service.Namespace,
+				),
+			)
+		*/
+
+		return r.Create(ctx, &service)
+	}
+
+	return nil
+}
+
+// createJob creates a job if missing, or returns the existing job.
+func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*batchv1.Job, error) {
+	log := log.FromContext(ctx)
+
+	jobNamespacedName := types.NamespacedName{
+		Name:      job.Name,
+		Namespace: job.Namespace,
+	}
+
+	foundJob := batchv1.Job{}
+	err := r.Get(ctx, jobNamespacedName, &foundJob)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			log.V(1).Error(err, "Job is not (not) found.", "job", job.Name)
+
+			return &foundJob, err
+		}
+
+		log.V(1).Info("New job", "job", job.Name)
+
+		/*
+			r.Recorder.Event(
+				&workbench,
+				"Normal",
+				"CreatingJob",
+				fmt.Sprintf(
+					"Creating job %q into the namespace %q",
+					job.Name,
+					job.Namespace,
+				),
+			)
+		*/
+
+		if err := r.Create(ctx, &job); err != nil {
+			log.V(1).Error(err, "Error creating the job", "job", job.Name)
+
+			return nil, err
+		}
+
+		return nil, nil
+	}
+
+	return &foundJob, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
