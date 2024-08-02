@@ -8,14 +8,36 @@ The goal is to delegate the hard work of wiring the Xpra server and their applic
 
 A Workbench is composed of:
 
-- A Deployment + ReplicaSet + Pod for the Xpra server
-- A Service handling the HTTP endpoint, and X11 Socket, of Xpra.
-- Many Jobs, one for each app. An App being a UI application, it will come and go.
+- A [Deployment](./internal/controller/deployment.go) + ReplicaSet + Pod for the Xpra server
+- A [Service](./internal/controller/service.go) handling the HTTP endpoint, and X11 Socket, of Xpra.
+- Many [Jobs](./internal/controller/job.go), one for each app. An App being a graphical application, it will come and go.
+
+```text
+                  CRD
+                   |
+                   v
+                operator
+                   |
+      .------------+-----------+------+- etc.
+      |            |           |      |
+      v            v           v      v
+  Deployment    Service       Job    Job
+      |                        |      |
+      v                        v      v
+  ReplicaSet                  Pod    Pod
+      |
+      v
+     Pod
+```
+
+To expose a Workbench on the Internet, an Ingress will be needed. It should point to the service on port 8080.
 
 ### TODO
 
+- Registry credentials and overall configuration of it.
 - Handling the whole life cycle when the user stops the Server from within;
 - Report various information in the /status for the applications;
+- TLS between the Xpra server and the applications;
 - etc.
 
 ## Getting Started
