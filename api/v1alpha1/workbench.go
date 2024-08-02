@@ -45,12 +45,12 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 
 	switch condition.Type {
 	case "Available":
-		status = "Complete"
+		status = "Running"
 	case "Progressing":
 		if condition.Status != "True" {
 			status = "Failed"
 		} else if condition.Reason == "NewReplicaSetAvailable" {
-			status = "Complete"
+			status = "Running"
 		} else {
 			status = "Progressing"
 		}
@@ -71,54 +71,33 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 //
 // It's not a *best* practice to do so, but it's very convenient.
 func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
-	updated := false
-
 	// Create the missing StatusApp if needed.
 	if len(wb.Status.Apps) < index+1 {
 		wb.Status.Apps = append(wb.Status.Apps, WorkbenchStatusApp{})
 	}
 
-	statusApp := wb.Status.Apps[index]
+	app := wb.Status.Apps[index]
 
-	// It's probably too soon to know, so let's mark it
-	// as progressing a live happily.
-	if len(job.Status.Conditions) == 0 {
-		statusApp.Status = WorkbenchStatusAppStatusProgressing
-		updated = true
-		/*
-					} else {
-			       TODO: adapt this for the batchv1.Job
-						condition := job.Status.Conditions[0]
+	// Default status
+	status := app.Status
 
-						var status WorkbenchStatusAppStatus
-
-						switch condition.Type {
-						case "Complete":
-							status = "Complete"
-						case "Progressing":
-							if condition.Status != "True" {
-								status = "Failed"
-							} else if condition.Reason == "NewReplicaSetAvailable" {
-								status = "Complete"
-							} else {
-								status = "Progressing"
-							}
-						case "Failed":
-						default:
-							status = "Failed"
-						}
-
-						if status != statusApp.Status {
-							statusApp.Status = status
-							updated = true
-						}
-		*/
+	if job.Status.Active == 1 {
+		if job.Status.Ready != nil && *job.Status.Ready >= 1 {
+			status = "Running"
+		}
+	} else {
+		if job.Status.Succeeded >= 1 {
+			status = "Complete"
+		}
 	}
 
 	// Save it back
-	if updated {
-		wb.Status.Apps[index] = statusApp
+	if status != app.Status {
+		app.Status = status
+
+		wb.Status.Apps[index] = app
+		return true
 	}
 
-	return updated
+	return false
 }

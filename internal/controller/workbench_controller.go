@@ -273,14 +273,14 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 			if err := r.Create(ctx, &job); err != nil {
 				log.V(1).Error(err, "Error creating the job", "job", job.Name)
-				// It's probably has already been created.
-				// FIXME check that it's indeed the case.
+				return ctrl.Result{}, err
 			}
 
 			// It's been created with success, don't loop straight away.
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 
+		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
 		statusUpdated := (&workbench).UpdateStatusFromJob(index, foundJob)
 		if statusUpdated {
 			if err := r.Status().Update(ctx, &workbench); err != nil {

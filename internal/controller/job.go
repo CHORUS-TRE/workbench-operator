@@ -47,6 +47,10 @@ func initJob(workbench defaultv1alpha1.Workbench, index int, app defaultv1alpha1
 	job.Spec.Template.Spec.Containers = []corev1.Container{
 		appContainer,
 	}
+
+	// Hide the pod name in favour of the app name.
+	job.Spec.Template.Spec.Hostname = app.Name
+
 	// This allows the end user to stop the application from within Xpra.
 	job.Spec.Template.Spec.RestartPolicy = "OnFailure"
 

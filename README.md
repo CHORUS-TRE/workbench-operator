@@ -32,6 +32,10 @@ A Workbench is composed of:
 
 To expose a Workbench on the Internet, an Ingress will be needed. It should point to the service on port 8080.
 
+### Caveats
+
+As a server is a `Deployment`, stopping it from the inside will _restart_ it.
+
 ### TODO
 
 - Registry credentials and overall configuration of it.

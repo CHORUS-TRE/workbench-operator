@@ -56,15 +56,18 @@ type WorkbenchSpec struct {
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.
 //
-// It matches the Deployment Status,
-// See. https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#deployment-status
+// It matches the Job Status,
+// See https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/job-v1/#JobStatus
 type WorkbenchStatusAppStatus string
 
 const (
-	// WorkbenchStatusAppStatusRunning describes a deployed app
+	// WorkbenchStatusAppStatusRunning describes a up and running app.
+	WorkbenchStatusAppStatusRunning WorkbenchStatusAppStatus = "Running"
+
+	// WorkbenchStatusAppStatusComplete describes a terminated app.
 	WorkbenchStatusAppStatusComplete WorkbenchStatusAppStatus = "Complete"
 
-	// WorkbenchStatusAppStatusWaiting describes a pending app.
+	// WorkbenchStatusAppStatusProgressing describes a pending app.
 	WorkbenchStatusAppStatusProgressing WorkbenchStatusAppStatus = "Progressing"
 
 	// WorkbenchStatusAppStatusFailed describes a failed app.
@@ -76,9 +79,9 @@ type WorkbenchStatusServerStatus string
 
 const (
 	// WorkbenchStatusServerStatusRunning describes a deployed server
-	WorkbenchStatusServerStatusComplete WorkbenchStatusServerStatus = "Complete"
+	WorkbenchStatusServerStatusRunning WorkbenchStatusServerStatus = "Running"
 
-	// WorkbenchStatusServerStatusWaiting describes a pending server.
+	// WorkbenchStatusServerStatusProgressing describes a pending server.
 	WorkbenchStatusServerStatusProgressing WorkbenchStatusServerStatus = "Progressing"
 
 	// WorkbenchStatusServerStatusFailed describes a failed server.
