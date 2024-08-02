@@ -98,62 +98,59 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// -------- SERVER ---------------
-	// FIXME: move to a proper method.
-	// -------------------------------
 
-	// The deployment of Xpra
+	// The deployment of Xpra server
 	deployment := initDeployment(workbench)
-	deploymentNamespacedName := types.NamespacedName{
-		Name:      deployment.Name,
-		Namespace: deployment.Namespace,
+
+	// Link the deployment with the Workbench resource such that we can reconcile it
+	// when it's being changed.
+	if err := controllerutil.SetControllerReference(&workbench, &deployment, r.Scheme); err != nil {
+		log.V(1).Error(err, "Error setting the reference", "deployment", deployment.Name)
+
+		return ctrl.Result{}, err
 	}
 
-	foundDeployment := appsv1.Deployment{}
-	err := r.Get(ctx, deploymentNamespacedName, &foundDeployment)
+	foundDeployment, err := r.createDeployment(ctx, deployment)
 	if err != nil {
-		if !errors.IsNotFound(err) {
-			log.V(1).Error(err, "Deployment is not (not) found.")
-			return ctrl.Result{}, err
-		}
-
-		log.V(1).Info("Creating the deployment", "deployment", deployment.Name)
-
-		// Link the deployment with the Workbench resource such that we can reconcile it
-		// when it's being changed.
-		if err := controllerutil.SetControllerReference(&workbench, &deployment, r.Scheme); err != nil {
-			log.V(1).Error(err, "Error setting the reference", "deployment", deployment.Name)
-			return ctrl.Result{}, err
-		}
-
-		r.Recorder.Event(
-			&workbench,
-			"Normal",
-			"CreatingDeployment",
-			fmt.Sprintf(
-				"Creating deployment %q into the namespace %q",
-				deployment.Name,
-				deployment.Namespace,
-			),
-		)
-
-		if err := r.Create(ctx, &deployment); err != nil {
-			log.V(1).Error(err, "Error creating the deployment")
-			// It's probably has already been created.
-			// FIXME: check that it's indeed the case.
-		}
-
-		// It's been created with success, don't loop straight away.
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		log.V(1).Error(err, "Error creating the deployment")
 	}
 
 	// TODO: to properly follow the deployment we have to dig into the replicaset
 	// via metadata.annotations."deployment.kubernetes.io/revision"
 	// which is also present on the replica. Then the pods, which can be found via
 	// the labels, has said replicas as its owner.
-	statusUpdated := (&workbench).UpdateStatusFromDeployment(foundDeployment)
-	if statusUpdated {
-		if err := r.Status().Update(ctx, &workbench); err != nil {
-			log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+	if foundDeployment != nil {
+		statusUpdated := (&workbench).UpdateStatusFromDeployment(*foundDeployment)
+		if statusUpdated {
+			if err := r.Status().Update(ctx, &workbench); err != nil {
+				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+			}
+		}
+
+		// -------- SERVER UPDATES ------
+
+		// Update the existing deployment with the model one.
+		updated := updateDeployment(deployment, foundDeployment)
+
+		if updated {
+			log.V(1).Info("Updating Deployment", "deployment", foundDeployment.Name)
+
+			r.Recorder.Event(
+				&workbench,
+				"Normal",
+				"UpdatingDeployment",
+				fmt.Sprintf(
+					"Updating deployment %q into the namespace %q",
+					deployment.Name,
+					deployment.Namespace,
+				),
+			)
+
+			err2 := r.Update(ctx, foundDeployment)
+			if err2 != nil {
+				log.V(1).Error(err2, "Unable to update the deployment")
+				return ctrl.Result{}, err2
+			}
 		}
 	}
 
@@ -175,8 +172,6 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// ---------- APPS ---------------
-	// FIXME: move to a proper method.
-	// -------------------------------
 
 	for index, app := range workbench.Spec.Apps {
 		app := app
@@ -205,32 +200,6 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					log.V(1).Error(err, "Unable to update the WorkbenchStatus")
 				}
 			}
-		}
-	}
-
-	// -------- SERVER UPDATES ------
-
-	// Update the existing deployment with the model one.
-	updated := updateDeployment(deployment, &foundDeployment)
-
-	if updated {
-		log.V(1).Info("Updating Deployment", "deployment", foundDeployment.Name)
-
-		r.Recorder.Event(
-			&workbench,
-			"Normal",
-			"UpdatingDeployment",
-			fmt.Sprintf(
-				"Updating deployment %q into the namespace %q",
-				deployment.Name,
-				deployment.Namespace,
-			),
-		)
-
-		err2 := r.Update(ctx, &foundDeployment)
-		if err2 != nil {
-			log.V(1).Error(err2, "Unable to update the deployment")
-			return ctrl.Result{}, err2
 		}
 	}
 
@@ -266,6 +235,50 @@ func (r *WorkbenchReconciler) deleteExternalResources(ctx context.Context, workb
 	}
 
 	return r.deleteDeployments(ctx, *workbench)
+}
+
+func (r *WorkbenchReconciler) createDeployment(ctx context.Context, deployment appsv1.Deployment) (*appsv1.Deployment, error) {
+	log := log.FromContext(ctx)
+
+	deploymentNamespacedName := types.NamespacedName{
+		Name:      deployment.Name,
+		Namespace: deployment.Namespace,
+	}
+
+	foundDeployment := appsv1.Deployment{}
+	err := r.Get(ctx, deploymentNamespacedName, &foundDeployment)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			log.V(1).Error(err, "Deployment is not (not) found.")
+			return nil, err
+		}
+
+		log.V(1).Info("Creating the deployment", "deployment", deployment.Name)
+
+		/*
+			r.Recorder.Event(
+				&workbench,
+				"Normal",
+				"CreatingDeployment",
+				fmt.Sprintf(
+					"Creating deployment %q into the namespace %q",
+					deployment.Name,
+					deployment.Namespace,
+				),
+			)
+		*/
+
+		if err := r.Create(ctx, &deployment); err != nil {
+			log.V(1).Error(err, "Error creating the deployment")
+			// It's probably has already been created.
+			// FIXME: check that it's indeed the case.
+			return nil, err
+		}
+
+		return nil, nil
+	}
+
+	return &foundDeployment, nil
 }
 
 // reconcileService creates the service when missing.
@@ -358,7 +371,7 @@ func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&defaultv1alpha1.Workbench{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
-		Owns(&corev1.Pod{}).
 		Complete(r)
 }
