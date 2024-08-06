@@ -171,6 +171,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	// The service definition is not affected by the CRD, and the status does have any information from it.
+
 	// ---------- APPS ---------------
 
 	for index, app := range workbench.Spec.Apps {
@@ -185,6 +187,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
+		// FIXME: it will create a job even if its state is "Stopped".
+
 		foundJob, err := r.createJob(ctx, job)
 		if err != nil {
 			log.V(1).Error(err, "Error creating the job", "job", job.Name)
@@ -192,20 +196,39 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		if foundJob != nil {
-			// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
-			statusUpdated := (&workbench).UpdateStatusFromJob(index, *foundJob)
-			if statusUpdated {
-				if err := r.Status().Update(ctx, &workbench); err != nil {
-					log.V(1).Error(err, "Unable to update the WorkbenchStatus")
-				}
+		// Break the loop
+		if foundJob == nil {
+			continue
+		}
+
+		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
+		statusUpdated := (&workbench).UpdateStatusFromJob(index, *foundJob)
+		if statusUpdated {
+			if err := r.Status().Update(ctx, &workbench); err != nil {
+				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
+			}
+		}
+
+		// TODO: move that check to an admission webhook.
+		if job.Name != foundJob.Name {
+			err := fmt.Errorf("One simply cannot change the application name: %s != %s", job.Name, foundJob.Name)
+			return ctrl.Result{}, err
+		}
+
+		updated := updateJob(job, foundJob)
+
+		if updated {
+			log.V(1).Info("Updating Job", "job", job.Name)
+
+			// FIXME:when the job is suspended from the outside world , it will likely take a while to shutdown as
+			// nobody is listening to the killing signal.
+			err2 := r.Update(ctx, foundJob)
+			if err2 != nil {
+				log.V(1).Error(err2, "Unable to update the job", "job", job.Name)
+				return ctrl.Result{}, err2
 			}
 		}
 	}
-
-	// The service definition is not affected by the CRD, and the status does have any information from it.
-
-	// TODO: Apps update, the fun part.
 
 	return ctrl.Result{}, nil
 }
@@ -255,19 +278,6 @@ func (r *WorkbenchReconciler) createDeployment(ctx context.Context, deployment a
 
 		log.V(1).Info("Creating the deployment", "deployment", deployment.Name)
 
-		/*
-			r.Recorder.Event(
-				&workbench,
-				"Normal",
-				"CreatingDeployment",
-				fmt.Sprintf(
-					"Creating deployment %q into the namespace %q",
-					deployment.Name,
-					deployment.Namespace,
-				),
-			)
-		*/
-
 		if err := r.Create(ctx, &deployment); err != nil {
 			log.V(1).Error(err, "Error creating the deployment")
 			// It's probably has already been created.
@@ -302,19 +312,6 @@ func (r *WorkbenchReconciler) createService(ctx context.Context, service corev1.
 
 		log.V(1).Info("Creating the service", "service", service.Name)
 
-		/*
-			r.Recorder.Event(
-				&workbench,
-				"Normal",
-				"CreatingService",
-				fmt.Sprintf(
-					"Creating service %q into the namespace %q",
-					service.Name,
-					service.Namespace,
-				),
-			)
-		*/
-
 		return r.Create(ctx, &service)
 	}
 
@@ -340,19 +337,6 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 		}
 
 		log.V(1).Info("New job", "job", job.Name)
-
-		/*
-			r.Recorder.Event(
-				&workbench,
-				"Normal",
-				"CreatingJob",
-				fmt.Sprintf(
-					"Creating job %q into the namespace %q",
-					job.Name,
-					job.Namespace,
-				),
-			)
-		*/
 
 		if err := r.Create(ctx, &job); err != nil {
 			log.V(1).Error(err, "Error creating the job", "job", job.Name)

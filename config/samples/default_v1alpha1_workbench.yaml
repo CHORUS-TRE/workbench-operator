@@ -13,5 +13,4 @@ spec:
       version: "0.0.1"
     - name: wezterm
       version: "0.0.1"
-    - name: wezterm
-      version: "0.0.1"
+      state: Stopped

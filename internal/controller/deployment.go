@@ -111,7 +111,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
 	return deployment
 }
 
-// updateDeployment makes the destination workbench like the source.
+// updateDeployment makes the destination deployment (Server) like the source.
 func updateDeployment(source appsv1.Deployment, destination *appsv1.Deployment) bool {
 	updated := false
 

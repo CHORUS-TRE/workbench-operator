@@ -54,7 +54,47 @@ func initJob(workbench defaultv1alpha1.Workbench, index int, app defaultv1alpha1
 	// This allows the end user to stop the application from within Xpra.
 	job.Spec.Template.Spec.RestartPolicy = "OnFailure"
 
+	appState := app.State
+	if appState == "" {
+		appState = "Running"
+	}
+
+	if appState != "Running" {
+		tru := true
+		job.Spec.Suspend = &tru
+	} else {
+		fal := false
+		job.Spec.Suspend = &fal
+	}
+
 	return job
+}
+
+// updateJob  makes the destination batch Job (app), like the source one.
+func updateJob(source batchv1.Job, destination *batchv1.Job) bool {
+	updated := false
+
+	containers := destination.Spec.Template.Spec.Containers
+	if len(containers) != 1 {
+		destination.Spec.Template.Spec.Containers = source.Spec.Template.Spec.Containers
+		updated = true
+	}
+
+	// I'm unsure if being able to modify the version is actually a good idea.
+	// --Y
+	appImage := source.Spec.Template.Spec.Containers[0].Image
+	if destination.Spec.Template.Spec.Containers[0].Image != appImage {
+		destination.Spec.Template.Spec.Containers[0].Image = appImage
+		updated = true
+	}
+
+	suspend := source.Spec.Suspend
+	if suspend != nil && (destination.Spec.Suspend == nil || *destination.Spec.Suspend != *suspend) {
+		destination.Spec.Suspend = suspend
+		updated = true
+	}
+
+	return updated
 }
 
 func (r *WorkbenchReconciler) deleteJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
