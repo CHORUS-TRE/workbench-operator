@@ -12,7 +12,7 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
-func initJob(workbench defaultv1alpha1.Workbench, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) batchv1.Job {
+func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) batchv1.Job {
 	job := batchv1.Job{}
 
 	job.Name = fmt.Sprintf("%s-%d-%s", workbench.Name, index, app.Name)
@@ -30,8 +30,13 @@ func initJob(workbench defaultv1alpha1.Workbench, index int, app defaultv1alpha1
 		appVersion = "latest"
 	}
 
-	// TODO: allow the registry to be specific as well.
-	appImage := fmt.Sprintf("registry.build.chorus-tre.local/%s:%s", app.Name, appVersion)
+	// Non-empty registry requires a / to concatenate with the Xpra server one.
+	registry := config.Registry
+	if registry != "" {
+		registry += "/"
+	}
+
+	appImage := fmt.Sprintf("%s%s:%s", registry, app.Name, appVersion)
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
@@ -46,6 +51,12 @@ func initJob(workbench defaultv1alpha1.Workbench, index int, app defaultv1alpha1
 
 	job.Spec.Template.Spec.Containers = []corev1.Container{
 		appContainer,
+	}
+
+	for _, imagePullSecret := range config.ImagePullSecrets {
+		job.Spec.Template.Spec.ImagePullSecrets = append(job.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
+			Name: imagePullSecret,
+		})
 	}
 
 	// Hide the pod name in favour of the app name.

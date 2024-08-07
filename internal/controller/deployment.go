@@ -18,7 +18,7 @@ import (
 // Xpra listens on port 8080 and starts a X11 socket in the tmp folder.
 // That folder is shared with a socat sidecar that turns the socket into a nice
 // and shiny TCP listener, on port 6080.
-func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
+func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.Deployment {
 	deployment := appsv1.Deployment{}
 	deployment.Name = workbench.Name
 	deployment.Namespace = workbench.Namespace
@@ -50,9 +50,18 @@ func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
 
 	deployment.Spec.Template.Spec.Volumes = []corev1.Volume{volume}
 
+	for _, imagePullSecret := range config.ImagePullSecrets {
+		deployment.Spec.Template.Spec.ImagePullSecrets = append(deployment.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
+			Name: imagePullSecret,
+		})
+	}
+
+	// FIXME: allow to configure socat image.
+	socatImage := "alpine/socat:1.8.0.0"
+
 	sidecarContainer := corev1.Container{
 		Name:            "xpra-server-bind",
-		Image:           "alpine/socat:1.8.0.0",
+		Image:           socatImage,
 		ImagePullPolicy: "IfNotPresent",
 		Ports: []corev1.ContainerPort{
 			{
@@ -67,14 +76,22 @@ func initDeployment(workbench defaultv1alpha1.Workbench) appsv1.Deployment {
 		VolumeMounts: volumeMounts,
 	}
 
+	// Non-empty registry requires a / to concatenate with the Xpra server one.
+	registry := config.Registry
+	if registry != "" {
+		registry += "/"
+	}
+
 	// TODO: put default values via the admission webhook.
 	serverVersion := workbench.Spec.Server.Version
 	if serverVersion == "" {
 		serverVersion = "latest"
 	}
 
-	// TODO: allow the registry to be specific as well.
-	serverImage := fmt.Sprintf("registry.build.chorus-tre.local/xpra-server:%s", serverVersion)
+	// FIXME: allow to configure Xpra server image.
+	xpraServerImage := "xpra-server"
+
+	serverImage := fmt.Sprintf("%s%s:%s", registry, xpraServerImage, serverVersion)
 	serverContainer := corev1.Container{
 		Name:            "xpra-server",
 		Image:           serverImage,
