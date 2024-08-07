@@ -5,6 +5,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -24,7 +27,14 @@ var _ = Describe("Workbench Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		workbench := &defaultv1alpha1.Workbench{}
+
+		workbench := &defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      resourceName,
+				Namespace: "default",
+			},
+		}
+
 		workbench.Spec.Apps = []defaultv1alpha1.WorkbenchApp{
 			{
 				Name: "wezterm",
@@ -35,14 +45,7 @@ var _ = Describe("Workbench Controller", func() {
 			By("creating the custom resource for the Kind Workbench")
 			err := k8sClient.Get(ctx, typeNamespacedName, workbench)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &defaultv1alpha1.Workbench{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					Spec: defaultv1alpha1.WorkbenchSpec{},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+				Expect(k8sClient.Create(ctx, workbench)).To(Succeed())
 			}
 		})
 
@@ -62,14 +65,53 @@ var _ = Describe("Workbench Controller", func() {
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(3),
+				Config: Config{
+					Registry: "my-registry",
+					ImagePullSecrets: []string{
+						"secret-1",
+						"secret-2",
+					},
+				},
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			// Verify that a deployment exists.
+			deployment := &appsv1.Deployment{}
+			err = k8sClient.Get(ctx, typeNamespacedName, deployment)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Two secrets were defined to pull the images.
+			Expect(deployment.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
+
+			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
+			Expect(deployment.Spec.Template.Spec.Containers[1].Image).To(HavePrefix("alpine/socat:"))
+
+			// Verify that a service exists
+			service := &corev1.Service{}
+			err = k8sClient.Get(ctx, typeNamespacedName, service)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that a job exists
+			job := &batchv1.Job{}
+			jobNamespacedName := types.NamespacedName{
+				Name:      resourceName + "-0-wezterm",
+				Namespace: "default", // TODO(user):Modify as needed
+			}
+			err = k8sClient.Get(ctx, jobNamespacedName, job)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Two secrets were defined to pull the images.
+			Expect(job.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
+
+			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
+
+			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
 		})
 	})
 })

@@ -20,11 +20,20 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
+// Config holds the global configuration that was given to the controller.
+type Config struct {
+	// Registry contains the hostname of the server and apps OCI images.
+	Registry string
+	// ImagePullSecrets holds the list of secret for all registries.
+	ImagePullSecrets []string
+}
+
 // WorkbenchReconciler reconciles a Workbench object
 type WorkbenchReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	Config   Config
 }
 
 // finalizer used to control the clean up the deployments.
@@ -100,7 +109,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// -------- SERVER ---------------
 
 	// The deployment of Xpra server
-	deployment := initDeployment(workbench)
+	deployment := initDeployment(workbench, r.Config)
 
 	// Link the deployment with the Workbench resource such that we can reconcile it
 	// when it's being changed.
@@ -178,7 +187,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	for index, app := range workbench.Spec.Apps {
 		app := app
 
-		job := initJob(workbench, index, app, service)
+		job := initJob(workbench, r.Config, index, app, service)
 
 		// Link the service with the Workbench resource such that we can reconcile it
 		// when it's being changed.
