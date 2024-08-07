@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: workbench-sample
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: workbench-sample.chorus-tre.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: workbench-sample
+                port:
+                  number: 8080
