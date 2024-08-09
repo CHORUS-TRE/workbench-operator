@@ -59,10 +59,16 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	// FIXME: allow to configure socat image.
 	socatImage := "alpine/socat:1.8.0.0"
 
+	// As of Kubernetes 1.29, initContainer + restartPolicy: Always is the right way to
+	// do sidecar containers:
+	// https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/
+	always := corev1.ContainerRestartPolicyAlways
+
 	sidecarContainer := corev1.Container{
 		Name:            "xpra-server-bind",
 		Image:           socatImage,
 		ImagePullPolicy: "IfNotPresent",
+		RestartPolicy:   &always,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "x11-socket",
@@ -112,18 +118,8 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		VolumeMounts: volumeMounts,
 	}
 
-	// FIXME: Kubernetes 1.29 supports native sidecars as initContainers.
-	//
-	// always := corev1.ContainerRestartPolicyAlways
-	// sidecarContainer.RestartPolicy = &always
-	// deployment.Spec.Template.Spec.InitContainers = []{sidecarContainer}
-	// deployment.Spec.Template.Spec.Containers = []{serverContainer}
-	//
-	// we will use less reliable ones in the meantime.
-	deployment.Spec.Template.Spec.Containers = []corev1.Container{
-		serverContainer,
-		sidecarContainer,
-	}
+	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
+	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
 
 	return deployment
 }
@@ -133,7 +129,7 @@ func updateDeployment(source appsv1.Deployment, destination *appsv1.Deployment) 
 	updated := false
 
 	containers := destination.Spec.Template.Spec.Containers
-	if len(containers) != 2 {
+	if len(containers) != 1 {
 		destination.Spec.Template.Spec.Containers = source.Spec.Template.Spec.Containers
 		updated = true
 	}
@@ -144,9 +140,15 @@ func updateDeployment(source appsv1.Deployment, destination *appsv1.Deployment) 
 		updated = true
 	}
 
-	sidecarImage := source.Spec.Template.Spec.Containers[1].Image
-	if containers[1].Image != sidecarImage {
-		destination.Spec.Template.Spec.Containers[1].Image = sidecarImage
+	initContainers := destination.Spec.Template.Spec.InitContainers
+	if len(initContainers) != 1 {
+		destination.Spec.Template.Spec.InitContainers = source.Spec.Template.Spec.InitContainers
+		updated = true
+	}
+
+	sidecarImage := source.Spec.Template.Spec.InitContainers[0].Image
+	if initContainers[0].Image != sidecarImage {
+		destination.Spec.Template.Spec.InitContainers[0].Image = sidecarImage
 		updated = true
 	}
 

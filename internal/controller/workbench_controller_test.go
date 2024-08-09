@@ -87,10 +87,11 @@ var _ = Describe("Workbench Controller", func() {
 			// Two secrets were defined to pull the images.
 			Expect(deployment.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 
-			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(2))
+			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
+			Expect(deployment.Spec.Template.Spec.InitContainers).To(HaveLen(1))
 
 			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
-			Expect(deployment.Spec.Template.Spec.Containers[1].Image).To(HavePrefix("alpine/socat:"))
+			Expect(deployment.Spec.Template.Spec.InitContainers[0].Image).To(HavePrefix("alpine/socat:"))
 
 			// Verify that a service exists
 			service := &corev1.Service{}

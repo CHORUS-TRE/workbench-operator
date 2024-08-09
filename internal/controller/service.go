@@ -27,9 +27,11 @@ func initService(workbench defaultv1alpha1.Workbench) corev1.Service {
 			Protocol:   "TCP",
 			Name:       "http",
 		},
+		// Using the named port seems to break.
+		// https://github.com/projectcalico/calico/issues/8881
 		{
 			Port:       6080,
-			TargetPort: intstr.FromString("x11-socket"),
+			TargetPort: intstr.FromInt(6080), // FIXME: should be x11-socket
 			Protocol:   "TCP",
 			Name:       "x11-socket",
 		},
