@@ -1,0 +1,10 @@
+- op: add
+  path: "/spec/template/spec/containers/0/args/-"
+  value: "--registry=registry.build.chorus-tre.ch"
+- op: add
+  path: "/spec/template/spec/containers/0/args/-"
+  value: "--image-pull-secret=regcred"
+- op: replace
+  path: "/spec/template/spec/imagePullSecrets"
+  value:
+    - name: regcred
