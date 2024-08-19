@@ -20,14 +20,6 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
-// Config holds the global configuration that was given to the controller.
-type Config struct {
-	// Registry contains the hostname of the server and apps OCI images.
-	Registry string
-	// ImagePullSecrets holds the list of secret for all registries.
-	ImagePullSecrets []string
-}
-
 // WorkbenchReconciler reconciles a Workbench object
 type WorkbenchReconciler struct {
 	client.Client
