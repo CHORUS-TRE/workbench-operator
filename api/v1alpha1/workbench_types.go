@@ -52,6 +52,8 @@ type WorkbenchSpec struct {
 	Server WorkbenchServer `json:"server,omitempty"`
 	// Apps represent a list of applications any their state
 	Apps []WorkbenchApp `json:"apps,omitempty"`
+	// Service Account to be used by the pods.
+	ServiceAccount string `json:"serviceAccountName,omitempty"`
 }
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.

@@ -24,6 +24,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 
 	job.Labels = labels
 
+	// Service account is an alternative to the image Pull Secrets
+	serviceAccountName := workbench.Spec.ServiceAccount
+	if serviceAccountName != "" {
+		job.Spec.Template.Spec.ServiceAccountName = serviceAccountName
+	}
+
 	// Fix empty version
 	appVersion := app.Version
 	if appVersion == "" {
