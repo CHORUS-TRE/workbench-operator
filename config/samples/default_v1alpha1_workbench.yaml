@@ -7,7 +7,7 @@ metadata:
   name: workbench-sample
 spec:
   server:
-    version: "0.0.2"
+    version: "6.1.2-1"
   apps:
     - name: wezterm
       version: "0.0.1"
