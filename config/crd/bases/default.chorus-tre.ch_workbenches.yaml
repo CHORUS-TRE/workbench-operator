@@ -76,6 +76,9 @@ spec:
                     description: Version defines the version to use.
                     type: string
                 type: object
+              serviceAccountName:
+                description: Service Account to be used by the pods.
+                type: string
             type: object
           status:
             description: WorkbenchStatus defines the observed state of Workbench

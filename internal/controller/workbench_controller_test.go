@@ -35,6 +35,8 @@ var _ = Describe("Workbench Controller", func() {
 			},
 		}
 
+		workbench.Spec.ServiceAccount = "service-account"
+
 		workbench.Spec.Apps = []defaultv1alpha1.WorkbenchApp{
 			{
 				Name: "wezterm",
@@ -93,6 +95,8 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
 			Expect(deployment.Spec.Template.Spec.InitContainers[0].Image).To(HavePrefix("alpine/socat:"))
 
+			Expect(deployment.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
+
 			// Verify that a service exists
 			service := &corev1.Service{}
 			err = k8sClient.Get(ctx, typeNamespacedName, service)
@@ -113,6 +117,8 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
+
+			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
 		})
 	})
 })
