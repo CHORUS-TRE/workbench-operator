@@ -38,7 +38,6 @@ As a server is a `Deployment`, stopping it from the inside will _restart_ it.
 
 ### TODO
 
-- Allow to specify xpra-server and socat images;
 - Handling the whole life cycle when the user stops the Server from within;
 - Report various information in the /status for the applications;
 - TLS between the Xpra server and the applications;

@@ -43,6 +43,8 @@ func main() {
 	var enableHTTP2 bool
 	var registry string
 	var imagePullSecret string
+	var xpraServerImage string
+	var socatImage string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -55,6 +57,8 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&registry, "registry", "registry.build.chorus-tre.local", "The hostname of the OCI registry")
 	flag.StringVar(&imagePullSecret, "image-pull-secret", "", "The secret to authenticate to the OCI registry")
+	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
+	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -117,6 +121,8 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("workbench-controller"),
 		Config: controller.Config{
 			Registry:         registry,
+			SocatImage:       socatImage,
+			XpraServerImage:  xpraServerImage,
 			ImagePullSecrets: []string{imagePullSecret},
 		},
 	}).SetupWithManager(mgr); err != nil {

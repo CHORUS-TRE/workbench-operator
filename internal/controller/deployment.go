@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -62,8 +63,16 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		})
 	}
 
-	// FIXME: allow to configure socat image.
-	socatImage := "alpine/socat:1.8.0.0"
+	// socatImage and its pull policy
+	socatImage := config.SocatImage
+	if socatImage == "" {
+		socatImage = "alpine/socat:latest"
+	}
+
+	socatImagePullPolicy := corev1.PullIfNotPresent
+	if strings.HasSuffix(socatImage, ":latest") || !strings.Contains(socatImage, ":") {
+		socatImagePullPolicy = corev1.PullAlways
+	}
 
 	// As of Kubernetes 1.29, initContainer + restartPolicy: Always is the right way to
 	// do sidecar containers:
@@ -73,7 +82,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	sidecarContainer := corev1.Container{
 		Name:            "xpra-server-bind",
 		Image:           socatImage,
-		ImagePullPolicy: "IfNotPresent",
+		ImagePullPolicy: socatImagePullPolicy,
 		RestartPolicy:   &always,
 		Ports: []corev1.ContainerPort{
 			{
@@ -101,13 +110,22 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	}
 
 	// FIXME: allow to configure Xpra server image.
-	xpraServerImage := "xpra-server"
+	xpraServerImage := config.XpraServerImage
+	if xpraServerImage == "" {
+		xpraServerImage = fmt.Sprintf("%s%s", registry, "xpra-server")
+	}
 
-	serverImage := fmt.Sprintf("%s%s:%s", registry, xpraServerImage, serverVersion)
+	serverImage := fmt.Sprintf("%s:%s", xpraServerImage, serverVersion)
+
+	serverImagePullPolicy := corev1.PullIfNotPresent
+	if serverVersion == "latest" {
+		serverImagePullPolicy = corev1.PullAlways
+	}
+
 	serverContainer := corev1.Container{
 		Name:            "xpra-server",
 		Image:           serverImage,
-		ImagePullPolicy: "IfNotPresent",
+		ImagePullPolicy: serverImagePullPolicy,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "http",
