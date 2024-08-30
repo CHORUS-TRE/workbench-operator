@@ -1,0 +1,26 @@
+controllerManager:
+  manager:
+    args:
+    - --leader-elect
+    - --health-probe-bind-address=:8081
+    - --registry=registry.build.chorus-tre.ch
+    - --image-pull-secret=regcred
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+    image:
+      repository: registry.build.chorus-tre.ch/workbench-operator
+      tag: 0.0.1.a0
+    resources:
+      limits:
+        cpu: 500m
+        memory: 128Mi
+      requests:
+        cpu: 10m
+        memory: 64Mi
+  replicas: 1
+  serviceAccount:
+    annotations: {}
+kubernetesClusterDomain: cluster.local
