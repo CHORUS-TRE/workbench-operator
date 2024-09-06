@@ -55,7 +55,28 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		},
 	}
 
+	wallpaper := workbench.Spec.Server.Wallpaper
+	var wallpaperVolume *corev1.Volume
+	var wallpaperVolumeMount *corev1.VolumeMount
+
+	if wallpaper != "" {
+		wallpaperVolume = &corev1.Volume{
+			Name: "wallpaper",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}
+
+		wallpaperVolumeMount = &corev1.VolumeMount{
+			Name:      wallpaperVolume.Name,
+			MountPath: "/usr/share/backgrounds/images/",
+		}
+	}
+
 	deployment.Spec.Template.Spec.Volumes = []corev1.Volume{volume}
+	if wallpaperVolumeMount != nil {
+		deployment.Spec.Template.Spec.Volumes = append(deployment.Spec.Template.Spec.Volumes, *wallpaperVolume)
+	}
 
 	for _, imagePullSecret := range config.ImagePullSecrets {
 		deployment.Spec.Template.Spec.ImagePullSecrets = append(deployment.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
@@ -97,6 +118,21 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		VolumeMounts: volumeMounts,
 	}
 
+	var wallpaperContainer *corev1.Container
+	if wallpaper != "" && wallpaperVolumeMount != nil {
+		wallpaperContainer = &corev1.Container{
+			Name:            "xpra-server-wallpaper",
+			Image:           "curlimages/curl:8.9.1",
+			ImagePullPolicy: "IfNotPresent",
+			Args: []string{
+				"-L",
+				"-o", "/usr/share/backgrounds/images/default.png",
+				wallpaper,
+			},
+			VolumeMounts: []corev1.VolumeMount{*wallpaperVolumeMount},
+		}
+	}
+
 	// Non-empty registry requires a / to concatenate with the Xpra server one.
 	registry := config.Registry
 	if registry != "" {
@@ -122,6 +158,11 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		serverImagePullPolicy = corev1.PullAlways
 	}
 
+	serverVolumeMounts := volumeMounts
+	if wallpaperVolumeMount != nil {
+		serverVolumeMounts = append(serverVolumeMounts, *wallpaperVolumeMount)
+	}
+
 	serverContainer := corev1.Container{
 		Name:            "xpra-server",
 		Image:           serverImage,
@@ -139,11 +180,15 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 				Value: "",
 			},
 		},
-		VolumeMounts: volumeMounts,
+		VolumeMounts: serverVolumeMounts,
 	}
 
 	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
+
+	if wallpaperContainer != nil {
+		deployment.Spec.Template.Spec.InitContainers = append(deployment.Spec.Template.Spec.InitContainers, *wallpaperContainer)
+	}
 
 	return deployment
 }

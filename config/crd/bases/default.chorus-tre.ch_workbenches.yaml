@@ -75,6 +75,10 @@ spec:
                   version:
                     description: Version defines the version to use.
                     type: string
+                  wallpaper:
+                    description: Wallpaper lets you define a wallpaper to download
+                      (at first run) and use.
+                    type: string
                 type: object
               serviceAccountName:
                 description: Service Account to be used by the pods.

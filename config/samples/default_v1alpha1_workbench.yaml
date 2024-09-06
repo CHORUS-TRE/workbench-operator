@@ -8,6 +8,7 @@ metadata:
 spec:
   server:
     version: "6.1.2-1"
+    wallpaper: "https://i.redd.it/5veyo93i76nd1.jpeg"
   apps:
     - name: wezterm
       version: "0.0.1"
