@@ -28,8 +28,18 @@ var _ = Describe("Workbench Webhook", func() {
 	Context("When creating Workbench under Validating Webhook", func() {
 		It("Should deny if a required field is empty", func() {
 
-			// TODO(user): Add your logic here
+			workbench := Workbench()
 
+			workbench.Spec.Apps = []WorkbenchApp{
+				{
+					Name: "foo",
+				},
+			}
+
+			warnings, err := workbench.ValidateCreate()
+
+			Expect(warnings).To(BeNil())
+			Expect(err).To(BeNil())
 		})
 
 		It("Should admit if all required fields are provided", func() {
