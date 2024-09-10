@@ -4,6 +4,8 @@ controllerManager:
     - --leader-elect
     - --health-probe-bind-address=:8081
     - --registry=registry.build.chorus-tre.ch
+    - --xpra-server-image=registry.build.chorus-tre.ch/xpra-server
+    - --socat-image=alpine/socat:1.8.0.0
     - --image-pull-secret=regcred
     containerSecurityContext:
       allowPrivilegeEscalation: false
