@@ -103,7 +103,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		registry += "/"
 	}
 
-	// TODO: put default values via the admission webhook.
+	// Done by the defaulter webhook.
 	serverVersion := workbench.Spec.Server.Version
 	if serverVersion == "" {
 		serverVersion = "latest"

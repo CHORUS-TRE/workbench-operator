@@ -1,0 +1,45 @@
+# Setup with Kind
+
+Kind allows to properly run the webhooks.
+
+```bash
+kind craete cluster --config hack/kind-config.yaml
+```
+
+## Dependencies
+
+### Ingress-nginx
+
+See: <https://kubernetes.github.io/ingress-nginx/deploy/>
+
+```bash
+helm upgrade --install ingress-nginx ingress-nginx \
+             --repo https://kubernetes.github.io/ingress-nginx \
+             --namespace ingress-nginx --create-namespace
+```
+
+### Cert-manager
+
+See: <https://cert-manager.io/docs/installation/>
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
+```
+
+Create the certificate that will be used by the webhook.
+
+```bash
+kubectl apply -k config/cert-manager
+```
+
+## Build and run
+
+Build and load into Kind the controller.
+
+```bash
+docker buildx build registry.local/controller:v1
+```
+
+```
+kind load docker-image registry.local/controller:v1
+```
