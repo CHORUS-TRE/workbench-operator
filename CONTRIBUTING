@@ -3,7 +3,7 @@
 Kind allows to properly run the webhooks.
 
 ```bash
-kind craete cluster --config hack/kind-config.yaml
+kind create cluster --config hack/kind-config.yaml
 ```
 
 ## Dependencies
