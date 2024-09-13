@@ -106,7 +106,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	// TODO: put default values via the admission webhook.
 	serverVersion := workbench.Spec.Server.Version
 	if serverVersion == "" {
-		serverVersion = "latest"
+		serverVersion = "latest" // nolint:goconst
 	}
 
 	// FIXME: allow to configure Xpra server image.
