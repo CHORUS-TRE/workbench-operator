@@ -47,7 +47,7 @@ spec:
           | nindent 10 }}
       imagePullSecrets:
       - name: regcred
-      securityContext:
-        runAsNonRoot: true
+      securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
+        8 }}
       serviceAccountName: {{ include "workbench-operator.fullname" . }}-controller-manager
       terminationGracePeriodSeconds: 10
