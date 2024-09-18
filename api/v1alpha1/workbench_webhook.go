@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"fmt"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -12,9 +14,9 @@ import (
 var workbenchlog = logf.Log.WithName("workbench-resource")
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
-func (r *Workbench) SetupWebhookWithManager(mgr ctrl.Manager) error {
+func (wb *Workbench) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+		For(wb).
 		Complete()
 }
 
@@ -23,19 +25,19 @@ func (r *Workbench) SetupWebhookWithManager(mgr ctrl.Manager) error {
 var _ webhook.Defaulter = &Workbench{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
-func (r *Workbench) Default() {
-	workbenchlog.Info("default", "name", r.Name)
+func (wb *Workbench) Default() {
+	workbenchlog.Info("default", "name", wb.Name)
 
-	if r.Spec.Server.Version == "" {
-		r.Spec.Server.Version = "latest"
+	if wb.Spec.Server.Version == "" {
+		wb.Spec.Server.Version = "latest"
 	}
 
-	for index, app := range r.Spec.Apps {
+	for index, app := range wb.Spec.Apps {
 		if app.Version == "" {
-			r.Spec.Apps[index].Version = "latest"
+			wb.Spec.Apps[index].Version = "latest"
 		}
 		if app.State == "" {
-			r.Spec.Apps[index].State = WorkbenchAppStateRunning
+			wb.Spec.Apps[index].State = WorkbenchAppStateRunning
 		}
 	}
 }
@@ -48,24 +50,53 @@ func (r *Workbench) Default() {
 var _ webhook.Validator = &Workbench{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *Workbench) ValidateCreate() (admission.Warnings, error) {
-	workbenchlog.Info("validate create", "name", r.Name)
+//
+// The app name shouldn't be empty, but this is mostly a double check as this validation already exists at the OpenAPI level.
+func (wb *Workbench) ValidateCreate() (admission.Warnings, error) {
+	workbenchlog.Info("validate create", "name", wb.Name)
 
-	// TODO(user): fill in your validation logic upon object creation.
+	for index, app := range wb.Spec.Apps {
+		if app.Name == "" {
+			return nil, fmt.Errorf("empty application name at position %d is invalid.", index)
+		}
+	}
+
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *Workbench) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	workbenchlog.Info("validate update", "name", r.Name)
+//
+// Updating a workbench has some constraints as the ordered bag of applications cannot easily
+// be modified. E.g. one application cannot move positions into the list, therefor you're not
+// allowed to remove any applications, only to stop them. Adding more applications at the end
+// of the list is also fine.
+func (wb *Workbench) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
+	workbenchlog.Info("validate update", "name", wb.Name)
 
-	// TODO(user): fill in your validation logic upon object update.
+	oldWorkbench, ok := old.(*Workbench)
+	if !ok {
+		return nil, fmt.Errorf("expected a Workbench but got a %T", old)
+	}
+
+	if len(wb.Spec.Apps) < len(oldWorkbench.Spec.Apps) {
+		return nil, fmt.Errorf("apps cannot be removed from a Workbench, only stopped.")
+	}
+
+	for index, oldApp := range oldWorkbench.Spec.Apps {
+		// As the old is smaller or equal than the wb, this is safe.
+		app := wb.Spec.Apps[index]
+
+		if app.Name != oldApp.Name {
+			return nil, fmt.Errorf("apps cannot be moved or changed on the fly, stop them, and new ones. App %d should be %q, not %q", index, app.Name, oldApp.Name)
+		}
+	}
+
 	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *Workbench) ValidateDelete() (admission.Warnings, error) {
-	workbenchlog.Info("validate delete", "name", r.Name)
+func (wb *Workbench) ValidateDelete() (admission.Warnings, error) {
+	workbenchlog.Info("validate delete", "name", wb.Name)
 
 	// TODO(user): fill in your validation logic upon object deletion.
 	return nil, nil
