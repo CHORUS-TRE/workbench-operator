@@ -45,7 +45,7 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 
 	switch condition.Type {
 	case "Available":
-		status = "Running"
+		status = "Running" // nolint:goconst
 	case "Progressing":
 		if condition.Status != "True" {
 			status = "Failed"
