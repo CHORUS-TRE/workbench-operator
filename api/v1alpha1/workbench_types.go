@@ -34,14 +34,27 @@ type WorkbenchServer struct {
 	// TODO: add anything you'd like to configure. E.g. resources, Xpra options, auth, etc.
 }
 
+// Image represents the configuration of a custom image for an app.
+type Image struct {
+	// Registry represents the hostname of the registry. E.g. quay.io
+	Registry string `json:"registry"`
+	// Repository contains the image name. E.g. apps/myapp
+	Repository string `json:"repository"`
+	// Tag contains the version identifier. Defaults to latest.
+	Tag string `json:"tag,omitempty"`
+}
+
 // WorkbenchApp defines one application running in the workbench.
 type WorkbenchApp struct {
 	// Name is the application name (likely its OCI image name as well)
 	Name string `json:"name"`
-	// Version defines the version to use.
+	// Version defines the version to use (which is the image tag).
 	Version string `json:"version,omitempty"`
 	// State defines the desired state
 	State WorkbenchAppState `json:"state,omitempty"`
+
+	// Image overwrites the default image built using the default registry, name, and version.
+	Image *Image `json:"image,omitempty"`
 
 	// TODO: add anything you'd like to configure. E.g. resources, (App data) volume, etc.
 }
@@ -54,6 +67,8 @@ type WorkbenchSpec struct {
 	Apps []WorkbenchApp `json:"apps,omitempty"`
 	// Service Account to be used by the pods.
 	ServiceAccount string `json:"serviceAccountName,omitempty"`
+	// ImagePullSecrets is the secret(s) needed to pull the image(s).
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 }
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.

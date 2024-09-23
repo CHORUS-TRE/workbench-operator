@@ -55,6 +55,25 @@ spec:
                   description: WorkbenchApp defines one application running in the
                     workbench.
                   properties:
+                    image:
+                      description: Image overwrites the default image built using
+                        the default registry, name, and version.
+                      properties:
+                        registry:
+                          description: Registry represents the hostname of the registry.
+                            E.g. quay.io
+                          type: string
+                        repository:
+                          description: Repository contains the image name. E.g. apps/myapp
+                          type: string
+                        tag:
+                          description: Tag contains the version identifier. Defaults
+                            to latest.
+                          type: string
+                      required:
+                      - registry
+                      - repository
+                      type: object
                     name:
                       description: Name is the application name (likely its OCI image
                         name as well)
@@ -63,11 +82,18 @@ spec:
                       description: State defines the desired state
                       type: string
                     version:
-                      description: Version defines the version to use.
+                      description: Version defines the version to use (which is the
+                        image tag).
                       type: string
                   required:
                   - name
                   type: object
+                type: array
+              imagePullSecrets:
+                description: ImagePullSecrets is the secret(s) needed to pull the
+                  image(s).
+                items:
+                  type: string
                 type: array
               server:
                 description: Server represents the configuration of the server part.

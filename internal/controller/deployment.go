@@ -57,7 +57,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 
 	deployment.Spec.Template.Spec.Volumes = []corev1.Volume{volume}
 
-	for _, imagePullSecret := range config.ImagePullSecrets {
+	for _, imagePullSecret := range workbench.Spec.ImagePullSecrets {
 		deployment.Spec.Template.Spec.ImagePullSecrets = append(deployment.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecret,
 		})
