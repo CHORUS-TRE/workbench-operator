@@ -3,13 +3,13 @@
   value: "--registry=registry.build.chorus-tre.ch"
 - op: add
   path: "/spec/template/spec/containers/0/args/-"
+  value: "--apps-repository="
+- op: add
+  path: "/spec/template/spec/containers/0/args/-"
   value: "--xpra-server-image=registry.build.chorus-tre.ch/xpra-server"
 - op: add
   path: "/spec/template/spec/containers/0/args/-"
   value: "--socat-image=alpine/socat:1.8.0.0"
-- op: add
-  path: "/spec/template/spec/containers/0/args/-"
-  value: "--image-pull-secret=regcred"
 - op: replace
   path: "/spec/template/spec/imagePullSecrets"
   value:
