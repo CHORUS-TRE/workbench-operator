@@ -58,12 +58,29 @@ spec:
                     name:
                       description: Name is the application name (likely its OCI image
                         name as well)
+                      maxLength: 30
+                      minLength: 1
+                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_-.]*'
                       type: string
                     state:
-                      description: State defines the desired state
+                      default: Running
+                      description: |-
+                        State defines the desired state
+                        Valid values are:
+                        - "Running" (default): application is running
+                        - "Stopped": application has been stopped
+                        - "Killed": application has been force stopped
+                      enum:
+                      - Running
+                      - Stopped
+                      - Killed
                       type: string
                     version:
+                      default: latest
                       description: Version defines the version to use.
+                      maxLength: 128
+                      minLength: 1
+                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_-.]*'
                       type: string
                   required:
                   - name
@@ -73,10 +90,12 @@ spec:
                 description: Server represents the configuration of the server part.
                 properties:
                   version:
+                    default: latest
                     description: Version defines the version to use.
                     type: string
                 type: object
               serviceAccountName:
+                default: default
                 description: Service Account to be used by the pods.
                 type: string
             type: object
@@ -94,6 +113,11 @@ spec:
                       type: integer
                     status:
                       description: Status informs about the real state of the app.
+                      enum:
+                      - Running
+                      - Complete
+                      - Progressing
+                      - Failed
                       type: string
                   required:
                   - revision
@@ -109,6 +133,10 @@ spec:
                     type: integer
                   status:
                     description: Status informs about the real state of the app.
+                    enum:
+                    - Running
+                    - Progressing
+                    - Failed
                     type: string
                 required:
                 - revision
