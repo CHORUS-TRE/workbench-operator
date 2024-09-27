@@ -42,7 +42,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		registry += "/"
 	}
 
-	appImage := fmt.Sprintf("%s%s:%s", registry, app.Name, appVersion)
+	appsRepository := config.AppsRepository
+	if appsRepository != "" {
+		appsRepository += "/"
+	}
+
+	appImage := fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,

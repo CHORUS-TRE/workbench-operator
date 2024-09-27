@@ -109,7 +109,6 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		serverVersion = "latest" // nolint:goconst
 	}
 
-	// FIXME: allow to configure Xpra server image.
 	xpraServerImage := config.XpraServerImage
 	if xpraServerImage == "" {
 		xpraServerImage = fmt.Sprintf("%s%s", registry, "xpra-server")
