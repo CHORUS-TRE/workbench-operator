@@ -13,6 +13,7 @@ import (
 //
 // An app always goes from Running to Stopped or Killed if it's externally stopped or killed.
 // Otherwise, the actual status is found in the /status section.
+// +kubebuilder:validation:Enum=Running;Stopped;Killed
 type WorkbenchAppState string
 
 const (
@@ -29,6 +30,8 @@ const (
 // WorkbenchServer defines the server configuration.
 type WorkbenchServer struct {
 	// Version defines the version to use.
+	// +optional
+	// +default:value="latest"
 	Version string `json:"version,omitempty"`
 
 	// TODO: add anything you'd like to configure. E.g. resources, Xpra options, auth, etc.
@@ -40,20 +43,40 @@ type Image struct {
 	Registry string `json:"registry"`
 	// Repository contains the image name. E.g. apps/myapp
 	Repository string `json:"repository"`
-	// Tag contains the version identifier. Defaults to latest.
+	// Tag contains the version identifier.
+	// +optional
+	// +default:value="latest"
+	// +kubebuilder:validation:Pattern:="[a-zA-Z0-9_][a-zA-Z0-9_\\-\\.]*"
 	Tag string `json:"tag,omitempty"`
 }
 
 // WorkbenchApp defines one application running in the workbench.
 type WorkbenchApp struct {
 	// Name is the application name (likely its OCI image name as well)
+	// +kubebuilder:validation:MinLength:=1
+	// +kubebuilder:validation:MaxLength:=30
+	// +kubebuilder:validation:Pattern:="[a-zA-Z0-9_][a-zA-Z0-9_\\-\\.]*"
 	Name string `json:"name"`
-	// Version defines the version to use (which is the image tag).
+
+	// Version defines the version to use.
+	// +optional
+	// +default:value="latest"
+	// +kubebuilder:validation:MinLength:=1
+	// +kubebuilder:validation:MaxLength:=128
+	// +kubebuilder:validation:Pattern:="[a-zA-Z0-9_][a-zA-Z0-9_\\-\\.]*"
 	Version string `json:"version,omitempty"`
+
 	// State defines the desired state
+	// Valid values are:
+	// - "Running" (default): application is running
+	// - "Stopped": application has been stopped
+	// - "Killed": application has been force stopped
+	// +optional
+	// +default:value="Running"
 	State WorkbenchAppState `json:"state,omitempty"`
 
 	// Image overwrites the default image built using the default registry, name, and version.
+	// +optional
 	Image *Image `json:"image,omitempty"`
 
 	// TODO: add anything you'd like to configure. E.g. resources, (App data) volume, etc.
@@ -62,12 +85,18 @@ type WorkbenchApp struct {
 // WorkbenchSpec defines the desired state of Workbench
 type WorkbenchSpec struct {
 	// Server represents the configuration of the server part.
+	// +optional
 	Server WorkbenchServer `json:"server,omitempty"`
 	// Apps represent a list of applications any their state
+	// +optional
 	Apps []WorkbenchApp `json:"apps,omitempty"`
 	// Service Account to be used by the pods.
+	// +optional
+	// +default:value="default"
 	ServiceAccount string `json:"serviceAccountName,omitempty"`
 	// ImagePullSecrets is the secret(s) needed to pull the image(s).
+	// +optional
+	// +kubebuilder:validation:items:MinLength:=1
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
 }
 
@@ -75,6 +104,7 @@ type WorkbenchSpec struct {
 //
 // It matches the Job Status,
 // See https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/job-v1/#JobStatus
+// +kubebuilder:validation:Enum=Running;Complete;Progressing;Failed
 type WorkbenchStatusAppStatus string
 
 const (
@@ -92,6 +122,7 @@ const (
 )
 
 // WorkbenchStatusServerStatus is identical to the App status.
+// +kubebuilder:validation:Enum=Running;Progressing;Failed
 type WorkbenchStatusServerStatus string
 
 const (

@@ -81,7 +81,9 @@ var _ = Describe("Workbench Controller", func() {
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(3),
 				Config: Config{
-					Registry: "my-registry",
+					Registry:        "my-registry",
+					AppsRepository:  "applications",
+					XpraServerImage: "my-registry/server/xpra-server",
 				},
 			}
 
@@ -101,7 +103,7 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
 			Expect(deployment.Spec.Template.Spec.InitContainers).To(HaveLen(1))
 
-			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
+			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/server/"))
 			Expect(deployment.Spec.Template.Spec.InitContainers[0].Image).To(HavePrefix("alpine/socat:"))
 
 			Expect(deployment.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
@@ -133,7 +135,7 @@ var _ = Describe("Workbench Controller", func() {
 
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 
-			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
+			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/applications/"))
 
 			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
 
