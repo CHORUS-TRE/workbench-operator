@@ -2,6 +2,11 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: workbench-sample
+  annotations:
+    # For WebSocket
+    # see: https://kubernetes.github.io/ingress-nginx/user-guide/miscellaneous/#websockets
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:
   ingressClassName: nginx
   rules:

@@ -36,7 +36,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		appVersion = "latest"
 	}
 
-	// Non-empty registry requires a / to concatenate with the Xpra server one.
+	// Non-empty registry requires a slash (/) to concatenate with the Xpra server one.
 	registry := config.Registry
 	if registry != "" {
 		registry += "/"
