@@ -145,7 +145,7 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 .PHONY: helm
 helm: manifests kustomize helmify
-	$(KUSTOMIZE) build config/default | $(HELMIFY) charts/workbench-operator
+	$(KUSTOMIZE) build config/default | $(HELMIFY) -image-pull-secrets charts/workbench-operator
 
 ##@ Dependencies
 
