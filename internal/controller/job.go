@@ -30,28 +30,44 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		job.Spec.Template.Spec.ServiceAccountName = serviceAccountName
 	}
 
-	// Fix empty version
-	appVersion := app.Version
-	if appVersion == "" {
-		appVersion = "latest"
+	var appImage string
+	imagePullPolicy := corev1.PullIfNotPresent
+
+	if app.Image == nil {
+		// Fix empty version
+		appVersion := app.Version
+		if appVersion == "" {
+			appVersion = "latest"
+			imagePullPolicy = corev1.PullAlways
+		}
+
+		// Non-empty registry requires a / to concatenate with the app one.
+		registry := config.Registry
+		if registry != "" {
+			registry += "/"
+		}
+
+		appsRepository := config.AppsRepository
+		if appsRepository != "" {
+			appsRepository += "/"
+		}
+
+		appImage = fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
+	} else {
+		// Fix empty version
+		appVersion := app.Image.Tag
+		if appVersion == "" {
+			appVersion = "latest"
+			imagePullPolicy = corev1.PullAlways
+		}
+
+		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
 	}
 
-	// Non-empty registry requires a / to concatenate with the Xpra server one.
-	registry := config.Registry
-	if registry != "" {
-		registry += "/"
-	}
-
-	appsRepository := config.AppsRepository
-	if appsRepository != "" {
-		appsRepository += "/"
-	}
-
-	appImage := fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
-		ImagePullPolicy: "IfNotPresent",
+		ImagePullPolicy: imagePullPolicy,
 		Env: []corev1.EnvVar{
 			{
 				Name:  "DISPLAY",
@@ -64,7 +80,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		appContainer,
 	}
 
-	for _, imagePullSecret := range config.ImagePullSecrets {
+	for _, imagePullSecret := range workbench.Spec.ImagePullSecrets {
 		job.Spec.Template.Spec.ImagePullSecrets = append(job.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecret,
 		})

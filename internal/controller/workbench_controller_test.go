@@ -41,6 +41,19 @@ var _ = Describe("Workbench Controller", func() {
 			{
 				Name: "wezterm",
 			},
+			{
+				Name: "kitty",
+				Image: &defaultv1alpha1.Image{
+					Registry:   "quay.io",
+					Repository: "kitty/kitty",
+					Tag:        "1.2.0",
+				},
+			},
+		}
+
+		workbench.Spec.ImagePullSecrets = []string{
+			"secret-1",
+			"secret-2",
 		}
 
 		BeforeEach(func() {
@@ -68,12 +81,8 @@ var _ = Describe("Workbench Controller", func() {
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(3),
 				Config: Config{
-					Registry:       "my-registry",
-					AppsRepository: "applications",
-					ImagePullSecrets: []string{
-						"secret-1",
-						"secret-2",
-					},
+					Registry:        "my-registry",
+					AppsRepository:  "applications",
 					XpraServerImage: "my-registry/server/xpra-server",
 				},
 			}
@@ -104,13 +113,21 @@ var _ = Describe("Workbench Controller", func() {
 			err = k8sClient.Get(ctx, typeNamespacedName, service)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify that a job exists
+			// Verify that the jobs exist
 			job := &batchv1.Job{}
 			jobNamespacedName := types.NamespacedName{
 				Name:      resourceName + "-0-wezterm",
 				Namespace: "default", // TODO(user):Modify as needed
 			}
 			err = k8sClient.Get(ctx, jobNamespacedName, job)
+			Expect(err).NotTo(HaveOccurred())
+
+			job1 := &batchv1.Job{}
+			jobNamespacedName = types.NamespacedName{
+				Name:      resourceName + "-1-kitty",
+				Namespace: "default", // TODO(user):Modify as needed
+			}
+			err = k8sClient.Get(ctx, jobNamespacedName, job1)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Two secrets were defined to pull the images.
@@ -121,6 +138,9 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/applications/"))
 
 			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
+
+			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
+			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
 		})
 	})
 })

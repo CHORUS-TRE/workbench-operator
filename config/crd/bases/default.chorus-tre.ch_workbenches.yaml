@@ -55,12 +55,32 @@ spec:
                   description: WorkbenchApp defines one application running in the
                     workbench.
                   properties:
+                    image:
+                      description: Image overwrites the default image built using
+                        the default registry, name, and version.
+                      properties:
+                        registry:
+                          description: Registry represents the hostname of the registry.
+                            E.g. quay.io
+                          type: string
+                        repository:
+                          description: Repository contains the image name. E.g. apps/myapp
+                          type: string
+                        tag:
+                          default: latest
+                          description: Tag contains the version identifier.
+                          pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
+                          type: string
+                      required:
+                      - registry
+                      - repository
+                      type: object
                     name:
                       description: Name is the application name (likely its OCI image
                         name as well)
                       maxLength: 30
                       minLength: 1
-                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_-.]*'
+                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
                       type: string
                     state:
                       default: Running
@@ -80,11 +100,18 @@ spec:
                       description: Version defines the version to use.
                       maxLength: 128
                       minLength: 1
-                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_-.]*'
+                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
                       type: string
                   required:
                   - name
                   type: object
+                type: array
+              imagePullSecrets:
+                description: ImagePullSecrets is the secret(s) needed to pull the
+                  image(s).
+                items:
+                  minLength: 1
+                  type: string
                 type: array
               server:
                 description: Server represents the configuration of the server part.

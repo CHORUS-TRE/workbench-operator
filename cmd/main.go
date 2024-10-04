@@ -43,7 +43,6 @@ func main() {
 	var enableHTTP2 bool
 	var registry string
 	var appsRepository string
-	var imagePullSecret string
 	var xpraServerImage string
 	var socatImage string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -58,7 +57,6 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&registry, "registry", "registry.build.chorus-tre.local", "The hostname of the OCI registry")
 	flag.StringVar(&appsRepository, "apps-repository", "apps", "The repository holding the apps")
-	flag.StringVar(&imagePullSecret, "image-pull-secret", "", "The secret to authenticate to the OCI registry")
 	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
 	opts := zap.Options{
@@ -122,11 +120,10 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("workbench-controller"),
 		Config: controller.Config{
-			Registry:         registry,
-			AppsRepository:   appsRepository,
-			SocatImage:       socatImage,
-			XpraServerImage:  xpraServerImage,
-			ImagePullSecrets: []string{imagePullSecret},
+			Registry:        registry,
+			AppsRepository:  appsRepository,
+			SocatImage:      socatImage,
+			XpraServerImage: xpraServerImage,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
