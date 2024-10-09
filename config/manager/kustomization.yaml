@@ -5,4 +5,4 @@ kind: Kustomization
 images:
   - name: controller
     newName: registry.chorus-tre.local/chorus/workbench-operator
-    newTag: 0.0.2
+    newTag: 0.2.0
