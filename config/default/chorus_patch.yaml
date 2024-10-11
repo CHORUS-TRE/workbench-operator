@@ -6,7 +6,7 @@
   value: "--apps-repository=apps" # It's the default value anyway.
 - op: add
   path: "/spec/template/spec/containers/0/args/-"
-  value: "--xpra-server-image=registry.build.chorus-tre.ch/xpra-server"
+  value: "--xpra-server-image=registry.build.chorus-tre.ch/apps/xpra-server"
 - op: add
   path: "/spec/template/spec/containers/0/args/-"
   value: "--socat-image=alpine/socat:1.8.0.0"
