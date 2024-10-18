@@ -130,6 +130,8 @@ var _ = Describe("Workbench Controller", func() {
 			err = k8sClient.Get(ctx, jobNamespacedName, job1)
 			Expect(err).NotTo(HaveOccurred())
 
+			Expect(job.Spec.TTLSecondsAfterFinished).To(Equal(int32(86400)))
+
 			// Two secrets were defined to pull the images.
 			Expect(job.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 

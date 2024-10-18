@@ -26,7 +26,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 
 	// The pod will be cleaned up after a day.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
-	oneDay := 24 * 3600
+	oneDay := int32(24 * 3600)
 	job.Spec.TTLSecondsAfterFinished = &oneDay
 
 	// Service account is an alternative to the image Pull Secrets
