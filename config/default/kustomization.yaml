@@ -18,15 +18,15 @@ resources:
   - ../crd
   - ../rbac
   - ../manager
-# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
-# crd/kustomization.yaml
-#- ../webhook
-# [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'. 'WEBHOOK' components are required.
-#- ../certmanager
-# [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
+  # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
+  # crd/kustomization.yaml
+  #- ../webhook
+  # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'. 'WEBHOOK' components are required.
+  #- ../certmanager
+  # [PROMETHEUS] To enable prometheus monitor, uncomment all sections with 'PROMETHEUS'.
   - ../prometheus
-# [METRICS] To enable the controller manager metrics service, uncomment the following line.
-#- metrics_service.yaml
+  # [METRICS] To enable the controller manager metrics service, uncomment the following line.
+  - metrics_service.yaml
 
 # Uncomment the patches line if you enable Metrics, and/or are using webhooks and cert-manager
 patches:
@@ -34,9 +34,9 @@ patches:
   - path: chorus_patch.yaml
     target:
       kind: Deployment
-# [METRICS] The following patch will enable the metrics endpoint. Ensure that you also protect this endpoint.
-# More info: https://book.kubebuilder.io/reference/metrics
-# If you want to expose the metric endpoint of your controller-manager uncomment the following line.
+  # [METRICS] The following patch will enable the metrics endpoint. Ensure that you also protect this endpoint.
+  # More info: https://book.kubebuilder.io/reference/metrics
+  # If you want to expose the metric endpoint of your controller-manager uncomment the following line.
   - path: manager_metrics_patch.yaml
     target:
       kind: Deployment
