@@ -15,7 +15,7 @@ controllerManager:
         - ALL
     image:
       repository: registry.chorus-tre.local/chorus/workbench-operator
-      tag: 0.2.0
+      tag: 0.2.2
     resources:
       limits:
         cpu: 500m
@@ -30,3 +30,10 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+metricsService:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  type: ClusterIP
