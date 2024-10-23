@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -44,12 +45,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		// Non-empty registry requires a / to concatenate with the app one.
 		registry := config.Registry
 		if registry != "" {
-			registry += "/"
+			registry = strings.TrimRight(registry, "/") + "/"
 		}
 
 		appsRepository := config.AppsRepository
 		if appsRepository != "" {
-			appsRepository += "/"
+			appsRepository = strings.Trim(appsRepository, "/") + "/"
 		}
 
 		appImage = fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
