@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -180,6 +181,9 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// ---------- APPS ---------------
 
+	// List of jobs that were either found or created, the others will be deleted.
+	foundJobNames := []string{}
+
 	for index, app := range workbench.Spec.Apps {
 		job := initJob(workbench, r.Config, index, app, service)
 
@@ -199,7 +203,9 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		// Break the loop
+		foundJobNames = append(foundJobNames, job.Name)
+
+		// Break the loop as the job was created.
 		if foundJob == nil {
 			continue
 		}
@@ -230,6 +236,26 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				log.V(1).Error(err2, "Unable to update the job", "job", job.Name)
 				return ctrl.Result{}, err2
 			}
+		}
+	}
+
+	allJobs, err := r.findJobs(ctx, workbench)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Sorting the job names to leverage the binary search.
+	// It's a small list anyway.
+	slices.Sort(foundJobNames)
+	for _, job := range allJobs.Items {
+		_, found := slices.BinarySearch(foundJobNames, job.Name)
+		if found {
+			continue
+		}
+
+		log.V(1).Info("Extra job found, removing", "job", job.Name)
+		if err := r.deleteJob(ctx, &job); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 

@@ -21,7 +21,7 @@ import (
 // and shiny TCP listener, on port 6080.
 func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.Deployment {
 	deployment := appsv1.Deployment{}
-	deployment.Name = workbench.Name
+	deployment.Name = fmt.Sprintf("%s-server", workbench.Name)
 	deployment.Namespace = workbench.Namespace
 
 	// Labels
