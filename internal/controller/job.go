@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,11 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 
 	job.Labels = labels
 
+	// The pod will be cleaned up after a day.
+	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
+	oneDay := int32(24 * 3600)
+	job.Spec.TTLSecondsAfterFinished = &oneDay
+
 	// Service account is an alternative to the image Pull Secrets
 	serviceAccountName := workbench.Spec.ServiceAccount
 	if serviceAccountName != "" {
@@ -44,12 +50,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		// Non-empty registry requires a / to concatenate with the app one.
 		registry := config.Registry
 		if registry != "" {
-			registry += "/"
+			registry = strings.TrimRight(registry, "/") + "/"
 		}
 
 		appsRepository := config.AppsRepository
 		if appsRepository != "" {
-			appsRepository += "/"
+			appsRepository = strings.Trim(appsRepository, "/") + "/"
 		}
 
 		appImage = fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
@@ -109,22 +115,10 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.
+//
+// It's not allowed to modify the Job definition outside of suspending it.
 func updateJob(source batchv1.Job, destination *batchv1.Job) bool {
 	updated := false
-
-	containers := destination.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
-		destination.Spec.Template.Spec.Containers = source.Spec.Template.Spec.Containers
-		updated = true
-	}
-
-	// I'm unsure if being able to modify the version is actually a good idea.
-	// --Y
-	appImage := source.Spec.Template.Spec.Containers[0].Image
-	if destination.Spec.Template.Spec.Containers[0].Image != appImage {
-		destination.Spec.Template.Spec.Containers[0].Image = appImage
-		updated = true
-	}
 
 	suspend := source.Spec.Suspend
 	if suspend != nil && (destination.Spec.Suspend == nil || *destination.Spec.Suspend != *suspend) {
