@@ -16,6 +16,7 @@ import (
 func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) batchv1.Job {
 	job := batchv1.Job{}
 
+	// The name of the app is there for human consumption.
 	job.Name = fmt.Sprintf("%s-%d-%s", workbench.Name, index, app.Name)
 	job.Namespace = workbench.Namespace
 
@@ -129,17 +130,39 @@ func updateJob(source batchv1.Job, destination *batchv1.Job) bool {
 	return updated
 }
 
-func (r *WorkbenchReconciler) deleteJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
-	log := log.FromContext(ctx)
-
-	// Find all the jobs linked with the workbench.
+func (r *WorkbenchReconciler) findJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (*batchv1.JobList, error) {
 	jobList := batchv1.JobList{}
 
 	err := r.List(
 		ctx,
 		&jobList,
-		client.MatchingLabels{matchingLabel: workbench.Name},
+		client.MatchingLabels{
+			matchingLabel: workbench.Name,
+		},
 	)
+
+	return &jobList, err
+}
+
+// Delete the given job.
+func (r *WorkbenchReconciler) deleteJob(ctx context.Context, job *batchv1.Job) error {
+	log := log.FromContext(ctx)
+
+	log.V(1).Info("Delete a job", "job", job.Name)
+
+	return r.Delete(
+		ctx,
+		job,
+		client.PropagationPolicy("Background"),
+	)
+}
+
+// Delete all the jobs of the given workbench.
+func (r *WorkbenchReconciler) deleteJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
+	log := log.FromContext(ctx)
+
+	// Find all the jobs linked with the workbench.
+	jobList, err := r.findJobs(ctx, workbench)
 	if err != nil {
 		return 0, err
 	}
