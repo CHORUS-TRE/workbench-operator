@@ -1,7 +1,7 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "workbench-operator.fullname" . }}-controller-manager-metrics-monitor
+  name: {{ include "workbench-operator.fullname" . }}-metrics-monitor
   labels:
     control-plane: controller-manager
   {{- include "workbench-operator.labels" . | nindent 4 }}
