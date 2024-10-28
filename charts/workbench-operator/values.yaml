@@ -30,3 +30,10 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+metricsService:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  type: ClusterIP
