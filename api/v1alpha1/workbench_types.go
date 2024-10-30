@@ -35,6 +35,9 @@ type WorkbenchServer struct {
 	Version string `json:"version,omitempty"`
 
 	// TODO: add anything you'd like to configure. E.g. resources, Xpra options, auth, etc.
+
+	// Wallpaper lets you define a wallpaper to download (at first run) and use.
+	Wallpaper string `json:"wallpaper,omitempty"`
 }
 
 // Image represents the configuration of a custom image for an app.
