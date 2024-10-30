@@ -13,8 +13,8 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) batchv1.Job {
-	job := batchv1.Job{}
+func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
+	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
 	job.Name = fmt.Sprintf("%s-%d-%s", workbench.Name, index, app.Name)
@@ -25,6 +25,21 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 	}
 
 	job.Labels = labels
+
+	var shmDir *corev1.Volume
+	if app.ShmSize != nil {
+		shmDir = &corev1.Volume{
+			Name: "shm",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium:    "Memory",
+					SizeLimit: app.ShmSize,
+				},
+			},
+		}
+
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
+	}
 
 	// The pod will be cleaned up after a day.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
@@ -81,6 +96,14 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 				Value: fmt.Sprintf("%s.%s:80", service.Name, service.Namespace), // FIXME: 80 from 6080
 			},
 		},
+	}
+
+	// Mounting the /dev/shm volume.
+	if shmDir != nil {
+		appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
+			Name:      shmDir.Name,
+			MountPath: "/dev/shm",
+		})
 	}
 
 	job.Spec.Template.Spec.Containers = []corev1.Container{
