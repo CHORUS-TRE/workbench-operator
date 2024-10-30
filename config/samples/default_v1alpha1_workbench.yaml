@@ -7,10 +7,11 @@ metadata:
   name: workbench-sample
 spec:
   server:
-    version: "6.1.2-1"
+    version: "6.2.1-1"
   apps:
-    - name: wezterm
-      version: "0.0.1"
+    - name: jupyterlab
+      version: "4.2.5-1"
+      shmSize: 1Gi
     - name: wezterm
       version: "0.0.1"
       state: Stopped

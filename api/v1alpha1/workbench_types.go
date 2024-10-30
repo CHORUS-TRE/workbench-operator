@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -78,6 +79,10 @@ type WorkbenchApp struct {
 	// Image overwrites the default image built using the default registry, name, and version.
 	// +optional
 	Image *Image `json:"image,omitempty"`
+
+	// ShmSize defines the size of the required extra /dev/shm space.
+	// +optional
+	ShmSize *resource.Quantity `json:"shmSize,omitempty"`
 
 	// TODO: add anything you'd like to configure. E.g. resources, (App data) volume, etc.
 }

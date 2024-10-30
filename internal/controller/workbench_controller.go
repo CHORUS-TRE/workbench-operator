@@ -185,14 +185,14 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		// Link the service with the Workbench resource such that we can reconcile it
 		// when it's being changed.
-		if err := controllerutil.SetControllerReference(&workbench, &job, r.Scheme); err != nil {
+		if err := controllerutil.SetControllerReference(&workbench, job, r.Scheme); err != nil {
 			log.V(1).Error(err, "Error setting the reference", "job", job.Name)
 			return ctrl.Result{}, err
 		}
 
 		// FIXME: it will create a job even if its state is "Stopped".
 
-		foundJob, err := r.createJob(ctx, job)
+		foundJob, err := r.createJob(ctx, *job)
 		if err != nil {
 			log.V(1).Error(err, "Error creating the job", "job", job.Name)
 
@@ -218,7 +218,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		updated := updateJob(job, foundJob)
+		updated := updateJob(*job, foundJob)
 
 		if updated {
 			log.V(1).Info("Updating Job", "job", job.Name)
