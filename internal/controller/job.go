@@ -7,14 +7,13 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) (*batchv1.Job, error) {
+func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
 	job := &batchv1.Job{}
 
 	job.Name = fmt.Sprintf("%s-%d-%s", workbench.Name, index, app.Name)
@@ -26,21 +25,20 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 
 	job.Labels = labels
 
-	sizeLimit, err := resource.ParseQuantity("2Gi")
-	if err != nil {
-		return nil, err
-	}
-
-	shmDir := corev1.Volume{
-		Name: "shm",
-		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{
-				Medium:    "Memory",
-				SizeLimit: &sizeLimit,
+	var shmDir *corev1.Volume
+	if app.ShmSize != nil {
+		shmDir = &corev1.Volume{
+			Name: "shm",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium:    "Memory",
+					SizeLimit: app.ShmSize,
+				},
 			},
-		},
+		}
+
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
 	}
-	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, shmDir)
 
 	// The pod will be cleaned up after a day.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
@@ -97,12 +95,14 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 				Value: fmt.Sprintf("%s.%s:80", service.Name, service.Namespace), // FIXME: 80 from 6080
 			},
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "shm",
-				MountPath: "/dev/shm",
-			},
-		},
+	}
+
+	// Mounting the /dev/shm volume.
+	if shmDir != nil {
+		appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
+			Name:      shmDir.Name,
+			MountPath: "/dev/shm",
+		})
 	}
 
 	job.Spec.Template.Spec.Containers = []corev1.Container{
@@ -134,7 +134,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		job.Spec.Suspend = &fal
 	}
 
-	return job, nil
+	return job
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.

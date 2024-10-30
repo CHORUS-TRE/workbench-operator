@@ -181,10 +181,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// ---------- APPS ---------------
 
 	for index, app := range workbench.Spec.Apps {
-		job, err := initJob(workbench, r.Config, index, app, service)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+		job := initJob(workbench, r.Config, index, app, service)
 
 		// Link the service with the Workbench resource such that we can reconcile it
 		// when it's being changed.
