@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -96,8 +97,12 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify that a deployment exists.
+			deploymentNamespacedName := types.NamespacedName{
+				Name:      fmt.Sprintf("%s-server", typeNamespacedName.Name),
+				Namespace: typeNamespacedName.Namespace,
+			}
 			deployment := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, typeNamespacedName, deployment)
+			err = k8sClient.Get(ctx, deploymentNamespacedName, deployment)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Two secrets were defined to pull the images.
