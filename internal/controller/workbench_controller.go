@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -37,11 +38,11 @@ const matchingLabel = "workbench"
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services/status,verbs=get
-// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
@@ -180,28 +181,31 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// ---------- APPS ---------------
 
-	for index, app := range workbench.Spec.Apps {
-		app := app
+	// List of jobs that were either found or created, the others will be deleted.
+	foundJobNames := []string{}
 
+	for index, app := range workbench.Spec.Apps {
 		job := initJob(workbench, r.Config, index, app, service)
 
 		// Link the service with the Workbench resource such that we can reconcile it
 		// when it's being changed.
-		if err := controllerutil.SetControllerReference(&workbench, &job, r.Scheme); err != nil {
+		if err := controllerutil.SetControllerReference(&workbench, job, r.Scheme); err != nil {
 			log.V(1).Error(err, "Error setting the reference", "job", job.Name)
 			return ctrl.Result{}, err
 		}
 
 		// FIXME: it will create a job even if its state is "Stopped".
 
-		foundJob, err := r.createJob(ctx, job)
+		foundJob, err := r.createJob(ctx, *job)
 		if err != nil {
 			log.V(1).Error(err, "Error creating the job", "job", job.Name)
 
 			return ctrl.Result{}, err
 		}
 
-		// Break the loop
+		foundJobNames = append(foundJobNames, job.Name)
+
+		// Break the loop as the job was created.
 		if foundJob == nil {
 			continue
 		}
@@ -220,7 +224,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		updated := updateJob(job, foundJob)
+		updated := updateJob(*job, foundJob)
 
 		if updated {
 			log.V(1).Info("Updating Job", "job", job.Name)
@@ -232,6 +236,26 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				log.V(1).Error(err2, "Unable to update the job", "job", job.Name)
 				return ctrl.Result{}, err2
 			}
+		}
+	}
+
+	allJobs, err := r.findJobs(ctx, workbench)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Sorting the job names to leverage the binary search.
+	// It's a small list anyway.
+	slices.Sort(foundJobNames)
+	for _, job := range allJobs.Items {
+		_, found := slices.BinarySearch(foundJobNames, job.Name)
+		if found {
+			continue
+		}
+
+		log.V(1).Info("Extra job found, removing", "job", job.Name)
+		if err := r.deleteJob(ctx, &job); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -9,6 +10,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -37,10 +39,25 @@ var _ = Describe("Workbench Controller", func() {
 
 		workbench.Spec.ServiceAccount = "service-account"
 
+		oneGig := resource.MustParse("1Gi")
 		workbench.Spec.Apps = []defaultv1alpha1.WorkbenchApp{
 			{
 				Name: "wezterm",
 			},
+			{
+				Name: "kitty",
+				Image: &defaultv1alpha1.Image{
+					Registry:   "quay.io",
+					Repository: "kitty/kitty",
+					Tag:        "1.2.0",
+				},
+				ShmSize: &oneGig,
+			},
+		}
+
+		workbench.Spec.ImagePullSecrets = []string{
+			"secret-1",
+			"secret-2",
 		}
 
 		BeforeEach(func() {
@@ -68,11 +85,9 @@ var _ = Describe("Workbench Controller", func() {
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(3),
 				Config: Config{
-					Registry: "my-registry",
-					ImagePullSecrets: []string{
-						"secret-1",
-						"secret-2",
-					},
+					Registry:        "my-registry",
+					AppsRepository:  "applications",
+					XpraServerImage: "my-registry/server/xpra-server",
 				},
 			}
 
@@ -82,8 +97,12 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify that a deployment exists.
+			deploymentNamespacedName := types.NamespacedName{
+				Name:      fmt.Sprintf("%s-server", typeNamespacedName.Name),
+				Namespace: typeNamespacedName.Namespace,
+			}
 			deployment := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, typeNamespacedName, deployment)
+			err = k8sClient.Get(ctx, deploymentNamespacedName, deployment)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Two secrets were defined to pull the images.
@@ -92,7 +111,7 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
 			Expect(deployment.Spec.Template.Spec.InitContainers).To(HaveLen(1))
 
-			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
+			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/server/"))
 			Expect(deployment.Spec.Template.Spec.InitContainers[0].Image).To(HavePrefix("alpine/socat:"))
 
 			Expect(deployment.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
@@ -102,7 +121,7 @@ var _ = Describe("Workbench Controller", func() {
 			err = k8sClient.Get(ctx, typeNamespacedName, service)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify that a job exists
+			// Verify that the jobs exist
 			job := &batchv1.Job{}
 			jobNamespacedName := types.NamespacedName{
 				Name:      resourceName + "-0-wezterm",
@@ -111,14 +130,33 @@ var _ = Describe("Workbench Controller", func() {
 			err = k8sClient.Get(ctx, jobNamespacedName, job)
 			Expect(err).NotTo(HaveOccurred())
 
+			job1 := &batchv1.Job{}
+			jobNamespacedName = types.NamespacedName{
+				Name:      resourceName + "-1-kitty",
+				Namespace: "default", // TODO(user):Modify as needed
+			}
+			err = k8sClient.Get(ctx, jobNamespacedName, job1)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(job.Spec.TTLSecondsAfterFinished).To(HaveValue(Equal(int32(86400))))
+
 			// Two secrets were defined to pull the images.
 			Expect(job.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
+			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(0))
 
-			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/"))
+			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/applications/"))
+			Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(0))
 
 			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
+
+			Expect(job1.Spec.Template.Spec.Containers).To(HaveLen(1))
+			Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(1))
+
+			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
+			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
+			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
 		})
 	})
 })

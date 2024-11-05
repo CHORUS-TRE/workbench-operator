@@ -1,18 +1,21 @@
 controllerManager:
   manager:
     args:
-    - --leader-elect
-    - --health-probe-bind-address=:8081
-    - --registry=registry.build.chorus-tre.ch
-    - --image-pull-secret=regcred
+      - --metrics-bind-address=:8080
+      - --leader-elect
+      - --health-probe-bind-address=:8081
+      - --registry=registry.build.chorus-tre.ch
+      - --apps-repository=apps
+      - --xpra-server-image=registry.build.chorus-tre.ch/apps/xpra-server
+      - --socat-image=alpine/socat:1.8.0.0
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop:
-        - ALL
+          - ALL
     image:
-      repository: registry.build.chorus-tre.ch/workbench-operator
-      tag: 0.0.1.a0
+      repository: registry.chorus-tre.local/chorus/workbench-operator
+      tag: 0.3.0
     resources:
       limits:
         cpu: 500m
@@ -20,7 +23,17 @@ controllerManager:
       requests:
         cpu: 10m
         memory: 64Mi
+  podSecurityContext:
+    runAsNonRoot: true
   replicas: 1
   serviceAccount:
     annotations: {}
+imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+metricsService:
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  type: ClusterIP

@@ -21,7 +21,7 @@ import (
 // and shiny TCP listener, on port 6080.
 func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.Deployment {
 	deployment := appsv1.Deployment{}
-	deployment.Name = workbench.Name
+	deployment.Name = fmt.Sprintf("%s-server", workbench.Name)
 	deployment.Namespace = workbench.Namespace
 
 	// Labels
@@ -57,7 +57,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 
 	deployment.Spec.Template.Spec.Volumes = []corev1.Volume{volume}
 
-	for _, imagePullSecret := range config.ImagePullSecrets {
+	for _, imagePullSecret := range workbench.Spec.ImagePullSecrets {
 		deployment.Spec.Template.Spec.ImagePullSecrets = append(deployment.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecret,
 		})
@@ -100,19 +100,23 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	// Non-empty registry requires a / to concatenate with the Xpra server one.
 	registry := config.Registry
 	if registry != "" {
-		registry += "/"
+		registry = strings.TrimRight(registry, "/") + "/"
+	}
+
+	appsRepository := config.AppsRepository
+	if appsRepository != "" {
+		appsRepository = strings.Trim(appsRepository, "/") + "/"
 	}
 
 	// Done by the defaulter webhook.
 	serverVersion := workbench.Spec.Server.Version
 	if serverVersion == "" {
-		serverVersion = "latest"
+		serverVersion = "latest" // nolint:goconst
 	}
 
-	// FIXME: allow to configure Xpra server image.
 	xpraServerImage := config.XpraServerImage
 	if xpraServerImage == "" {
-		xpraServerImage = fmt.Sprintf("%s%s", registry, "xpra-server")
+		xpraServerImage = fmt.Sprintf("%s%s%s", registry, appsRepository, "xpra-server")
 	}
 
 	serverImage := fmt.Sprintf("%s:%s", xpraServerImage, serverVersion)

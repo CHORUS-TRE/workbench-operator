@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -12,9 +13,10 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) batchv1.Job {
-	job := batchv1.Job{}
+func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
+	job := &batchv1.Job{}
 
+	// The name of the app is there for human consumption.
 	job.Name = fmt.Sprintf("%s-%d-%s", workbench.Name, index, app.Name)
 	job.Namespace = workbench.Namespace
 
@@ -24,29 +26,70 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 
 	job.Labels = labels
 
+	var shmDir *corev1.Volume
+	if app.ShmSize != nil {
+		shmDir = &corev1.Volume{
+			Name: "shm",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{
+					Medium:    "Memory",
+					SizeLimit: app.ShmSize,
+				},
+			},
+		}
+
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
+	}
+
+	// The pod will be cleaned up after a day.
+	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
+	oneDay := int32(24 * 3600)
+	job.Spec.TTLSecondsAfterFinished = &oneDay
+
 	// Service account is an alternative to the image Pull Secrets
 	serviceAccountName := workbench.Spec.ServiceAccount
 	if serviceAccountName != "" {
 		job.Spec.Template.Spec.ServiceAccountName = serviceAccountName
 	}
 
-	// Fix empty version
-	appVersion := app.Version
-	if appVersion == "" {
-		appVersion = "latest"
+	var appImage string
+	imagePullPolicy := corev1.PullIfNotPresent
+
+	if app.Image == nil {
+		// Fix empty version
+		appVersion := app.Version
+		if appVersion == "" {
+			appVersion = "latest"
+			imagePullPolicy = corev1.PullAlways
+		}
+
+		// Non-empty registry requires a / to concatenate with the app one.
+		registry := config.Registry
+		if registry != "" {
+			registry = strings.TrimRight(registry, "/") + "/"
+		}
+
+		appsRepository := config.AppsRepository
+		if appsRepository != "" {
+			appsRepository = strings.Trim(appsRepository, "/") + "/"
+		}
+
+		appImage = fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
+	} else {
+		// Fix empty version
+		appVersion := app.Image.Tag
+		if appVersion == "" {
+			appVersion = "latest"
+			imagePullPolicy = corev1.PullAlways
+		}
+
+		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
 	}
 
-	// Non-empty registry requires a slash (/) to concatenate with the Xpra server one.
-	registry := config.Registry
-	if registry != "" {
-		registry += "/"
-	}
-
-	appImage := fmt.Sprintf("%s%s:%s", registry, app.Name, appVersion)
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
-		ImagePullPolicy: "IfNotPresent",
+		ImagePullPolicy: imagePullPolicy,
 		Env: []corev1.EnvVar{
 			{
 				Name:  "DISPLAY",
@@ -55,11 +98,19 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		},
 	}
 
+	// Mounting the /dev/shm volume.
+	if shmDir != nil {
+		appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
+			Name:      shmDir.Name,
+			MountPath: "/dev/shm",
+		})
+	}
+
 	job.Spec.Template.Spec.Containers = []corev1.Container{
 		appContainer,
 	}
 
-	for _, imagePullSecret := range config.ImagePullSecrets {
+	for _, imagePullSecret := range workbench.Spec.ImagePullSecrets {
 		job.Spec.Template.Spec.ImagePullSecrets = append(job.Spec.Template.Spec.ImagePullSecrets, corev1.LocalObjectReference{
 			Name: imagePullSecret,
 		})
@@ -88,22 +139,10 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.
+//
+// It's not allowed to modify the Job definition outside of suspending it.
 func updateJob(source batchv1.Job, destination *batchv1.Job) bool {
 	updated := false
-
-	containers := destination.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
-		destination.Spec.Template.Spec.Containers = source.Spec.Template.Spec.Containers
-		updated = true
-	}
-
-	// I'm unsure if being able to modify the version is actually a good idea.
-	// --Y
-	appImage := source.Spec.Template.Spec.Containers[0].Image
-	if destination.Spec.Template.Spec.Containers[0].Image != appImage {
-		destination.Spec.Template.Spec.Containers[0].Image = appImage
-		updated = true
-	}
 
 	suspend := source.Spec.Suspend
 	if suspend != nil && (destination.Spec.Suspend == nil || *destination.Spec.Suspend != *suspend) {
@@ -114,17 +153,39 @@ func updateJob(source batchv1.Job, destination *batchv1.Job) bool {
 	return updated
 }
 
-func (r *WorkbenchReconciler) deleteJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
-	log := log.FromContext(ctx)
-
-	// Find all the jobs linked with the workbench.
+func (r *WorkbenchReconciler) findJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (*batchv1.JobList, error) {
 	jobList := batchv1.JobList{}
 
 	err := r.List(
 		ctx,
 		&jobList,
-		client.MatchingLabels{matchingLabel: workbench.Name},
+		client.MatchingLabels{
+			matchingLabel: workbench.Name,
+		},
 	)
+
+	return &jobList, err
+}
+
+// Delete the given job.
+func (r *WorkbenchReconciler) deleteJob(ctx context.Context, job *batchv1.Job) error {
+	log := log.FromContext(ctx)
+
+	log.V(1).Info("Delete a job", "job", job.Name)
+
+	return r.Delete(
+		ctx,
+		job,
+		client.PropagationPolicy("Background"),
+	)
+}
+
+// Delete all the jobs of the given workbench.
+func (r *WorkbenchReconciler) deleteJobs(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
+	log := log.FromContext(ctx)
+
+	// Find all the jobs linked with the workbench.
+	jobList, err := r.findJobs(ctx, workbench)
 	if err != nil {
 		return 0, err
 	}
