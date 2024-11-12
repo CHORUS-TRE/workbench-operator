@@ -1,21 +1,22 @@
 controllerManager:
   manager:
     args:
-      - --metrics-bind-address=:8080
-      - --leader-elect
-      - --health-probe-bind-address=:8081
-      - --registry=registry.build.chorus-tre.ch
-      - --apps-repository=apps
-      - --xpra-server-image=registry.build.chorus-tre.ch/apps/xpra-server
-      - --socat-image=alpine/socat:1.8.0.0
+    - --metrics-bind-address=:8080
+    - --leader-elect
+    - --health-probe-bind-address=:8081
+    - --registry=registry.build.chorus-tre.ch
+    - --apps-repository=apps
+    - --xpra-server-image=registry.build.chorus-tre.ch/apps/xpra-server
+    - --socat-image=alpine/socat:1.8.0.0
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
         drop:
-          - ALL
+        - ALL
     image:
       repository: registry.chorus-tre.local/chorus/workbench-operator
       tag: 0.3.0
+    imagePullPolicy: IfNotPresent
     resources:
       limits:
         cpu: 500m
@@ -32,8 +33,14 @@ imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
 metricsService:
   ports:
-    - name: http
-      port: 8080
-      protocol: TCP
-      targetPort: 8080
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  type: ClusterIP
+webhookService:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
   type: ClusterIP

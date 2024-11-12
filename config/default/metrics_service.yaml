@@ -5,13 +5,13 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: workbench-operator
     app.kubernetes.io/managed-by: kustomize
-  name: controller-manager-metrics-service
+  name: metrics-service
   namespace: system
 spec:
   ports:
-  - name: http
-    port: 8080
-    protocol: TCP
-    targetPort: 8080
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
   selector:
     control-plane: controller-manager

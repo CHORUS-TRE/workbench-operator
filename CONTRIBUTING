@@ -35,7 +35,16 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 Create the issuer and certificate that will be used by the webhook.
 
 ```bash
-kubectl apply -k config/cert-manager
+kubectl apply -k config/certmanager
+```
+
+### Prometheus Operator CRDs
+
+See: <https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds>
+
+```bash
+helm install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
+    -n default
 ```
 
 ## Build and run
@@ -43,11 +52,20 @@ kubectl apply -k config/cert-manager
 Build and load into Kind the controller.
 
 ```bash
-docker buildx build -t registry.local/controller:v1
+docker buildx build -t controller:v1
 ```
 
 If you're using *kind*, load the image into it.
 
 ```
-kind load docker-image registry.local/controller:v1
+kind load docker-image controller:v1
+```
+
+Run it.
+
+```
+helm upgrade --install workbench-operator charts/workbench-operator \
+    -n workbench-operator-system \
+    --set controllerManager.manager.image.repository=controller \
+    --set controllerManager.manager.image.tag=v1
 ```
