@@ -109,10 +109,13 @@ type WorkbenchSpec struct {
 //
 // It matches the Job Status,
 // See https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/job-v1/#JobStatus
-// +kubebuilder:validation:Enum=Running;Complete;Progressing;Failed
+// +kubebuilder:validation:Enum=Unknown;Running;Complete;Progressing;Failed
 type WorkbenchStatusAppStatus string
 
 const (
+	// WorkbenchStatuAppStatusUnknown describe a non-existing app.
+	WorkbenchStatusAppStatusUnknown WorkbenchStatusAppStatus = "Unknown"
+
 	// WorkbenchStatusAppStatusRunning describes a up and running app.
 	WorkbenchStatusAppStatusRunning WorkbenchStatusAppStatus = "Running"
 

@@ -71,9 +71,14 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 //
 // It's not a *best* practice to do so, but it's very convenient.
 func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
-	// Create the missing StatusApp if needed.
-	if len(wb.Status.Apps) < index+1 {
-		wb.Status.Apps = append(wb.Status.Apps, WorkbenchStatusApp{})
+	// Grow the slice of StatusApps for the new index.
+	for len(wb.Status.Apps) < index+1 {
+		apps := make([]WorkbenchStatusApp, index+1)
+		copy(apps, wb.Status.Apps)
+		wb.Status.Apps = append(wb.Status.Apps, WorkbenchStatusApp{
+			Revision: -1,
+			Status:   WorkbenchStatusAppStatusUnknown,
+		})
 	}
 
 	app := wb.Status.Apps[index]
@@ -83,11 +88,15 @@ func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
 
 	if job.Status.Active == 1 {
 		if job.Status.Ready != nil && *job.Status.Ready >= 1 {
-			status = "Running"
+			status = WorkbenchStatusAppStatusRunning
+		} else {
+			status = WorkbenchStatusAppStatusProgressing
 		}
 	} else {
 		if job.Status.Succeeded >= 1 {
-			status = "Complete"
+			status = WorkbenchStatusAppStatusComplete
+		} else {
+			status = WorkbenchStatusAppStatusFailed
 		}
 	}
 
