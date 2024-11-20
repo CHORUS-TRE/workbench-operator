@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "workbench-operator.fullname" . }}-metrics-service
+  name: {{ include "workbench-operator.fullname" . }}-controller-manager-metrics-service
   labels:
     control-plane: controller-manager
-    {{- include "workbench-operator.labels" . | nindent 4 }}
+  {{- include "workbench-operator.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.metricsService.type }}
   selector:
