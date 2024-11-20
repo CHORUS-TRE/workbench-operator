@@ -82,6 +82,14 @@ spec:
                       minLength: 1
                       pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
                       type: string
+                    shmSize:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      description: ShmSize defines the size of the required extra /dev/shm
+                        space.
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
                     state:
                       default: Running
                       description: |-
