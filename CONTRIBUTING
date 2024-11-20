@@ -52,7 +52,7 @@ helm install prometheus-operator-crds prometheus-community/prometheus-operator-c
 Build and load into Kind the controller.
 
 ```bash
-docker buildx build -t controller:v1
+docker buildx build -t controller:v1 .
 ```
 
 If you're using *kind*, load the image into it.
