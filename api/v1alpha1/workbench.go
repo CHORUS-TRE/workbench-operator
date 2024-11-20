@@ -73,8 +73,6 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
 	// Grow the slice of StatusApps for the new index.
 	for len(wb.Status.Apps) < index+1 {
-		apps := make([]WorkbenchStatusApp, index+1)
-		copy(apps, wb.Status.Apps)
 		wb.Status.Apps = append(wb.Status.Apps, WorkbenchStatusApp{
 			Revision: -1,
 			Status:   WorkbenchStatusAppStatusUnknown,
