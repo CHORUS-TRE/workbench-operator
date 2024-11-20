@@ -148,6 +148,7 @@ spec:
                     status:
                       description: Status informs about the real state of the app.
                       enum:
+                      - Unknown
                       - Running
                       - Complete
                       - Progressing
