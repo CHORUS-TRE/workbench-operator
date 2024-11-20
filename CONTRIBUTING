@@ -32,12 +32,6 @@ See: <https://cert-manager.io/docs/installation/>
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.yaml
 ```
 
-Create the issuer and certificate that will be used by the webhook.
-
-```bash
-kubectl apply -k config/certmanager
-```
-
 ### Prometheus Operator CRDs
 
 See: <https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds>
@@ -48,6 +42,12 @@ helm install prometheus-operator-crds prometheus-community/prometheus-operator-c
 ```
 
 ## Build and run
+
+Install the CRDs.
+
+```bash
+make install
+```
 
 Build and load into Kind the controller.
 
@@ -69,3 +69,5 @@ helm upgrade --install workbench-operator charts/workbench-operator \
     --set controllerManager.manager.image.repository=controller \
     --set controllerManager.manager.image.tag=v1
 ```
+
+You'll likely iterate the above command with only bump the version number.

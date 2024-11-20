@@ -12,6 +12,6 @@ spec:
     - name: jupyterlab
       version: "4.2.5-1"
       shmSize: 1Gi
-    - name: wezterm
-      version: "0.0.1"
       state: Stopped
+    - name: sciterminal
+      version: "20241018-1"
