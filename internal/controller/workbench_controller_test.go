@@ -53,6 +53,10 @@ var _ = Describe("Workbench Controller", func() {
 				},
 				ShmSize: &oneGig,
 			},
+			{
+				Name:  "alacritty",
+				State: "Stopped",
+			},
 		}
 
 		workbench.Spec.ImagePullSecrets = []string{
