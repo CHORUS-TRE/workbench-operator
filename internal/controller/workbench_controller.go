@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -9,7 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -35,6 +36,8 @@ const finalizer = "default.k8s.chorus-tre.ch/finalizer"
 // matchingLabel is used to catch all the apps of a workbench.
 const matchingLabel = "workbench"
 
+var ErrSuspendedJob = errors.New("suspended job")
+
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/finalizers,verbs=update
@@ -57,7 +60,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	workbench := defaultv1alpha1.Workbench{}
 	if err := r.Get(ctx, req.NamespacedName, &workbench); err != nil {
 		// Not found means it's been deleted.
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to fetch the workbench")
 		}
 
@@ -194,10 +197,13 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		// FIXME: it will create a job even if its state is "Stopped".
-
 		foundJob, err := r.createJob(ctx, *job)
 		if err != nil {
+			// Break the loop as nothing shall be created.
+			if errors.Is(err, ErrSuspendedJob) {
+				continue
+			}
+
 			log.V(1).Error(err, "Error creating the job", "job", job.Name)
 
 			return ctrl.Result{}, err
@@ -300,7 +306,7 @@ func (r *WorkbenchReconciler) createDeployment(ctx context.Context, deployment a
 	foundDeployment := appsv1.Deployment{}
 	err := r.Get(ctx, deploymentNamespacedName, &foundDeployment)
 	if err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			log.V(1).Error(err, "Deployment is not (not) found.")
 			return nil, err
 		}
@@ -333,7 +339,7 @@ func (r *WorkbenchReconciler) createService(ctx context.Context, service corev1.
 
 	err := r.Get(ctx, serviceNamespacedName, &foundService)
 	if err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			log.V(1).Error(err, "Service is not (not) found.")
 
 			return err
@@ -359,10 +365,17 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 	foundJob := batchv1.Job{}
 	err := r.Get(ctx, jobNamespacedName, &foundJob)
 	if err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			log.V(1).Error(err, "Job is not (not) found.", "job", job.Name)
 
 			return &foundJob, err
+		}
+
+		// Do no create a job in the suspended state. It's a feature to have things in the
+		// Workbench definitions that do not exist yet.
+		if job.Spec.Suspend != nil && *job.Spec.Suspend == true {
+			log.V(1).Info("Skip suspended job", "job", job.Name)
+			return nil, fmt.Errorf("skipping job %q: %w", job.Name, ErrSuspendedJob)
 		}
 
 		log.V(1).Info("New job", "job", job.Name)
