@@ -129,6 +129,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
 		os.Exit(1)
 	}
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = (&defaultv1alpha1.Workbench{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "Workbench")
+			os.Exit(1)
+		}
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

@@ -1,0 +1,73 @@
+# Setup with Kind
+
+Kind allows to properly run the webhooks.
+
+```bash
+kind create cluster --config hack/kind-config.yaml
+```
+
+## Dependencies
+
+### Namespace
+
+```bash
+kubectl create ns workbench-operator-system
+```
+
+### Ingress-nginx
+
+See: <https://kubernetes.github.io/ingress-nginx/deploy/>
+
+```bash
+helm upgrade --install ingress-nginx ingress-nginx \
+             --repo https://kubernetes.github.io/ingress-nginx \
+             --namespace ingress-nginx --create-namespace
+```
+
+### Cert-manager
+
+See: <https://cert-manager.io/docs/installation/>
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.yaml
+```
+
+### Prometheus Operator CRDs
+
+See: <https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds>
+
+```bash
+helm install prometheus-operator-crds prometheus-community/prometheus-operator-crds \
+    -n default
+```
+
+## Build and run
+
+Install the CRDs.
+
+```bash
+make install
+```
+
+Build and load into Kind the controller.
+
+```bash
+docker buildx build -t controller:v1 .
+```
+
+If you're using *kind*, load the image into it.
+
+```
+kind load docker-image controller:v1
+```
+
+Run it.
+
+```
+helm upgrade --install workbench-operator charts/workbench-operator \
+    -n workbench-operator-system \
+    --set controllerManager.manager.image.repository=controller \
+    --set controllerManager.manager.image.tag=v1
+```
+
+You'll likely iterate the above command with only bump the version number.

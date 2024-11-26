@@ -1,0 +1,29 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "workbench-operator.fullname" . }}-validating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "workbench-operator.fullname" . }}-serving-cert
+  labels:
+  {{- include "workbench-operator.labels" . | nindent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "workbench-operator.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-default-chorus-tre-ch-v1alpha1-workbench
+  failurePolicy: Fail
+  name: vworkbench.kb.io
+  rules:
+  - apiGroups:
+    - default.chorus-tre.ch
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - workbenches
+  sideEffects: None
