@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -84,7 +85,10 @@ type WorkbenchApp struct {
 	// +optional
 	ShmSize *resource.Quantity `json:"shmSize,omitempty"`
 
-	// TODO: add anything you'd like to configure. E.g. resources, (App data) volume, etc.
+	// Resources describes the compute resource requirements.
+	// +optional
+	// Add anything you'd like to configure. E.g. resources, (App data) volume, etc.
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // WorkbenchSpec defines the desired state of Workbench
