@@ -7,6 +7,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -86,16 +87,36 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
 	}
 
+	// Define default resources
+	defaultResources := corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("750m"),
+			corev1.ResourceMemory:           resource.MustParse("768Mi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
+		},
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:              resource.MustParse("500m"),
+			corev1.ResourceMemory:           resource.MustParse("512Mi"),
+			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+		},
+	}
+
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
 		ImagePullPolicy: imagePullPolicy,
+		Resources:       defaultResources, // Set default resources
 		Env: []corev1.EnvVar{
 			{
 				Name:  "DISPLAY",
 				Value: fmt.Sprintf("%s.%s:80", service.Name, service.Namespace), // FIXME: 80 from 6080
 			},
 		},
+	}
+
+	// Override with custom resources if specified
+	if app.Resources != nil {
+		appContainer.Resources = *app.Resources
 	}
 
 	// Mounting the /dev/shm volume.
