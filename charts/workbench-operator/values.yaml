@@ -4,9 +4,9 @@ controllerManager:
     - --metrics-bind-address=:8080
     - --leader-elect
     - --health-probe-bind-address=:8081
-    - --registry=registry.build.chorus-tre.ch
+    - --registry=harbor.build.chorus-tre.local
     - --apps-repository=apps
-    - --xpra-server-image=registry.build.chorus-tre.ch/apps/xpra-server
+    - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
     - --socat-image=alpine/socat:1.8.0.0
     containerSecurityContext:
       allowPrivilegeEscalation: false
@@ -14,8 +14,8 @@ controllerManager:
         drop:
         - ALL
     image:
-      repository: registry.chorus-tre.local/chorus/workbench-operator
-      tag: 0.3.0
+      repository: harbor.chorus-tre.local/chorus/workbench-operator
+      tag: 0.3.4
     resources:
       limits:
         cpu: 500m

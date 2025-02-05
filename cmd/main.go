@@ -55,7 +55,7 @@ func main() {
 		"If set the metrics endpoint is served securely")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&registry, "registry", "registry.build.chorus-tre.local", "The hostname of the OCI registry")
+	flag.StringVar(&registry, "registry", "harbor.build.chorus-tre.local", "The hostname of the OCI registry")
 	flag.StringVar(&appsRepository, "apps-repository", "apps", "The repository holding the apps")
 	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")

@@ -4,5 +4,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
   - name: controller
-    newName: registry.chorus-tre.local/chorus/workbench-operator
-    newTag: 0.3.0
+    newName: harbor.chorus-tre.local/chorus/workbench-operator
+    newTag: 0.3.4
