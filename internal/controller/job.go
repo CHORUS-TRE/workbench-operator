@@ -14,6 +14,20 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
+// Default resource requirements for workbench applications
+var defaultResources = corev1.ResourceRequirements{
+	Limits: corev1.ResourceList{
+		corev1.ResourceCPU:              resource.MustParse("750m"),
+		corev1.ResourceMemory:           resource.MustParse("768Mi"),
+		corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
+	},
+	Requests: corev1.ResourceList{
+		corev1.ResourceCPU:              resource.MustParse("500m"),
+		corev1.ResourceMemory:           resource.MustParse("512Mi"),
+		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+	},
+}
+
 func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
 	job := &batchv1.Job{}
 
@@ -85,20 +99,6 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		}
 
 		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
-	}
-
-	// Define default resources
-	defaultResources := corev1.ResourceRequirements{
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:              resource.MustParse("750m"),
-			corev1.ResourceMemory:           resource.MustParse("768Mi"),
-			corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
-		},
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:              resource.MustParse("500m"),
-			corev1.ResourceMemory:           resource.MustParse("512Mi"),
-			corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
-		},
 	}
 
 	appContainer := corev1.Container{
