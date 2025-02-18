@@ -80,7 +80,7 @@ spec:
                       properties:
                         url:
                           description: URL to load in the kiosk browser
-                          pattern: ^https?://.*
+                          pattern: ^https://.*
                           type: string
                       required:
                       - url

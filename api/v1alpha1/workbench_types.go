@@ -55,7 +55,7 @@ type Image struct {
 // KioskConfig defines configuration specific to kiosk mode applications
 type KioskConfig struct {
 	// URL to load in the kiosk browser
-	// +kubebuilder:validation:Pattern=`^https?://.*`
+	// +kubebuilder:validation:Pattern=`^https://.*`
 	URL string `json:"url"`
 }
 
