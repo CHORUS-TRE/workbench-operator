@@ -114,6 +114,14 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app 
 		},
 	}
 
+	// Add kiosk configuration if this is a kiosk app and has kiosk config
+	if app.Name == "kiosk" && app.KioskConfig != nil {
+		appContainer.Env = append(appContainer.Env, corev1.EnvVar{
+			Name:  "KIOSK_URL",
+			Value: app.KioskConfig.URL,
+		})
+	}
+
 	// Override with custom resources if specified
 	if app.Resources != nil {
 		appContainer.Resources = *app.Resources

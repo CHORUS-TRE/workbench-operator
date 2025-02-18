@@ -52,6 +52,13 @@ type Image struct {
 	Tag string `json:"tag,omitempty"`
 }
 
+// KioskConfig defines configuration specific to kiosk mode applications
+type KioskConfig struct {
+	// URL to load in the kiosk browser
+	// +kubebuilder:validation:Pattern=`^https://.*`
+	URL string `json:"url"`
+}
+
 // WorkbenchApp defines one application running in the workbench.
 type WorkbenchApp struct {
 	// Name is the application name (likely its OCI image name as well)
@@ -89,6 +96,10 @@ type WorkbenchApp struct {
 	// +optional
 	// Add anything you'd like to configure. E.g. resources, (App data) volume, etc.
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// KioskConfig holds kiosk-specific configuration
+	// +optional
+	KioskConfig *KioskConfig `json:"kioskConfig,omitempty"`
 }
 
 // WorkbenchSpec defines the desired state of Workbench

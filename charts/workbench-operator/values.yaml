@@ -14,8 +14,8 @@ controllerManager:
         drop:
         - ALL
     image:
-      repository: harbor.chorus-tre.local/chorus/workbench-operator
-      tag: 0.3.5
+      repository: harbor.build.chorus-tre.local/chorus/workbench-operator
+      tag: 0.3.6
     resources:
       limits:
         cpu: 500m

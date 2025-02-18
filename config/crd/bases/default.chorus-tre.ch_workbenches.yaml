@@ -75,6 +75,16 @@ spec:
                       - registry
                       - repository
                       type: object
+                    kioskConfig:
+                      description: KioskConfig holds kiosk-specific configuration
+                      properties:
+                        url:
+                          description: URL to load in the kiosk browser
+                          pattern: ^https://.*
+                          type: string
+                      required:
+                      - url
+                      type: object
                     name:
                       description: Name is the application name (likely its OCI image
                         name as well)
