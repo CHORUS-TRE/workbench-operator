@@ -18,12 +18,12 @@ import (
 var defaultResources = corev1.ResourceRequirements{
 	Limits: corev1.ResourceList{
 		corev1.ResourceCPU:              resource.MustParse("750m"),
-		corev1.ResourceMemory:           resource.MustParse("768Mi"),
+		corev1.ResourceMemory:           resource.MustParse("1536Mi"),
 		corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
 	},
 	Requests: corev1.ResourceList{
 		corev1.ResourceCPU:              resource.MustParse("500m"),
-		corev1.ResourceMemory:           resource.MustParse("512Mi"),
+		corev1.ResourceMemory:           resource.MustParse("1024Mi"),
 		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 	},
 }
