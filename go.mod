@@ -2,7 +2,7 @@ module github.com/CHORUS-TRE/workbench-operator
 
 go 1.22.0
 
-toolchain go1.23.3
+toolchain go1.24.2
 
 require (
 	github.com/onsi/ginkgo/v2 v2.22.0
