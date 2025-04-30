@@ -187,6 +187,10 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// List of jobs that were either found or created, the others will be deleted.
 	foundJobNames := []string{}
 
+	if workbench.Spec.Apps == nil {
+		workbench.Spec.Apps = make(map[string]defaultv1alpha1.WorkbenchApp)
+	}
+
 	for uid, app := range workbench.Spec.Apps {
 		job := initJob(workbench, r.Config, uid, app, service)
 

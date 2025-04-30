@@ -71,7 +71,11 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 //
 // It's not a *best* practice to do so, but it's very convenient.
 func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
-	// Grow the slice of StatusApps for the new index.
+	if wb.Status.Apps == nil {
+		wb.Status.Apps = make(map[string]WorkbenchStatusApp)
+	}
+
+	// Grow the map of StatusApps for the new entry.
 	if _, ok := wb.Spec.Apps[uid]; !ok {
 		wb.Status.Apps[uid] = WorkbenchStatusApp{
 			Revision: -1,
