@@ -187,8 +187,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// List of jobs that were either found or created, the others will be deleted.
 	foundJobNames := []string{}
 
-	for index, app := range workbench.Spec.Apps {
-		job := initJob(workbench, r.Config, index, app, service)
+	for uid, app := range workbench.Spec.Apps {
+		job := initJob(workbench, r.Config, uid, app, service)
 
 		// Link the service with the Workbench resource such that we can reconcile it
 		// when it's being changed.
@@ -217,7 +217,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
-		statusUpdated := (&workbench).UpdateStatusFromJob(index, *foundJob)
+		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob)
 		if statusUpdated {
 			if err := r.Status().Update(ctx, &workbench); err != nil {
 				log.V(1).Error(err, "Unable to update the WorkbenchStatus")

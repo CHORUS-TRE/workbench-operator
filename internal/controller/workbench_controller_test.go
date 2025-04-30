@@ -40,11 +40,11 @@ var _ = Describe("Workbench Controller", func() {
 		workbench.Spec.ServiceAccount = "service-account"
 
 		oneGig := resource.MustParse("1Gi")
-		workbench.Spec.Apps = []defaultv1alpha1.WorkbenchApp{
-			{
+		workbench.Spec.Apps = map[string]defaultv1alpha1.WorkbenchApp{
+			"uid0": {
 				Name: "wezterm",
 			},
-			{
+			"uid1": {
 				Name: "kitty",
 				Image: &defaultv1alpha1.Image{
 					Registry:   "quay.io",
@@ -53,7 +53,7 @@ var _ = Describe("Workbench Controller", func() {
 				},
 				ShmSize: &oneGig,
 			},
-			{
+			"uid2": {
 				Name:  "alacritty",
 				State: "Stopped",
 			},
@@ -128,7 +128,7 @@ var _ = Describe("Workbench Controller", func() {
 			// Verify that the jobs exist
 			job := &batchv1.Job{}
 			jobNamespacedName := types.NamespacedName{
-				Name:      resourceName + "-0-wezterm",
+				Name:      resourceName + "-uid0-wezterm",
 				Namespace: "default", // TODO(user):Modify as needed
 			}
 			err = k8sClient.Get(ctx, jobNamespacedName, job)
@@ -136,7 +136,7 @@ var _ = Describe("Workbench Controller", func() {
 
 			job1 := &batchv1.Job{}
 			jobNamespacedName = types.NamespacedName{
-				Name:      resourceName + "-1-kitty",
+				Name:      resourceName + "-uid1-kitty",
 				Namespace: "default", // TODO(user):Modify as needed
 			}
 			err = k8sClient.Get(ctx, jobNamespacedName, job1)

@@ -154,9 +154,9 @@ func (in *WorkbenchSpec) DeepCopyInto(out *WorkbenchSpec) {
 	out.Server = in.Server
 	if in.Apps != nil {
 		in, out := &in.Apps, &out.Apps
-		*out = make([]WorkbenchApp, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
+		*out = make(map[string]WorkbenchApp, len(*in))
+		for key, val := range *in {
+			(*out)[key] = *val.DeepCopy()
 		}
 	}
 	if in.ImagePullSecrets != nil {
@@ -182,8 +182,10 @@ func (in *WorkbenchStatus) DeepCopyInto(out *WorkbenchStatus) {
 	out.Server = in.Server
 	if in.Apps != nil {
 		in, out := &in.Apps, &out.Apps
-		*out = make([]WorkbenchStatusApp, len(*in))
-		copy(*out, *in)
+		*out = make(map[string]WorkbenchStatusApp, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
 	}
 }
 
