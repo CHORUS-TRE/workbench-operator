@@ -107,7 +107,7 @@ type WorkbenchSpec struct {
 	// Server represents the configuration of the server part.
 	// +optional
 	Server WorkbenchServer `json:"server,omitempty"`
-	// Apps represent a list of applications any their state
+	// Apps represent a map of applications any their state
 	// +optional
 	Apps map[string]WorkbenchApp `json:"apps,omitempty"`
 	// Service Account to be used by the pods.
