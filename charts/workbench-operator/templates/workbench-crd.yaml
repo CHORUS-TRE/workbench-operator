@@ -53,11 +53,12 @@ spec:
               apps:
                 description: Apps represent a list of applications any their state
                 items:
-                  description: WorkbenchApp defines one application running in the workbench.
+                  description: WorkbenchApp defines one application running in the
+                    workbench.
                   properties:
                     image:
-                      description: Image overwrites the default image built using the
-                        default registry, name, and version.
+                      description: Image overwrites the default image built using
+                        the default registry, name, and version.
                       properties:
                         registry:
                           description: Registry represents the hostname of the registry.
@@ -157,8 +158,8 @@ spec:
                       anyOf:
                       - type: integer
                       - type: string
-                      description: ShmSize defines the size of the required extra /dev/shm
-                        space.
+                      description: ShmSize defines the size of the required extra
+                        /dev/shm space.
                       pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                       x-kubernetes-int-or-string: true
                     state:
@@ -186,7 +187,8 @@ spec:
                   type: object
                 type: array
               imagePullSecrets:
-                description: ImagePullSecrets is the secret(s) needed to pull the image(s).
+                description: ImagePullSecrets is the secret(s) needed to pull the
+                  image(s).
                 items:
                   minLength: 1
                   type: string
@@ -209,8 +211,8 @@ spec:
             properties:
               apps:
                 items:
-                  description: WorkbenchStatusappStatus informs about the state of the
-                    apps.
+                  description: WorkbenchStatusappStatus informs about the state of
+                    the apps.
                   properties:
                     revision:
                       description: Revision is the values of the "deployment.kubernetes.io/revision"
