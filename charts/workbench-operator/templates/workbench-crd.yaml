@@ -51,8 +51,7 @@ spec:
             description: WorkbenchSpec defines the desired state of Workbench
             properties:
               apps:
-                description: Apps represent a list of applications any their state
-                items:
+                additionalProperties:
                   description: WorkbenchApp defines one application running in the
                     workbench.
                   properties:
@@ -185,7 +184,8 @@ spec:
                   required:
                   - name
                   type: object
-                type: array
+                description: Apps represent a map of applications any their state
+                type: object
               imagePullSecrets:
                 description: ImagePullSecrets is the secret(s) needed to pull the
                   image(s).
@@ -210,7 +210,7 @@ spec:
             description: WorkbenchStatus defines the observed state of Workbench
             properties:
               apps:
-                items:
+                additionalProperties:
                   description: WorkbenchStatusappStatus informs about the state of
                     the apps.
                   properties:
@@ -231,7 +231,7 @@ spec:
                   - revision
                   - status
                   type: object
-                type: array
+                type: object
               server:
                 description: WorkbenchStatusServer represents the server status.
                 properties:

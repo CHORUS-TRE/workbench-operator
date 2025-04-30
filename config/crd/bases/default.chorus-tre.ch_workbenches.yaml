@@ -183,7 +183,7 @@ spec:
                   required:
                   - name
                   type: object
-                description: Apps represent a list of applications any their state
+                description: Apps represent a map of applications any their state
                 type: object
               imagePullSecrets:
                 description: ImagePullSecrets is the secret(s) needed to pull the
