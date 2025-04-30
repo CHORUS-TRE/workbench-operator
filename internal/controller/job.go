@@ -17,14 +17,9 @@ import (
 // Default resource requirements for workbench applications
 var defaultResources = corev1.ResourceRequirements{
 	Limits: corev1.ResourceList{
-		corev1.ResourceCPU:              resource.MustParse("750m"),
-		corev1.ResourceMemory:           resource.MustParse("768Mi"),
+		corev1.ResourceCPU:              resource.MustParse("150m"),
+		corev1.ResourceMemory:           resource.MustParse("192Mi"),
 		corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
-	},
-	Requests: corev1.ResourceList{
-		corev1.ResourceCPU:              resource.MustParse("500m"),
-		corev1.ResourceMemory:           resource.MustParse("512Mi"),
-		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 	},
 }
 
