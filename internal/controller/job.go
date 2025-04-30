@@ -115,7 +115,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 	}
 
 	// Add kiosk configuration if this is a kiosk app and has kiosk config
-	if app.Name == "kiosk" && app.KioskConfig != nil {
+	if strings.Contains(appContainer.Image, "apps/kiosk") && app.KioskConfig != nil {
 		appContainer.Env = append(appContainer.Env, corev1.EnvVar{
 			Name:  "KIOSK_URL",
 			Value: app.KioskConfig.URL,
