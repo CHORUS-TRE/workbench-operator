@@ -70,16 +70,16 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 // UpdateStatusAppFromDeployment enriches the workbench status based on the deployment.
 //
 // It's not a *best* practice to do so, but it's very convenient.
-func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
+func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
 	// Grow the slice of StatusApps for the new index.
-	for len(wb.Status.Apps) < index+1 {
-		wb.Status.Apps = append(wb.Status.Apps, WorkbenchStatusApp{
+	if _, ok := wb.Spec.Apps[uid]; !ok {
+		wb.Status.Apps[uid] = WorkbenchStatusApp{
 			Revision: -1,
 			Status:   WorkbenchStatusAppStatusUnknown,
-		})
+		}
 	}
 
-	app := wb.Status.Apps[index]
+	app := wb.Status.Apps[uid]
 
 	// Default status
 	status := app.Status
@@ -102,7 +102,7 @@ func (wb *Workbench) UpdateStatusFromJob(index int, job batchv1.Job) bool {
 	if status != app.Status {
 		app.Status = status
 
-		wb.Status.Apps[index] = app
+		wb.Status.Apps[uid] = app
 		return true
 	}
 

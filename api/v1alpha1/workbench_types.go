@@ -109,7 +109,7 @@ type WorkbenchSpec struct {
 	Server WorkbenchServer `json:"server,omitempty"`
 	// Apps represent a list of applications any their state
 	// +optional
-	Apps []WorkbenchApp `json:"apps,omitempty"`
+	Apps map[string]WorkbenchApp `json:"apps,omitempty"`
 	// Service Account to be used by the pods.
 	// +optional
 	// +default:value="default"
@@ -179,8 +179,8 @@ type WorkbenchStatusApp struct {
 
 // WorkbenchStatus defines the observed state of Workbench
 type WorkbenchStatus struct {
-	Server WorkbenchStatusServer `json:"server"`
-	Apps   []WorkbenchStatusApp  `json:"apps,omitempty"`
+	Server WorkbenchStatusServer         `json:"server"`
+	Apps   map[string]WorkbenchStatusApp `json:"apps,omitempty"`
 }
 
 // +kubebuilder:object:root=true

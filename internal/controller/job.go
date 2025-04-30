@@ -28,11 +28,11 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, index int, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
+func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
-	job.Name = fmt.Sprintf("%s-%d-%s", workbench.Name, index, app.Name)
+	job.Name = fmt.Sprintf("%s-%s-%s", workbench.Name, uid, app.Name)
 	job.Namespace = workbench.Namespace
 
 	labels := map[string]string{

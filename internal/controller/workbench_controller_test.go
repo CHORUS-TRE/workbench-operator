@@ -40,11 +40,11 @@ var _ = Describe("Workbench Controller", func() {
 		workbench.Spec.ServiceAccount = "service-account"
 
 		oneGig := resource.MustParse("1Gi")
-		workbench.Spec.Apps = []defaultv1alpha1.WorkbenchApp{
-			{
+		workbench.Spec.Apps = map[string]defaultv1alpha1.WorkbenchApp{
+			"1": {
 				Name: "wezterm",
 			},
-			{
+			"2": {
 				Name: "kitty",
 				Image: &defaultv1alpha1.Image{
 					Registry:   "quay.io",
@@ -53,7 +53,7 @@ var _ = Describe("Workbench Controller", func() {
 				},
 				ShmSize: &oneGig,
 			},
-			{
+			"3": {
 				Name:  "alacritty",
 				State: "Stopped",
 			},
