@@ -7,21 +7,11 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
-
-// Default resource requirements for workbench applications
-var defaultResources = corev1.ResourceRequirements{
-	Limits: corev1.ResourceList{
-		corev1.ResourceCPU:              resource.MustParse("150m"),
-		corev1.ResourceMemory:           resource.MustParse("192Mi"),
-		corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
-	},
-}
 
 func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
 	job := &batchv1.Job{}
@@ -100,7 +90,6 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		Name:            app.Name,
 		Image:           appImage,
 		ImagePullPolicy: imagePullPolicy,
-		Resources:       defaultResources, // Set default resources
 		Env: []corev1.EnvVar{
 			{
 				Name:  "DISPLAY",
