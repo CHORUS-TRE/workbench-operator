@@ -37,6 +37,12 @@ type WorkbenchServer struct {
 	Version string `json:"version,omitempty"`
 
 	// TODO: add anything you'd like to configure. E.g. resources, Xpra options, auth, etc.
+	// InitialResolutionWidth defines the initial resolution width of the Xpra server.
+	// +optional
+	InitialResolutionWidth int `json:"initialResolutionWidth,omitempty"`
+	// InitialResolutionHeight defines the initial resolution height of the Xpra server.
+	// +optional
+	InitialResolutionHeight int `json:"initialResolutionHeight,omitempty"`
 }
 
 // Image represents the configuration of a custom image for an app.
