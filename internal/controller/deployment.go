@@ -146,6 +146,14 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		VolumeMounts: volumeMounts,
 	}
 
+	if workbench.Spec.Server.InitialResolutionWidth != 0 && workbench.Spec.Server.InitialResolutionHeight != 0 {
+		initialResolution := fmt.Sprintf("%dx%d", workbench.Spec.Server.InitialResolutionWidth, workbench.Spec.Server.InitialResolutionHeight)
+		serverContainer.Env = append(serverContainer.Env, corev1.EnvVar{
+			Name:  "INITIAL_RESOLUTION",
+			Value: initialResolution,
+		})
+	}
+
 	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
 
