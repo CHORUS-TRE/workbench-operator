@@ -46,7 +46,7 @@ var _ = Describe("Workbench Controller", func() {
 			},
 			"uid1": {
 				Name: "kitty",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "quay.io",
 					Repository: "kitty/kitty",
 					Tag:        "1.2.0",
