@@ -21,6 +21,11 @@ var defaultResources = corev1.ResourceRequirements{
 		corev1.ResourceMemory:           resource.MustParse("192Mi"),
 		corev1.ResourceEphemeralStorage: resource.MustParse("10Gi"),
 	},
+	Requests: corev1.ResourceList{
+		corev1.ResourceCPU:              resource.MustParse("1m"),
+		corev1.ResourceMemory:           resource.MustParse("1Ki"),
+		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+	},
 }
 
 func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
@@ -119,7 +124,18 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 
 	// Override with custom resources if specified
 	if app.Resources != nil {
-		appContainer.Resources = *app.Resources
+		if app.Resources.Limits != nil {
+			appContainer.Resources.Limits = app.Resources.Limits
+		}
+
+		if app.Resources.Requests != nil {
+			appContainer.Resources.Requests = app.Resources.Requests
+
+			// If limits aren't specified but requests are, use requests as limits
+			if app.Resources.Limits == nil {
+				appContainer.Resources.Limits = app.Resources.Requests
+			}
+		}
 	}
 
 	// Mounting the /dev/shm volume.
