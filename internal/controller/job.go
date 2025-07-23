@@ -70,27 +70,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 	var appImage string
 	imagePullPolicy := corev1.PullIfNotPresent
 
-	if app.Image == nil {
-		// Fix empty version
-		appVersion := app.Version
-		if appVersion == "" {
-			appVersion = "latest"
-			imagePullPolicy = corev1.PullAlways
-		}
-
-		// Non-empty registry requires a / to concatenate with the app one.
-		registry := config.Registry
-		if registry != "" {
-			registry = strings.TrimRight(registry, "/") + "/"
-		}
-
-		appsRepository := config.AppsRepository
-		if appsRepository != "" {
-			appsRepository = strings.Trim(appsRepository, "/") + "/"
-		}
-
-		appImage = fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
-	} else {
+	if app.Image != (defaultv1alpha1.Image{}) {
 		// Fix empty version
 		appVersion := app.Image.Tag
 		if appVersion == "" {
