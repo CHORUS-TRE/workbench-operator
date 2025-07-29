@@ -8,11 +8,28 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
+
+func NewHTTPProbe(path, portName string, delay, period int) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: path,
+				Port: intstr.FromString(portName),
+			},
+		},
+		InitialDelaySeconds: int32(delay),
+		PeriodSeconds:       int32(period),
+		TimeoutSeconds:      2,
+		SuccessThreshold:    1,
+		FailureThreshold:    3,
+	}
+}
 
 // initDeployment creates the Xpra server deployment.
 //
@@ -144,6 +161,8 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 			},
 		},
 		VolumeMounts: volumeMounts,
+		LivenessProbe:  NewHTTPProbe("/", "http", 10, 10),
+		ReadinessProbe: NewHTTPProbe("/", "http", 5, 5),
 	}
 
 	if workbench.Spec.Server.InitialResolutionWidth != 0 && workbench.Spec.Server.InitialResolutionHeight != 0 {
