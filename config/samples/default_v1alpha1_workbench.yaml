@@ -9,9 +9,11 @@ spec:
   server:
     version: "6.2.1-1"
   apps:
-    - name: jupyterlab
+    jlab:
+      name: jupyterlab
       version: "4.2.5-1"
       shmSize: 1Gi
-    - name: wezterm
+    wezterm:
+      name: wezterm
       version: "0.0.1"
       state: Stopped
