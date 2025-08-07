@@ -2,7 +2,6 @@ module github.com/CHORUS-TRE/workbench-operator
 
 go 1.24.0
 
-
 toolchain go1.24.6
 
 require (
