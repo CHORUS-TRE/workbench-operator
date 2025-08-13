@@ -56,6 +56,16 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
 	}
 
+	workspaceData := corev1.Volume{
+		Name: "workspace-data",
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: "chorus-workspace-pv",
+			},
+		},
+	}
+	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, workspaceData)
+
 	// The pod will be cleaned up after a day.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
 	oneDay := int32(24 * 3600)
@@ -145,6 +155,13 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			MountPath: "/dev/shm",
 		})
 	}
+
+	// Mounting the workspace data volume.
+	appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
+		Name:      "workspace-data",
+		MountPath: "/home/chorus/workspace-data",
+		SubPath:   fmt.Sprintf("workspaces/%s", job.Namespace),
+	})
 
 	job.Spec.Template.Spec.Containers = []corev1.Container{
 		appContainer,

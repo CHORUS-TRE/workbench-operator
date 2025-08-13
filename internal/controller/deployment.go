@@ -160,7 +160,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 				Value: "",
 			},
 		},
-		VolumeMounts: volumeMounts,
+		VolumeMounts:   volumeMounts,
 		LivenessProbe:  NewHTTPProbe("/", "http", 10, 10),
 		ReadinessProbe: NewHTTPProbe("/", "http", 5, 5),
 	}

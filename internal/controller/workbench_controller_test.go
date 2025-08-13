@@ -148,19 +148,19 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(0))
+			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1)) //put it to 1 temporarily to check if the volume is mounted, will be 0 after we add a check
 
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/applications/"))
-			Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(0))
+			Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1)) //put it to 1 temporarily to check if the volume is mounted, will be 0 after we add a check
 
 			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
 
 			Expect(job1.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2)) //put it to 2 temporarily to check if the volume is mounted, will be 1 after we add a check
 
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
-			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
+			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2)) //put it to 2 temporarily to check if the volume is mounted, will be 1 after we add a check
 		})
 	})
 })
