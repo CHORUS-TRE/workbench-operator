@@ -77,7 +77,10 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			},
 			VolumeName: "chorus-workspace-pv", //comment me for local testing
 			// When binding to a specific PV with no storage class, use empty string
-			StorageClassName: func() *string { s := ""; return &s }(),
+			StorageClassName: func() *string {
+				empty := ""
+				return &empty
+			}(),
 		},
 	}
 
