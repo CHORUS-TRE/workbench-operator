@@ -57,6 +57,8 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
 	}
 
+	// zeroStorageClass explicitly sets storageClassName: "" as YAML would.
+	var zeroStorageClass = new(string) // already "" by default
 	workspacePVC := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s", uid, app.Name),
@@ -77,7 +79,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			},
 			VolumeName: "chorus-workspace-pv", //comment me for local testing
 			// When binding to a specific PV with no storage class, use empty string
-			StorageClassName: func() *string { s := ""; return &s }(),
+			StorageClassName: zeroStorageClass,
 		},
 	}
 
