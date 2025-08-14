@@ -75,8 +75,9 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 					corev1.ResourceStorage: resource.MustParse("10Gi"),
 				},
 			},
-			VolumeName:       "chorus-workspace-pv", //comment me for local testing
-			StorageClassName: nil,
+			VolumeName: "chorus-workspace-pv", //comment me for local testing
+			// When binding to a specific PV with no storage class, use empty string
+			StorageClassName: func() *string { s := ""; return &s }(),
 		},
 	}
 
