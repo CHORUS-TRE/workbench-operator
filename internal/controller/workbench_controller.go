@@ -47,6 +47,7 @@ var ErrSuspendedJob = errors.New("suspended job")
 // +kubebuilder:rbac:groups=core,resources=services/status,verbs=get
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -184,17 +185,31 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// ---------- APPS ---------------
 
-	// List of jobs that were either found or created, the others will be deleted.
+	// List of jobs and PVCs that were either found or created, the others will be deleted.
 	foundJobNames := []string{}
+	foundPVCNames := []string{}
 
 	if workbench.Spec.Apps == nil {
 		workbench.Spec.Apps = make(map[string]defaultv1alpha1.WorkbenchApp)
 	}
 
 	for uid, app := range workbench.Spec.Apps {
-		job := initJob(workbench, r.Config, uid, app, service)
+		job, pvc := initJob(workbench, r.Config, uid, app, service)
 
-		// Link the service with the Workbench resource such that we can reconcile it
+		// Link the PVC with the Workbench resource such that we can reconcile it
+		// when it's being changed.
+		if err := controllerutil.SetControllerReference(&workbench, pvc, r.Scheme); err != nil {
+			log.V(1).Error(err, "Error setting the reference", "pvc", pvc.Name)
+			return ctrl.Result{}, err
+		}
+
+		// Create the PVC first
+		if err := r.createPVC(ctx, *pvc); err != nil {
+			log.V(1).Error(err, "Error creating the PVC", "pvc", pvc.Name)
+			return ctrl.Result{}, err
+		}
+
+		// Link the job with the Workbench resource such that we can reconcile it
 		// when it's being changed.
 		if err := controllerutil.SetControllerReference(&workbench, job, r.Scheme); err != nil {
 			log.V(1).Error(err, "Error setting the reference", "job", job.Name)
@@ -214,6 +229,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		foundJobNames = append(foundJobNames, job.Name)
+		foundPVCNames = append(foundPVCNames, pvc.Name)
 
 		// Break the loop as the job was created.
 		if foundJob == nil {
@@ -265,6 +281,26 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		log.V(1).Info("Extra job found, removing", "job", job.Name)
 		if err := r.deleteJob(ctx, &job); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Clean up orphaned PVCs (same pattern as job cleanup)
+	allPVCs, err := r.findPVCs(ctx, workbench)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Sorting the PVC names to leverage the binary search.
+	slices.Sort(foundPVCNames)
+	for _, pvc := range allPVCs.Items {
+		_, found := slices.BinarySearch(foundPVCNames, pvc.Name)
+		if found {
+			continue
+		}
+
+		log.V(1).Info("Extra PVC found, removing", "pvc", pvc.Name)
+		if err := r.Delete(ctx, &pvc); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -396,6 +432,49 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 	return &foundJob, err
 }
 
+// findPVCs finds all PVCs linked to the workbench.
+func (r *WorkbenchReconciler) findPVCs(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaimList, error) {
+	pvcList := corev1.PersistentVolumeClaimList{}
+
+	err := r.List(
+		ctx,
+		&pvcList,
+		client.MatchingLabels{
+			matchingLabel: workbench.Name,
+		},
+	)
+
+	return &pvcList, err
+}
+
+// createPVC creates a PVC if missing.
+func (r *WorkbenchReconciler) createPVC(ctx context.Context, pvc corev1.PersistentVolumeClaim) error {
+	log := log.FromContext(ctx)
+
+	pvcNamespacedName := types.NamespacedName{
+		Name:      pvc.Name,
+		Namespace: pvc.Namespace,
+	}
+
+	foundPVC := corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, pvcNamespacedName, &foundPVC)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.V(1).Error(err, "PVC is not (not) found.", "pvc", pvc.Name)
+			return err
+		}
+
+		log.V(1).Info("Creating PVC", "pvc", pvc.Name)
+
+		if err := r.Create(ctx, &pvc); err != nil {
+			log.V(1).Error(err, "Error creating the PVC", "pvc", pvc.Name)
+			return err
+		}
+	}
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -403,5 +482,6 @@ func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Complete(r)
 }

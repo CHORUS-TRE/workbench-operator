@@ -161,6 +161,19 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
 			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2)) //put it to 2 temporarily to check if the volume is mounted, will be 1 after we add a check
+
+			// Verify that PVCs are created for running apps
+			pvc := &corev1.PersistentVolumeClaim{}
+			pvcNamespacedName := types.NamespacedName{
+				Name:      "uid0-wezterm",
+				Namespace: "default",
+			}
+			err = k8sClient.Get(ctx, pvcNamespacedName, pvc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pvc.Labels[matchingLabel]).To(Equal(resourceName))
+
+			// Verify that PVCs have correct storage size
+			Expect(pvc.Spec.Resources.Requests[corev1.ResourceStorage]).To(Equal(resource.MustParse("10Gi")))
 		})
 	})
 })

@@ -29,7 +29,7 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service) *batchv1.Job {
+func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service) (*batchv1.Job, *corev1.PersistentVolumeClaim) {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -68,13 +68,14 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteMany,
+				//corev1.ReadWriteOnce, // uncomment me, comment line above for local testing
 			},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: resource.MustParse("10Gi"),
 				},
 			},
-			VolumeName:       "chorus-workspace-pv",
+			VolumeName:       "chorus-workspace-pv", //comment me for local testing
 			StorageClassName: nil,
 		},
 	}
@@ -215,7 +216,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Suspend = &fal
 	}
 
-	return job
+	return job, workspacePVC
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.
