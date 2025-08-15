@@ -8,7 +8,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -29,7 +28,7 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service) (*batchv1.Job, *corev1.PersistentVolumeClaim) {
+func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, sharedPVCName string) *batchv1.Job {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -57,37 +56,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
 	}
 
-	// zeroStorageClass explicitly sets storageClassName: "" as YAML would.
-	var zeroStorageClass = new(string) // already "" by default
-	workspacePVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s", uid, app.Name),
-			Namespace: workbench.Namespace,
-			Labels: map[string]string{
-				matchingLabel: workbench.Name,
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-				//corev1.ReadWriteOnce, // uncomment me, comment line above for local testing
-			},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("10Gi"),
-				},
-			},
-			VolumeName: "chorus-workspace-pv", //comment me for local testing
-			// When binding to a specific PV with no storage class, use empty string
-			StorageClassName: zeroStorageClass,
-		},
-	}
-
+	// Use the namespace-specific PVC (in same namespace as the pod)
 	workspaceData := corev1.Volume{
 		Name: "workspace-data",
 		VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: workspacePVC.Name,
+				ClaimName: sharedPVCName, // Now contains namespace-specific PVC name
 			},
 		},
 	}
@@ -183,7 +157,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		})
 	}
 
-	// Mounting the workspace data volume.
+	// Mounting the workspace data volume with namespace-specific subPath
 	appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
 		Name:      "workspace-data",
 		MountPath: "/home/chorus/workspace-data",
@@ -219,7 +193,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Suspend = &fal
 	}
 
-	return job, workspacePVC
+	return job
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.
