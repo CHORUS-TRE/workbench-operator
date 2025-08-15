@@ -5,4 +5,4 @@ kind: Kustomization
 images:
   - name: controller
     newName: harbor.chorus-tre.local/chorus/workbench-operator
-    newTag: 0.3.23
+    newTag: 0.3.24

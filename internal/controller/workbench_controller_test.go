@@ -162,18 +162,45 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
 			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2)) //put it to 2 temporarily to check if the volume is mounted, will be 1 after we add a check
 
-			// Verify that PVCs are created for running apps
+			// Verify that the kitty job successfully mounts the namespace-specific PVC
+			Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2)) // workspace-data + shm volumes
+
+			// Find the workspace-data volume
+			var workspaceVolume *corev1.Volume
+			for _, volume := range job1.Spec.Template.Spec.Volumes {
+				if volume.Name == "workspace-data" {
+					workspaceVolume = &volume
+					break
+				}
+			}
+			Expect(workspaceVolume).NotTo(BeNil())
+			Expect(workspaceVolume.PersistentVolumeClaim).NotTo(BeNil())
+			Expect(workspaceVolume.PersistentVolumeClaim.ClaimName).To(Equal("default-pvc"))
+
+			// Verify that the kitty container has the workspace volume mount
+			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2)) // workspace-data + shm volume mounts
+
+			// Find the workspace-data volume mount
+			var workspaceMount *corev1.VolumeMount
+			for _, mount := range job1.Spec.Template.Spec.Containers[0].VolumeMounts {
+				if mount.Name == "workspace-data" {
+					workspaceMount = &mount
+					break
+				}
+			}
+			Expect(workspaceMount).NotTo(BeNil())
+			Expect(workspaceMount.MountPath).To(Equal("/home/chorus/workspace-data"))
+			Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
+
+			// Verify that the namespace-specific PVC exists and is correctly configured
 			pvc := &corev1.PersistentVolumeClaim{}
 			pvcNamespacedName := types.NamespacedName{
-				Name:      "uid0-wezterm",
+				Name:      "default-pvc",
 				Namespace: "default",
 			}
 			err = k8sClient.Get(ctx, pvcNamespacedName, pvc)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(pvc.Labels[matchingLabel]).To(Equal(resourceName))
-
-			// Verify that PVCs have correct storage size
-			Expect(pvc.Spec.Resources.Requests[corev1.ResourceStorage]).To(Equal(resource.MustParse("10Gi")))
+			Expect(pvc.Spec.VolumeName).To(Equal("default-pv"))
 		})
 	})
 })
