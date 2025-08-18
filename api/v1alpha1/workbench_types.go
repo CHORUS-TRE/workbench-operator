@@ -91,8 +91,7 @@ type WorkbenchApp struct {
 	State WorkbenchAppState `json:"state,omitempty"`
 
 	// Image overwrites the default image built using the default registry, name, and version.
-	// +optional
-	Image *Image `json:"image,omitempty"`
+	Image Image `json:"image,omitempty"`
 
 	// ShmSize defines the size of the required extra /dev/shm space.
 	// +optional
