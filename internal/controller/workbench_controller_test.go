@@ -90,15 +90,29 @@ var _ = Describe("Workbench Controller", func() {
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: "csi.juicefs.com"}, csiDriver)
 			hasJuiceFSDriver := !errors.IsNotFound(err)
 
+			By("Checking if JuiceFS secret exists")
+			// Also check for secret in tests
+			hasJuiceFSSecret := false
+			if hasJuiceFSDriver {
+				secret := &corev1.Secret{}
+				err = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "juicefs-secret",
+					Namespace: "kube-system",
+				}, secret)
+				hasJuiceFSSecret = !errors.IsNotFound(err)
+			}
+
 			By("Reconciling the created resource")
 			controllerReconciler := &WorkbenchReconciler{
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
 				Recorder: record.NewFakeRecorder(3),
 				Config: Config{
-					Registry:        "my-registry",
-					AppsRepository:  "applications",
-					XpraServerImage: "my-registry/server/xpra-server",
+					Registry:               "my-registry",
+					AppsRepository:         "applications",
+					XpraServerImage:        "my-registry/server/xpra-server",
+					JuiceFSSecretName:      "juicefs-secret",
+					JuiceFSSecretNamespace: "kube-system",
 				},
 			}
 
@@ -156,13 +170,13 @@ var _ = Describe("Workbench Controller", func() {
 
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
 
-			// Check volumes and mounts based on JuiceFS driver availability
-			if hasJuiceFSDriver {
-				// With JuiceFS driver, workspace volume is present
+			// Check volumes and mounts based on JuiceFS driver and secret availability
+			if hasJuiceFSDriver && hasJuiceFSSecret {
+				// With JuiceFS driver and secret, workspace volume is present
 				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
 				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
 			} else {
-				// Without JuiceFS driver, no workspace volume
+				// Without JuiceFS driver or secret, no workspace volume
 				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(0))
 				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(0))
 			}
@@ -173,13 +187,13 @@ var _ = Describe("Workbench Controller", func() {
 
 			Expect(job1.Spec.Template.Spec.Containers).To(HaveLen(1))
 
-			// Check volumes and mounts for job1 (has shm volume) based on JuiceFS driver availability
-			if hasJuiceFSDriver {
-				// With JuiceFS driver, both shm and workspace volumes
+			// Check volumes and mounts for job1 (has shm volume) based on JuiceFS driver and secret availability
+			if hasJuiceFSDriver && hasJuiceFSSecret {
+				// With JuiceFS driver and secret, both shm and workspace volumes
 				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2))
 				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2))
 			} else {
-				// Without JuiceFS driver, only shm volume
+				// Without JuiceFS driver or secret, only shm volume
 				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(1))
 				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
 			}
@@ -187,8 +201,8 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
 
-			// Only verify PVC-related resources when JuiceFS driver is available
-			if hasJuiceFSDriver {
+			// Only verify PVC-related resources when JuiceFS driver and secret are available
+			if hasJuiceFSDriver && hasJuiceFSSecret {
 				// Find the workspace-data volume
 				var workspaceVolume *corev1.Volume
 				for _, volume := range job1.Spec.Template.Spec.Volumes {

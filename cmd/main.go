@@ -45,6 +45,8 @@ func main() {
 	var appsRepository string
 	var xpraServerImage string
 	var socatImage string
+	var juiceFSSecretName string
+	var juiceFSSecretNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -59,6 +61,8 @@ func main() {
 	flag.StringVar(&appsRepository, "apps-repository", "apps", "The repository holding the apps")
 	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
+	flag.StringVar(&juiceFSSecretName, "juicefs-secret-name", "juicefs-secret", "Name of the JuiceFS secret")
+	flag.StringVar(&juiceFSSecretNamespace, "juicefs-secret-namespace", "kube-system", "Namespace of the JuiceFS secret")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -120,10 +124,12 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("workbench-controller"),
 		Config: controller.Config{
-			Registry:        registry,
-			AppsRepository:  appsRepository,
-			SocatImage:      socatImage,
-			XpraServerImage: xpraServerImage,
+			Registry:               registry,
+			AppsRepository:         appsRepository,
+			SocatImage:             socatImage,
+			XpraServerImage:        xpraServerImage,
+			JuiceFSSecretName:      juiceFSSecretName,
+			JuiceFSSecretNamespace: juiceFSSecretNamespace,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
