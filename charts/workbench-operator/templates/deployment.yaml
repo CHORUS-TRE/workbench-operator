@@ -20,7 +20,10 @@ spec:
         kubectl.kubernetes.io/default-container: manager
     spec:
       containers:
-      - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
+      - args: 
+        {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
+        - --juicefs-secret-name={{ .Values.juicefs.secretName }}
+        - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
         command:
         - /manager
         env:

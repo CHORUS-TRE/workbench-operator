@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,6 +52,8 @@ var ErrSuspendedJob = errors.New("suspended job")
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=persistentvolumes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=csidrivers,verbs=get;list
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -188,76 +191,112 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// ---------- APPS ---------------
 
-	// zeroStorageClass explicitly sets storageClassName: "" as YAML would.
-	var zeroStorageClass = new(string) // already "" by default
+	// Check if JuiceFS CSI driver is available
+	hasJuiceFS := r.hasJuiceFSDriver(ctx)
 
-	// Create namespace-specific PV and PVC
-	namespacePVName := fmt.Sprintf("%s-pv", workbench.Namespace)
-	namespacePVCName := fmt.Sprintf("%s-pvc", workbench.Namespace)
+	// Default to empty string for PVC name when JuiceFS is not available
+	namespacePVCName := ""
 
-	// Create PV with JuiceFS CSI driver configuration
-	namespacePV := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: namespacePVName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			Capacity: corev1.ResourceList{
-				corev1.ResourceStorage: resource.MustParse("1Gi"),
-			},
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
-			StorageClassName:              *zeroStorageClass,
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver:       "csi.juicefs.com",
-					VolumeHandle: fmt.Sprintf("%s-volume", workbench.Namespace),
-					NodePublishSecretRef: &corev1.SecretReference{
-						Name:      "juicefs-secret",
-						Namespace: "kube-system",
+	if hasJuiceFS {
+		// Check if the JuiceFS secret exists before attempting to create PV/PVC
+		if !r.hasJuiceFSSecret(ctx) {
+			// Log error and emit event for visibility
+			errMsg := fmt.Sprintf("JuiceFS driver is present but secret '%s' not found in namespace '%s'. "+
+				"PV/PVC creation skipped. Please create the secret or update the configuration.",
+				r.Config.JuiceFSSecretName, r.Config.JuiceFSSecretNamespace)
+
+			log.Error(nil, errMsg)
+
+			// Emit a Kubernetes event so it's visible in kubectl describe
+			r.Recorder.Event(
+				&workbench,
+				"Warning",
+				"JuiceFSSecretMissing",
+				errMsg,
+			)
+
+			// Skip PV/PVC creation but continue with the rest
+			log.V(1).Info("Skipping PV/PVC creation due to missing JuiceFS secret")
+		} else {
+			// Both driver and secret exist - proceed with PV/PVC creation
+			log.V(1).Info("JuiceFS driver and secret detected - creating PV/PVC resources")
+
+			// zeroStorageClass explicitly sets storageClassName: "" as YAML would.
+			var zeroStorageClass = new(string) // already "" by default
+
+			// Create namespace-specific PV and PVC
+			namespacePVName := fmt.Sprintf("%s-pv", workbench.Namespace)
+			namespacePVCName = fmt.Sprintf("%s-pvc", workbench.Namespace)
+
+			// Create PV with JuiceFS CSI driver configuration
+			namespacePV := &corev1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: namespacePVName,
+				},
+				Spec: corev1.PersistentVolumeSpec{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("1Gi"),
 					},
-					VolumeAttributes: map[string]string{
-						// JuiceFS specific attributes can be added here if needed
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteMany,
+					},
+					PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+					StorageClassName:              *zeroStorageClass,
+					PersistentVolumeSource: corev1.PersistentVolumeSource{
+						CSI: &corev1.CSIPersistentVolumeSource{
+							Driver:       "csi.juicefs.com",
+							VolumeHandle: fmt.Sprintf("%s-volume", workbench.Namespace),
+							NodePublishSecretRef: &corev1.SecretReference{
+								Name:      r.Config.JuiceFSSecretName,
+								Namespace: r.Config.JuiceFSSecretNamespace,
+							},
+							VolumeAttributes: map[string]string{
+								// JuiceFS specific attributes can be added here if needed
+								"uid": "1001",
+								"gid": "1001",
+							},
+						},
 					},
 				},
-			},
-		},
-	}
+			}
 
-	// Create namespace-specific PVC
-	namespacePVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      namespacePVCName,
-			Namespace: workbench.Namespace,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("1Gi"),
+			// Create namespace-specific PVC
+			namespacePVC := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      namespacePVCName,
+					Namespace: workbench.Namespace,
 				},
-			},
-			VolumeName:       namespacePVName,
-			StorageClassName: zeroStorageClass,
-		},
-	}
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteMany,
+					},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("1Gi"),
+						},
+					},
+					VolumeName:       namespacePVName,
+					StorageClassName: zeroStorageClass,
+				},
+			}
 
-	// NOTE: No SetControllerReference for PV (cluster-scoped) or PVC (namespace-scoped but shared across workbenches in namespace)
-	// These resources should persist independently of individual workbench lifecycles
+			// NOTE: No SetControllerReference for PV (cluster-scoped) or PVC (namespace-scoped but shared across workbenches in namespace)
+			// These resources should persist independently of individual workbench lifecycles
 
-	// Create the namespace-specific PV if it doesn't exist
-	if err := r.createPV(ctx, *namespacePV); err != nil {
-		log.V(1).Error(err, "Error creating the namespace PV", "pv", namespacePV.Name)
-		return ctrl.Result{}, err
-	}
+			// Create the namespace-specific PV if it doesn't exist
+			if err := r.createPV(ctx, *namespacePV); err != nil {
+				log.V(1).Error(err, "Error creating the namespace PV", "pv", namespacePV.Name)
+				return ctrl.Result{}, err
+			}
 
-	// Create the namespace-specific PVC if it doesn't exist
-	if err := r.createPVC(ctx, *namespacePVC); err != nil {
-		log.V(1).Error(err, "Error creating the namespace PVC", "pvc", namespacePVC.Name)
-		return ctrl.Result{}, err
+			// Create the namespace-specific PVC if it doesn't exist
+			if err := r.createPVC(ctx, *namespacePVC); err != nil {
+				log.V(1).Error(err, "Error creating the namespace PVC", "pvc", namespacePVC.Name)
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		log.V(1).Info("JuiceFS driver not detected - skipping PV/PVC creation")
 	}
 
 	// List of jobs that were either found or created, the others will be deleted.
@@ -525,6 +564,58 @@ func (r *WorkbenchReconciler) createPVC(ctx context.Context, pvc corev1.Persiste
 	}
 
 	return nil
+}
+
+// hasJuiceFSDriver checks if the JuiceFS CSI driver is installed in the cluster.
+// Returns true if the JuiceFS CSI driver is found, false otherwise.
+func (r *WorkbenchReconciler) hasJuiceFSDriver(ctx context.Context) bool {
+	log := log.FromContext(ctx)
+
+	// Check if JuiceFS CSI driver exists
+	csiDriver := &storagev1.CSIDriver{}
+	err := r.Get(ctx, types.NamespacedName{Name: "csi.juicefs.com"}, csiDriver)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.V(1).Info("JuiceFS CSI driver not found - PV/PVC creation will be skipped")
+			return false
+		}
+		// If we can't determine, assume driver is present to be safe
+		log.V(1).Error(err, "Error checking for JuiceFS CSI driver, assuming it's present")
+		return true
+	}
+
+	log.V(1).Info("JuiceFS CSI driver found - PV/PVC will be created")
+	return true
+}
+
+// hasJuiceFSSecret checks if the configured JuiceFS secret exists.
+// Returns true if the secret is found, false otherwise.
+func (r *WorkbenchReconciler) hasJuiceFSSecret(ctx context.Context) bool {
+	log := log.FromContext(ctx)
+
+	// Check if the configured JuiceFS secret exists
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      r.Config.JuiceFSSecretName,
+		Namespace: r.Config.JuiceFSSecretNamespace,
+	}, secret)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Error(err, "JuiceFS secret not found",
+				"secret", r.Config.JuiceFSSecretName,
+				"namespace", r.Config.JuiceFSSecretNamespace)
+			return false
+		}
+		log.Error(err, "Error checking for JuiceFS secret")
+		return false
+	}
+
+	log.V(1).Info("JuiceFS secret found",
+		"secret", r.Config.JuiceFSSecretName,
+		"namespace", r.Config.JuiceFSSecretNamespace)
+	return true
 }
 
 // SetupWithManager sets up the controller with the Manager.
