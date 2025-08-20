@@ -56,16 +56,19 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
 	}
 
-	// Use the namespace-specific PVC (in same namespace as the pod)
-	workspaceData := corev1.Volume{
-		Name: "workspace-data",
-		VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: sharedPVCName, // Now contains namespace-specific PVC name
+	// Only add workspace volume if PVC name is provided (JuiceFS driver is available)
+	if sharedPVCName != "" {
+		// Use the namespace-specific PVC (in same namespace as the pod)
+		workspaceData := corev1.Volume{
+			Name: "workspace-data",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: sharedPVCName, // Now contains namespace-specific PVC name
+				},
 			},
-		},
+		}
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, workspaceData)
 	}
-	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, workspaceData)
 
 	// The pod will be cleaned up after a day.
 	// https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
@@ -157,12 +160,15 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		})
 	}
 
-	// Mounting the workspace data volume with namespace-specific subPath
-	appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
-		Name:      "workspace-data",
-		MountPath: "/home/chorus/workspace-data",
-		SubPath:   fmt.Sprintf("workspaces/%s", job.Namespace),
-	})
+	// Only mount workspace data volume if PVC name is provided (JuiceFS driver is available)
+	if sharedPVCName != "" {
+		// Mounting the workspace data volume with namespace-specific subPath
+		appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
+			Name:      "workspace-data",
+			MountPath: "/home/chorus/workspace-data",
+			SubPath:   fmt.Sprintf("workspaces/%s", job.Namespace),
+		})
+	}
 
 	job.Spec.Template.Spec.Containers = []corev1.Container{
 		appContainer,

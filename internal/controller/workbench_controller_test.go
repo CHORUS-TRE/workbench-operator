@@ -9,6 +9,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,6 +84,12 @@ var _ = Describe("Workbench Controller", func() {
 		})
 
 		It("should successfully reconcile the resource", func() {
+			By("Checking if JuiceFS CSI driver is present")
+			// Check if JuiceFS CSI driver is available
+			csiDriver := &storagev1.CSIDriver{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "csi.juicefs.com"}, csiDriver)
+			hasJuiceFSDriver := !errors.IsNotFound(err)
+
 			By("Reconciling the created resource")
 			controllerReconciler := &WorkbenchReconciler{
 				Client:   k8sClient,
@@ -95,7 +102,7 @@ var _ = Describe("Workbench Controller", func() {
 				},
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -148,59 +155,74 @@ var _ = Describe("Workbench Controller", func() {
 			Expect(job.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 
 			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1)) //put it to 1 temporarily to check if the volume is mounted, will be 0 after we add a check
+
+			// Check volumes and mounts based on JuiceFS driver availability
+			if hasJuiceFSDriver {
+				// With JuiceFS driver, workspace volume is present
+				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
+				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
+			} else {
+				// Without JuiceFS driver, no workspace volume
+				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(0))
+				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(0))
+			}
 
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/applications/"))
-			Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1)) //put it to 1 temporarily to check if the volume is mounted, will be 0 after we add a check
 
 			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("service-account"))
 
 			Expect(job1.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2)) //put it to 2 temporarily to check if the volume is mounted, will be 1 after we add a check
+
+			// Check volumes and mounts for job1 (has shm volume) based on JuiceFS driver availability
+			if hasJuiceFSDriver {
+				// With JuiceFS driver, both shm and workspace volumes
+				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2))
+				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2))
+			} else {
+				// Without JuiceFS driver, only shm volume
+				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(1))
+				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
+			}
 
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix("kitty:1.2.0"))
-			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2)) //put it to 2 temporarily to check if the volume is mounted, will be 1 after we add a check
 
-			// Verify that the kitty job successfully mounts the namespace-specific PVC
-			Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2)) // workspace-data + shm volumes
-
-			// Find the workspace-data volume
-			var workspaceVolume *corev1.Volume
-			for _, volume := range job1.Spec.Template.Spec.Volumes {
-				if volume.Name == "workspace-data" {
-					workspaceVolume = &volume
-					break
+			// Only verify PVC-related resources when JuiceFS driver is available
+			if hasJuiceFSDriver {
+				// Find the workspace-data volume
+				var workspaceVolume *corev1.Volume
+				for _, volume := range job1.Spec.Template.Spec.Volumes {
+					if volume.Name == "workspace-data" {
+						workspaceVolume = &volume
+						break
+					}
 				}
-			}
-			Expect(workspaceVolume).NotTo(BeNil())
-			Expect(workspaceVolume.PersistentVolumeClaim).NotTo(BeNil())
-			Expect(workspaceVolume.PersistentVolumeClaim.ClaimName).To(Equal("default-pvc"))
+				Expect(workspaceVolume).NotTo(BeNil())
+				Expect(workspaceVolume.PersistentVolumeClaim).NotTo(BeNil())
+				Expect(workspaceVolume.PersistentVolumeClaim.ClaimName).To(Equal("default-pvc"))
 
-			// Verify that the kitty container has the workspace volume mount
-			Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2)) // workspace-data + shm volume mounts
-
-			// Find the workspace-data volume mount
-			var workspaceMount *corev1.VolumeMount
-			for _, mount := range job1.Spec.Template.Spec.Containers[0].VolumeMounts {
-				if mount.Name == "workspace-data" {
-					workspaceMount = &mount
-					break
+				// Find the workspace-data volume mount
+				var workspaceMount *corev1.VolumeMount
+				for _, mount := range job1.Spec.Template.Spec.Containers[0].VolumeMounts {
+					if mount.Name == "workspace-data" {
+						workspaceMount = &mount
+						break
+					}
 				}
-			}
-			Expect(workspaceMount).NotTo(BeNil())
-			Expect(workspaceMount.MountPath).To(Equal("/home/chorus/workspace-data"))
-			Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
+				Expect(workspaceMount).NotTo(BeNil())
+				Expect(workspaceMount.MountPath).To(Equal("/home/chorus/workspace-data"))
+				Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
 
-			// Verify that the namespace-specific PVC exists and is correctly configured
-			pvc := &corev1.PersistentVolumeClaim{}
-			pvcNamespacedName := types.NamespacedName{
-				Name:      "default-pvc",
-				Namespace: "default",
+				// Verify that the namespace-specific PVC exists and is correctly configured
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvcNamespacedName := types.NamespacedName{
+					Name:      "default-pvc",
+					Namespace: "default",
+				}
+				err = k8sClient.Get(ctx, pvcNamespacedName, pvc)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(pvc.Spec.VolumeName).To(Equal("default-pv"))
 			}
-			err = k8sClient.Get(ctx, pvcNamespacedName, pvc)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pvc.Spec.VolumeName).To(Equal("default-pv"))
 		})
 	})
 })
