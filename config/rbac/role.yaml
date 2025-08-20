@@ -70,6 +70,7 @@ rules:
   verbs:
   - get
   - list
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -109,3 +110,4 @@ rules:
   verbs:
   - get
   - list
+  - watch
