@@ -252,8 +252,6 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 							},
 							VolumeAttributes: map[string]string{
 								// JuiceFS specific attributes can be added here if needed
-								"uid": "1001",
-								"gid": "1001",
 							},
 						},
 					},
@@ -265,6 +263,9 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      namespacePVCName,
 					Namespace: workbench.Namespace,
+					Labels: map[string]string{
+						"use-juicefs": "true",
+					},
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{
 					AccessModes: []corev1.PersistentVolumeAccessMode{
