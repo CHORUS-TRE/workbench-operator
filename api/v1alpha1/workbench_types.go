@@ -51,6 +51,7 @@ type WorkbenchServer struct {
 	// UserID defines the user ID for the workbench server.
 	// +optional
 	// +kubebuilder:default=1001
+	// +kubebuilder:validation:Minimum=1001
 	UserID int `json:"userid,omitempty"`
 }
 
