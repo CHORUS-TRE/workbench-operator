@@ -8,6 +8,8 @@ metadata:
 spec:
   server:
     version: "6.2.1-1"
+    user: user_name
+    userid: 1002
   apps:
     jlab:
       name: jupyterlab
