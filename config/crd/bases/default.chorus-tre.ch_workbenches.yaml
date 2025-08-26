@@ -203,6 +203,10 @@ spec:
                     description: InitialResolutionWidth defines the initial resolution
                       width of the Xpra server.
                     type: integer
+                  user:
+                    default: chorus
+                    description: User defines the username for the workbench server.
+                    type: string
                   version:
                     default: latest
                     description: Version defines the version to use.

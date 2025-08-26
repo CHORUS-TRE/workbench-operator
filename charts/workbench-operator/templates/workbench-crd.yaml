@@ -196,6 +196,10 @@ spec:
               server:
                 description: Server represents the configuration of the server part.
                 properties:
+                  version:
+                    default: latest
+                    description: Version defines the version to use.
+                    type: string
                   initialResolutionHeight:
                     description: InitialResolutionHeight defines the initial resolution
                       height of the Xpra server.
@@ -204,9 +208,9 @@ spec:
                     description: InitialResolutionWidth defines the initial resolution
                       width of the Xpra server.
                     type: integer
-                  version:
-                    default: latest
-                    description: Version defines the version to use.
+                  user:
+                    default: chorus
+                    description: User defines the username for the workbench server.
                     type: string
                 type: object
               serviceAccountName:

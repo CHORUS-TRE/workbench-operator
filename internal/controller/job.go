@@ -115,6 +115,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
 	}
 
+	// Handle user with default value
+	user := workbench.Spec.Server.User
+	if user == "" {
+		user = "chorus"
+	}
+
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
@@ -124,6 +130,10 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			{
 				Name:  "DISPLAY",
 				Value: fmt.Sprintf("%s.%s:80", service.Name, service.Namespace), // FIXME: 80 from 6080
+			},
+			{
+				Name:  "CHORUS_USER",
+				Value: user,
 			},
 		},
 	}
