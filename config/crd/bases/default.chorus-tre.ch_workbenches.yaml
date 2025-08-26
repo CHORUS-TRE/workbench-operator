@@ -210,6 +210,7 @@ spec:
                   userid:
                     default: 1001
                     description: UserID defines the user ID for the workbench server.
+                    minimum: 1001
                     type: integer
                   version:
                     default: latest

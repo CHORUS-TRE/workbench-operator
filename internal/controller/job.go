@@ -116,18 +116,6 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
 	}
 
-	// Handle user with default value
-	user := workbench.Spec.Server.User
-	if user == "" {
-		user = "chorus"
-	}
-
-	// Handle UserID with default value
-	userID := workbench.Spec.Server.UserID
-	if userID == 0 {
-		userID = 1001
-	}
-
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
@@ -140,11 +128,11 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			},
 			{
 				Name:  "CHORUS_USER",
-				Value: user,
+				Value: workbench.Spec.Server.User,
 			},
 			{
 				Name:  "CHORUS_UID",
-				Value: strconv.Itoa(userID),
+				Value: strconv.Itoa(workbench.Spec.Server.UserID),
 			},
 		},
 	}
