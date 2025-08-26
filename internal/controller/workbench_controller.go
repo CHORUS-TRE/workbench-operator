@@ -240,7 +240,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					AccessModes: []corev1.PersistentVolumeAccessMode{
 						corev1.ReadWriteMany,
 					},
-					PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+					PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
 					StorageClassName:              *zeroStorageClass,
 					PersistentVolumeSource: corev1.PersistentVolumeSource{
 						CSI: &corev1.CSIPersistentVolumeSource{
