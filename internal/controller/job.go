@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -121,6 +122,12 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		user = "chorus"
 	}
 
+	// Handle UserID with default value
+	userID := workbench.Spec.Server.UserID
+	if userID == 0 {
+		userID = 1001
+	}
+
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
@@ -134,6 +141,10 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			{
 				Name:  "CHORUS_USER",
 				Value: user,
+			},
+			{
+				Name:  "CHORUS_UID",
+				Value: strconv.Itoa(userID),
 			},
 		},
 	}

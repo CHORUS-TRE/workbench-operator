@@ -212,6 +212,10 @@ spec:
                     default: chorus
                     description: User defines the username for the workbench server.
                     type: string
+                  userid:
+                    default: 1001
+                    description: UserID defines the user ID for the workbench server.
+                    type: integer
                 type: object
               serviceAccountName:
                 default: default

@@ -207,6 +207,10 @@ spec:
                     default: chorus
                     description: User defines the username for the workbench server.
                     type: string
+                  userid:
+                    default: 1001
+                    description: UserID defines the user ID for the workbench server.
+                    type: integer
                   version:
                     default: latest
                     description: Version defines the version to use.
