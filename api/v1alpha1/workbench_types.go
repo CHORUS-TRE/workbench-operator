@@ -43,6 +43,16 @@ type WorkbenchServer struct {
 	// InitialResolutionHeight defines the initial resolution height of the Xpra server.
 	// +optional
 	InitialResolutionHeight int `json:"initialResolutionHeight,omitempty"`
+	// User defines the username for the workbench server.
+	// +optional
+	// +kubebuilder:default="chorus"
+	User string `json:"user,omitempty"`
+
+	// UserID defines the user ID for the workbench server.
+	// +optional
+	// +kubebuilder:default=1001
+	// +kubebuilder:validation:Minimum=1001
+	UserID int `json:"userid,omitempty"`
 }
 
 // Image represents the configuration of a custom image for an app.

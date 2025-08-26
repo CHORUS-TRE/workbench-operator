@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -124,6 +125,14 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 			{
 				Name:  "DISPLAY",
 				Value: fmt.Sprintf("%s.%s:80", service.Name, service.Namespace), // FIXME: 80 from 6080
+			},
+			{
+				Name:  "CHORUS_USER",
+				Value: workbench.Spec.Server.User,
+			},
+			{
+				Name:  "CHORUS_UID",
+				Value: strconv.Itoa(workbench.Spec.Server.UserID),
 			},
 		},
 	}
