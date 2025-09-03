@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -137,6 +138,11 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// the labels, has said replicas as its owner.
 	if foundDeployment != nil {
 		statusUpdated := (&workbench).UpdateStatusFromDeployment(*foundDeployment)
+
+		// Update server container health
+		serverHealthUpdated := r.updateServerContainerHealth(ctx, &workbench, *foundDeployment)
+		statusUpdated = statusUpdated || serverHealthUpdated
+
 		if statusUpdated {
 			if err := r.Status().Update(ctx, &workbench); err != nil {
 				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
@@ -440,7 +446,7 @@ func (r *WorkbenchReconciler) createDeployment(ctx context.Context, deployment a
 			return nil, err
 		}
 
-		return nil, nil
+		return &deployment, nil
 	}
 
 	return &foundDeployment, nil
@@ -617,6 +623,151 @@ func (r *WorkbenchReconciler) hasJuiceFSSecret(ctx context.Context) bool {
 		"secret", r.Config.JuiceFSSecretName,
 		"namespace", r.Config.JuiceFSSecretNamespace)
 	return true
+}
+
+// updateServerContainerHealth monitors the xpra-server container and updates status
+func (r *WorkbenchReconciler) updateServerContainerHealth(
+	ctx context.Context,
+	workbench *defaultv1alpha1.Workbench,
+	deployment appsv1.Deployment,
+) bool {
+	log := log.FromContext(ctx)
+
+	// Find pods for this deployment
+	podList := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(workbench.Namespace),
+		client.MatchingLabelsSelector{
+			Selector: labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels),
+		},
+	}
+
+	if err := r.List(ctx, podList, listOpts...); err != nil {
+		log.V(1).Error(err, "Failed to list pods for deployment", "deployment", deployment.Name)
+		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
+			Message: "Failed to list pods",
+		})
+	}
+
+	// Find most recent pod
+	var latestPod *corev1.Pod
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if latestPod == nil || pod.CreationTimestamp.After(latestPod.CreationTimestamp.Time) {
+			latestPod = pod
+		}
+	}
+
+	if latestPod == nil {
+		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
+			Message: "No pods found",
+		})
+	}
+
+	// Check if pod is terminating
+	if latestPod.DeletionTimestamp != nil {
+		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+			Status:  defaultv1alpha1.ServerContainerStatusTerminating,
+			Message: "Pod is terminating",
+		})
+	}
+
+	// Find xpra-server container status
+	var containerStatus *corev1.ContainerStatus
+	for i := range latestPod.Status.ContainerStatuses {
+		if latestPod.Status.ContainerStatuses[i].Name == "xpra-server" {
+			containerStatus = &latestPod.Status.ContainerStatuses[i]
+			break
+		}
+	}
+
+	if containerStatus == nil {
+		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
+			Message: "xpra-server container not found",
+		})
+	}
+
+	// Determine status from container state + probes
+	health := r.determineServerHealth(containerStatus)
+	return r.setServerContainerHealth(workbench, health)
+}
+
+// determineServerHealth maps container status to our health status
+func (r *WorkbenchReconciler) determineServerHealth(containerStatus *corev1.ContainerStatus) defaultv1alpha1.ServerContainerHealth {
+	health := defaultv1alpha1.ServerContainerHealth{
+		Ready:        containerStatus.Ready,
+		RestartCount: containerStatus.RestartCount,
+	}
+
+	// Check container state
+	if containerStatus.State.Waiting != nil {
+		health.Status = defaultv1alpha1.ServerContainerStatusWaiting
+		health.Message = fmt.Sprintf("Waiting: %s", containerStatus.State.Waiting.Reason)
+		return health
+	}
+
+	if containerStatus.State.Terminated != nil {
+		health.Status = defaultv1alpha1.ServerContainerStatusTerminated
+		health.Message = fmt.Sprintf("Terminated: %s", containerStatus.State.Terminated.Reason)
+		return health
+	}
+
+	// Container is running
+	if containerStatus.State.Running == nil {
+		health.Status = defaultv1alpha1.ServerContainerStatusUnknown
+		health.Message = "Container state unknown"
+		return health
+	}
+
+	// Check for recent restarts (last 5 minutes)
+	if containerStatus.RestartCount > 0 {
+		startTime := containerStatus.State.Running.StartedAt.Time
+		if time.Since(startTime) < 5*time.Minute {
+			health.Status = defaultv1alpha1.ServerContainerStatusRestarting
+			health.Message = fmt.Sprintf("Recently restarted (%d times)", containerStatus.RestartCount)
+			return health
+		}
+	}
+
+	// Check probe results
+	if containerStatus.Ready {
+		health.Status = defaultv1alpha1.ServerContainerStatusReady
+		health.Message = "Container is ready"
+	} else {
+		// Container running but not ready - could be starting up or failing
+		if containerStatus.RestartCount == 0 && time.Since(containerStatus.State.Running.StartedAt.Time) < 2*time.Minute {
+			health.Status = defaultv1alpha1.ServerContainerStatusStarting
+			health.Message = "Container starting up"
+		} else {
+			health.Status = defaultv1alpha1.ServerContainerStatusFailing
+			health.Message = "Readiness probe failing"
+		}
+	}
+
+	return health
+}
+
+// setServerContainerHealth updates workbench status and returns if changed
+func (r *WorkbenchReconciler) setServerContainerHealth(workbench *defaultv1alpha1.Workbench, health defaultv1alpha1.ServerContainerHealth) bool {
+	if workbench.Status.Server.ServerContainer == nil {
+		workbench.Status.Server.ServerContainer = &health
+		return true
+	}
+
+	current := workbench.Status.Server.ServerContainer
+	changed := current.Status != health.Status ||
+		current.Ready != health.Ready ||
+		current.RestartCount != health.RestartCount ||
+		current.Message != health.Message
+
+	if changed {
+		*current = health
+	}
+
+	return changed
 }
 
 // SetupWithManager sets up the controller with the Manager.
