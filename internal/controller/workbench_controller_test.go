@@ -156,6 +156,11 @@ var _ = Describe("Workbench Controller", func() {
 			"secret-2",
 		}
 
+		// Initialize Server with default user for testing
+		workbench.Spec.Server = defaultv1alpha1.WorkbenchServer{
+			User: "chorus", // Explicit default for test
+		}
+
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind Workbench")
 			err := k8sClient.Get(ctx, typeNamespacedName, workbench)
@@ -315,7 +320,7 @@ var _ = Describe("Workbench Controller", func() {
 					}
 				}
 				Expect(workspaceMount).NotTo(BeNil())
-				Expect(workspaceMount.MountPath).To(Equal("/home/chorus/workspace-data"))
+				Expect(workspaceMount.MountPath).To(Equal(fmt.Sprintf("/home/%s/workspace-data", workbench.Spec.Server.User)))
 				Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
 
 				// Verify that the namespace-specific PVC exists and is correctly configured

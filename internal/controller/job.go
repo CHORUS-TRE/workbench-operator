@@ -174,7 +174,7 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		// Mounting the workspace data volume with namespace-specific subPath
 		appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
 			Name:      "workspace-data",
-			MountPath: "/home/chorus/workspace-data",
+			MountPath: fmt.Sprintf("/home/%s/workspace-data", workbench.Spec.Server.User),
 			SubPath:   fmt.Sprintf("workspaces/%s", job.Namespace),
 		})
 	}
