@@ -253,6 +253,7 @@ type WorkbenchStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.server.version`
 // +kubebuilder:printcolumn:name="Apps",type=string,JSONPath=`.spec.apps[*].name`
+// +kubebuilder:printcolumn:name="Server-Health",type=string,JSONPath=`.status.server.serverContainer.status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workbench is the Schema for the workbenches API
