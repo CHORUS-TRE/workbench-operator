@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: workbenches.default.chorus-tre.ch
 spec:
   group: default.chorus-tre.ch
@@ -20,6 +20,9 @@ spec:
       type: string
     - jsonPath: .spec.apps[*].name
       name: Apps
+      type: string
+    - jsonPath: .status.server.serverContainer.status
+      name: Server-Health
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -101,7 +104,7 @@ spec:
                             Claims lists the names of resources, defined in spec.resourceClaims,
                             that are used by this container.
 
-                            This is an alpha field and requires enabling the
+                            This field depends on the
                             DynamicResourceAllocation feature gate.
 
                             This field is immutable. It can only be set for containers.
@@ -255,6 +258,39 @@ spec:
                     description: Revision is the values of the "deployment.kubernetes.io/revision"
                       metadata.
                     type: integer
+                  serverContainer:
+                    description: ServerContainer provides health information for the
+                      server container
+                    properties:
+                      message:
+                        description: Message provides additional context about the
+                          status
+                        type: string
+                      ready:
+                        description: Ready indicates if the readiness probe is passing
+                        type: boolean
+                      restartCount:
+                        description: RestartCount shows container restart count
+                        format: int32
+                        type: integer
+                      status:
+                        description: Status represents the current status of the server
+                          container
+                        enum:
+                        - Waiting
+                        - Starting
+                        - Ready
+                        - Failing
+                        - Restarting
+                        - Terminating
+                        - Terminated
+                        - Unknown
+                        type: string
+                    required:
+                    - ready
+                    - restartCount
+                    - status
+                    type: object
                   status:
                     description: Status informs about the real state of the app.
                     enum:

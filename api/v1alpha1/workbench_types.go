@@ -175,6 +175,52 @@ const (
 	WorkbenchStatusServerStatusFailed WorkbenchStatusServerStatus = "Failed"
 )
 
+// ServerContainerStatus represents the health status of the server container.
+// +kubebuilder:validation:Enum=Waiting;Starting;Ready;Failing;Restarting;Terminating;Terminated;Unknown
+type ServerContainerStatus string
+
+const (
+	// ServerContainerStatusWaiting describes a container that hasn't started
+	ServerContainerStatusWaiting ServerContainerStatus = "Waiting"
+
+	// ServerContainerStatusStarting describes a container that is starting up
+	ServerContainerStatusStarting ServerContainerStatus = "Starting"
+
+	// ServerContainerStatusReady describes a healthy container
+	ServerContainerStatusReady ServerContainerStatus = "Ready"
+
+	// ServerContainerStatusFailing describes a container failing health checks
+	ServerContainerStatusFailing ServerContainerStatus = "Failing"
+
+	// ServerContainerStatusRestarting describes a container that has restarted recently
+	ServerContainerStatusRestarting ServerContainerStatus = "Restarting"
+
+	// ServerContainerStatusTerminating describes a container being shut down
+	ServerContainerStatusTerminating ServerContainerStatus = "Terminating"
+
+	// ServerContainerStatusTerminated describes a stopped/crashed container
+	ServerContainerStatusTerminated ServerContainerStatus = "Terminated"
+
+	// ServerContainerStatusUnknown describes a container in unknown state
+	ServerContainerStatusUnknown ServerContainerStatus = "Unknown"
+)
+
+// ServerContainerHealth provides health information for the server container.
+type ServerContainerHealth struct {
+	// Status represents the current status of the server container
+	Status ServerContainerStatus `json:"status"`
+
+	// Ready indicates if the readiness probe is passing
+	Ready bool `json:"ready"`
+
+	// RestartCount shows container restart count
+	RestartCount int32 `json:"restartCount"`
+
+	// Message provides additional context about the status
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // WorkbenchStatusServer represents the server status.
 type WorkbenchStatusServer struct {
 	// Revision is the values of the "deployment.kubernetes.io/revision" metadata.
@@ -182,6 +228,10 @@ type WorkbenchStatusServer struct {
 
 	// Status informs about the real state of the app.
 	Status WorkbenchStatusServerStatus `json:"status"`
+
+	// ServerContainer provides health information for the server container
+	// +optional
+	ServerContainer *ServerContainerHealth `json:"serverContainer,omitempty"`
 }
 
 // WorkbenchStatusappStatus informs about the state of the apps.
@@ -203,6 +253,7 @@ type WorkbenchStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.server.version`
 // +kubebuilder:printcolumn:name="Apps",type=string,JSONPath=`.spec.apps[*].name`
+// +kubebuilder:printcolumn:name="Server-Health",type=string,JSONPath=`.status.server.serverContainer.status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workbench is the Schema for the workbenches API
