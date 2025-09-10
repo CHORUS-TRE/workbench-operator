@@ -753,12 +753,12 @@ func (r *WorkbenchReconciler) determineServerHealth(containerStatus *corev1.Cont
 
 // setServerContainerHealth updates workbench status and returns if changed
 func (r *WorkbenchReconciler) setServerContainerHealth(workbench *defaultv1alpha1.Workbench, health defaultv1alpha1.ServerContainerHealth) bool {
-	if workbench.Status.Server.ServerContainer == nil {
-		workbench.Status.Server.ServerContainer = &health
+	if workbench.Status.ServerDeployment.ServerContainer == nil {
+		workbench.Status.ServerDeployment.ServerContainer = &health
 		return true
 	}
 
-	current := workbench.Status.Server.ServerContainer
+	current := workbench.Status.ServerDeployment.ServerContainer
 	changed := current.Status != health.Status ||
 		current.Ready != health.Ready ||
 		current.RestartCount != health.RestartCount ||

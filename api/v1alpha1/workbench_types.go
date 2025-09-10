@@ -245,15 +245,15 @@ type WorkbenchStatusApp struct {
 
 // WorkbenchStatus defines the observed state of Workbench
 type WorkbenchStatus struct {
-	Server WorkbenchStatusServer         `json:"server"`
-	Apps   map[string]WorkbenchStatusApp `json:"apps,omitempty"`
+	ServerDeployment WorkbenchStatusServer         `json:"serverDeployment"`
+	Apps             map[string]WorkbenchStatusApp `json:"apps,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.server.version`
 // +kubebuilder:printcolumn:name="Apps",type=string,JSONPath=`.spec.apps[*].name`
-// +kubebuilder:printcolumn:name="Server-Health",type=string,JSONPath=`.status.server.serverContainer.status`
+// +kubebuilder:printcolumn:name="Server-Health",type=string,JSONPath=`.status.serverDeployment.serverContainer.status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workbench is the Schema for the workbenches API
