@@ -365,13 +365,13 @@ var _ = Describe("Workbench Controller", func() {
 
 			// The deployment is created, so server container health should be populated
 			// It will show "Unknown" status because no actual pods exist, but the structure should be there
-			Expect(finalWorkbench.Status.Server.ServerContainer).NotTo(BeNil())
-			Expect(finalWorkbench.Status.Server.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
-			Expect(finalWorkbench.Status.Server.ServerContainer.Message).To(ContainSubstring("No pods found"))
+			Expect(finalWorkbench.Status.ServerDeployment.ServerContainer).NotTo(BeNil())
+			Expect(finalWorkbench.Status.ServerDeployment.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+			Expect(finalWorkbench.Status.ServerDeployment.ServerContainer.Message).To(ContainSubstring("No pods found"))
 
 			// Verify required fields are populated
-			Expect(finalWorkbench.Status.Server.ServerContainer.RestartCount).To(Equal(int32(0)))
-			Expect(finalWorkbench.Status.Server.ServerContainer.Ready).To(BeFalse())
+			Expect(finalWorkbench.Status.ServerDeployment.ServerContainer.RestartCount).To(Equal(int32(0)))
+			Expect(finalWorkbench.Status.ServerDeployment.ServerContainer.Ready).To(BeFalse())
 		})
 	})
 
@@ -475,7 +475,7 @@ var _ = Describe("Workbench Controller", func() {
 						Namespace: "default",
 					},
 					Status: defaultv1alpha1.WorkbenchStatus{
-						Server: defaultv1alpha1.WorkbenchStatusServer{
+						ServerDeployment: defaultv1alpha1.WorkbenchStatusServer{
 							Revision: 1,
 							Status:   defaultv1alpha1.WorkbenchStatusServerStatusRunning,
 						},
@@ -502,9 +502,9 @@ var _ = Describe("Workbench Controller", func() {
 				changed := reconciler.updateServerContainerHealth(ctx, workbench, deployment)
 
 				Expect(changed).To(BeTrue())
-				Expect(workbench.Status.Server.ServerContainer).NotTo(BeNil())
-				Expect(workbench.Status.Server.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
-				Expect(workbench.Status.Server.ServerContainer.Message).To(ContainSubstring("No pods found"))
+				Expect(workbench.Status.ServerDeployment.ServerContainer).NotTo(BeNil())
+				Expect(workbench.Status.ServerDeployment.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(workbench.Status.ServerDeployment.ServerContainer.Message).To(ContainSubstring("No pods found"))
 			})
 
 			It("should handle pod without xpra-server container", func() {
@@ -531,8 +531,8 @@ var _ = Describe("Workbench Controller", func() {
 				changed := reconciler.updateServerContainerHealth(ctx, workbench, deployment)
 
 				Expect(changed).To(BeTrue())
-				Expect(workbench.Status.Server.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
-				Expect(workbench.Status.Server.ServerContainer.Message).To(ContainSubstring("xpra-server container not found"))
+				Expect(workbench.Status.ServerDeployment.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(workbench.Status.ServerDeployment.ServerContainer.Message).To(ContainSubstring("xpra-server container not found"))
 
 				// Cleanup
 				Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
@@ -555,11 +555,11 @@ var _ = Describe("Workbench Controller", func() {
 					changed := reconciler.updateServerContainerHealth(ctx, workbench, deployment)
 
 					Expect(changed).To(BeTrue())
-					Expect(workbench.Status.Server.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminating))
-					Expect(workbench.Status.Server.ServerContainer.Message).To(ContainSubstring("Pod is terminating"))
+					Expect(workbench.Status.ServerDeployment.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminating))
+					Expect(workbench.Status.ServerDeployment.ServerContainer.Message).To(ContainSubstring("Pod is terminating"))
 				} else {
 					// Pod was immediately deleted, test the logic directly with a mock
-					workbench.Status.Server.ServerContainer = nil
+					workbench.Status.ServerDeployment.ServerContainer = nil
 					testPod := createMockPod("test-pod", "default", createReadyContainerStatus(), nil)
 					testPod.Labels = deployment.Spec.Selector.MatchLabels
 					now := metav1.Now()
@@ -573,7 +573,7 @@ var _ = Describe("Workbench Controller", func() {
 					}
 					changed := reconciler.setServerContainerHealth(workbench, health)
 					Expect(changed).To(BeTrue())
-					Expect(workbench.Status.Server.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminating))
+					Expect(workbench.Status.ServerDeployment.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminating))
 				}
 			})
 
@@ -604,8 +604,8 @@ var _ = Describe("Workbench Controller", func() {
 
 				// Should detect that no container statuses are available and mark as Unknown
 				Expect(changed).To(BeTrue())
-				Expect(workbench.Status.Server.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
-				Expect(workbench.Status.Server.ServerContainer.Message).To(ContainSubstring("xpra-server container not found"))
+				Expect(workbench.Status.ServerDeployment.ServerContainer.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(workbench.Status.ServerDeployment.ServerContainer.Message).To(ContainSubstring("xpra-server container not found"))
 
 				// Cleanup
 				Expect(k8sClient.Delete(ctx, olderPod)).To(Succeed())

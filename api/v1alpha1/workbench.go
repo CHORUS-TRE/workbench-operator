@@ -24,15 +24,15 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 		revision = -1
 	}
 
-	if revision != wb.Status.Server.Revision {
-		wb.Status.Server.Revision = revision
+	if revision != wb.Status.ServerDeployment.Revision {
+		wb.Status.ServerDeployment.Revision = revision
 		updated = true
 	}
 
 	// It's probably too soon to know, so let's mark it
 	// as progressing a live happily.
 	if len(deployment.Status.Conditions) == 0 {
-		wb.Status.Server.Status = WorkbenchStatusServerStatusProgressing
+		wb.Status.ServerDeployment.Status = WorkbenchStatusServerStatusProgressing
 		updated = true
 
 		return updated
@@ -59,8 +59,8 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 		status = "Failed"
 	}
 
-	if status != wb.Status.Server.Status {
-		wb.Status.Server.Status = status
+	if status != wb.Status.ServerDeployment.Status {
+		wb.Status.ServerDeployment.Status = status
 		updated = true
 	}
 

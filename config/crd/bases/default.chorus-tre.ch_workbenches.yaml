@@ -21,7 +21,7 @@ spec:
     - jsonPath: .spec.apps[*].name
       name: Apps
       type: string
-    - jsonPath: .status.server.serverContainer.status
+    - jsonPath: .status.serverDeployment.serverContainer.status
       name: Server-Health
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -251,7 +251,7 @@ spec:
                   - status
                   type: object
                 type: object
-              server:
+              serverDeployment:
                 description: WorkbenchStatusServer represents the server status.
                 properties:
                   revision:
@@ -303,7 +303,7 @@ spec:
                 - status
                 type: object
             required:
-            - server
+            - serverDeployment
             type: object
         type: object
     served: true
