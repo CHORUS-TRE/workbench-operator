@@ -106,25 +106,22 @@ func (sm *StorageManager) GetProvider(storageType StorageType) StorageProvider {
 }
 
 // GetVolumeAndMountSpecs returns both volume and mount specs for all enabled storage types with PVCs
+// This method assumes storage (PVs/PVCs) has already been created by ProcessEnabledStorage
 func (sm *StorageManager) GetVolumeAndMountSpecs(ctx context.Context, workbench defaultv1alpha1.Workbench, user, namespace string) ([]corev1.Volume, []corev1.VolumeMount, error) {
-	storageVolumes, err := sm.ProcessEnabledStorage(ctx, workbench)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	var volumes []corev1.Volume
 	var mounts []corev1.VolumeMount
 
-	for storageType, pvcName := range storageVolumes {
-		if pvcName != "" {
-			provider := sm.GetProvider(storageType)
-			if provider != nil {
-				volume := provider.GetVolumeSpec(pvcName)
-				volumes = append(volumes, volume)
+	enabledProviders := sm.GetEnabledProviders(workbench)
+	for _, provider := range enabledProviders {
+		// Only add volume/mount if the provider has valid secret config
+		if provider.HasSecret(ctx, sm.reconciler.Client) {
+			pvcName := provider.GetPVCName(workbench.Namespace)
 
-				mount := provider.GetVolumeMountSpec(user, namespace)
-				mounts = append(mounts, mount)
-			}
+			volume := provider.GetVolumeSpec(pvcName)
+			volumes = append(volumes, volume)
+
+			mount := provider.GetVolumeMountSpec(user, namespace)
+			mounts = append(mounts, mount)
 		}
 	}
 	return volumes, mounts, nil

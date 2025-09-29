@@ -193,10 +193,17 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// The service definition is not affected by the CRD, and the status does have any information from it.
 
-	// ---------- APPS ---------------
+	// ---------- STORAGE ---------------
 
-	// Create storage manager (storage processing happens in job creation)
+	// Create storage manager and process enabled storage for the workbench
 	storageManager := NewStorageManager(r)
+	_, err = storageManager.ProcessEnabledStorage(ctx, workbench)
+	if err != nil {
+		log.V(1).Error(err, "Error processing storage")
+		return ctrl.Result{}, err
+	}
+
+	// ---------- APPS ---------------
 
 	// List of jobs that were either found or created, the others will be deleted.
 	foundJobNames := []string{}
