@@ -299,39 +299,39 @@ var _ = Describe("Workbench Controller", func() {
 
 			// Only verify PVC-related resources when JuiceFS driver and secret are available
 			if hasJuiceFSDriver && hasJuiceFSSecret {
-				// Find the workspace-data volume
+				// Find the workspace-archive volume
 				var workspaceVolume *corev1.Volume
 				for _, volume := range job1.Spec.Template.Spec.Volumes {
-					if volume.Name == "workspace-data" {
+					if volume.Name == "workspace-archive" {
 						workspaceVolume = &volume
 						break
 					}
 				}
 				Expect(workspaceVolume).NotTo(BeNil())
 				Expect(workspaceVolume.PersistentVolumeClaim).NotTo(BeNil())
-				Expect(workspaceVolume.PersistentVolumeClaim.ClaimName).To(Equal("default-pvc"))
+				Expect(workspaceVolume.PersistentVolumeClaim.ClaimName).To(Equal("default-archive-pvc"))
 
-				// Find the workspace-data volume mount
+				// Find the workspace-archive volume mount
 				var workspaceMount *corev1.VolumeMount
 				for _, mount := range job1.Spec.Template.Spec.Containers[0].VolumeMounts {
-					if mount.Name == "workspace-data" {
+					if mount.Name == "workspace-archive" {
 						workspaceMount = &mount
 						break
 					}
 				}
 				Expect(workspaceMount).NotTo(BeNil())
-				Expect(workspaceMount.MountPath).To(Equal(fmt.Sprintf("/home/%s/workspace-data", workbench.Spec.Server.User)))
+				Expect(workspaceMount.MountPath).To(Equal(fmt.Sprintf("/home/%s/workspace-archive", workbench.Spec.Server.User)))
 				Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
 
 				// Verify that the namespace-specific PVC exists and is correctly configured
 				pvc := &corev1.PersistentVolumeClaim{}
 				pvcNamespacedName := types.NamespacedName{
-					Name:      "default-pvc",
+					Name:      "default-archive-pvc",
 					Namespace: "default",
 				}
 				err = k8sClient.Get(ctx, pvcNamespacedName, pvc)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(pvc.Spec.VolumeName).To(Equal("default-pv"))
+				Expect(pvc.Spec.VolumeName).To(Equal("default-archive-pv"))
 			}
 		})
 
