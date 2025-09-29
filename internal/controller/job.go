@@ -29,7 +29,7 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
-func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, sharedPVCName string) *batchv1.Job {
+func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) *batchv1.Job {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -57,18 +57,13 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *shmDir)
 	}
 
-	// Only add workspace volume if PVC name is provided (JuiceFS driver is available)
-	if sharedPVCName != "" {
-		// Use the namespace-specific PVC (in same namespace as the pod)
-		workspaceData := corev1.Volume{
-			Name: "workspace-data",
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: sharedPVCName, // Now contains namespace-specific PVC name
-				},
-			},
-		}
-		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, workspaceData)
+	// Add storage volumes and mounts from the storage manager
+	storageVolumes, storageMounts, err := storageManager.GetVolumeAndMountSpecs(ctx, workbench, workbench.Spec.Server.User, job.Namespace)
+	if err != nil {
+		log := log.FromContext(ctx)
+		log.V(1).Info("Storage setup failed, continuing without storage volumes", "error", err)
+	} else {
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, storageVolumes...)
 	}
 
 	// The pod will be cleaned up after a day.
@@ -169,14 +164,9 @@ func initJob(workbench defaultv1alpha1.Workbench, config Config, uid string, app
 		})
 	}
 
-	// Only mount workspace data volume if PVC name is provided (JuiceFS driver is available)
-	if sharedPVCName != "" {
-		// Mounting the workspace data volume with namespace-specific subPath
-		appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
-			Name:      "workspace-data",
-			MountPath: fmt.Sprintf("/home/%s/workspace-data", workbench.Spec.Server.User),
-			SubPath:   fmt.Sprintf("workspaces/%s", job.Namespace),
-		})
+	// Add storage volume mounts (already retrieved above)
+	if err == nil {
+		appContainer.VolumeMounts = append(appContainer.VolumeMounts, storageMounts...)
 	}
 
 	job.Spec.Template.Spec.Containers = []corev1.Container{

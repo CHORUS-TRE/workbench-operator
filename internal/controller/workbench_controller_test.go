@@ -613,4 +613,111 @@ var _ = Describe("Workbench Controller", func() {
 			})
 		})
 	})
+
+	Describe("Storage Configuration", func() {
+
+		Context("Job Volume Configuration", func() {
+			It("should handle storage configuration when drivers are not available", func() {
+				// This test verifies that jobs are created successfully even when storage is enabled
+				// but the required drivers/secrets are not available (graceful degradation)
+				workbench := defaultv1alpha1.Workbench{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-workbench",
+						Namespace: "default",
+					},
+					Spec: defaultv1alpha1.WorkbenchSpec{
+						Server: defaultv1alpha1.WorkbenchServer{
+							User:   "testuser",
+							UserID: 1001,
+						},
+						Storage: &defaultv1alpha1.StorageConfig{
+							S3:  true,
+							NFS: true,
+						},
+					},
+				}
+
+				config := Config{
+					Registry:       "test.registry.io",
+					AppsRepository: "apps",
+				}
+
+				service := corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service",
+						Namespace: workbench.Namespace,
+					},
+				}
+
+				app := defaultv1alpha1.WorkbenchApp{
+					Name: "test-app",
+				}
+
+				// Create a storage manager for testing
+				reconciler := &WorkbenchReconciler{
+					Client: k8sClient,
+					Config: config,
+				}
+				storageManager := NewStorageManager(reconciler)
+
+				ctx := context.Background()
+				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+
+				// Verify no volumes were added since drivers are not available
+				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(0))
+
+				// Verify no volume mounts were added since storage is not available
+				container := job.Spec.Template.Spec.Containers[0]
+				Expect(len(container.VolumeMounts)).To(Equal(0))
+			})
+
+			It("should not add volumes when PVC names are empty", func() {
+				workbench := defaultv1alpha1.Workbench{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-workbench",
+						Namespace: "default",
+					},
+					Spec: defaultv1alpha1.WorkbenchSpec{
+						Server: defaultv1alpha1.WorkbenchServer{
+							User:   "testuser",
+							UserID: 1001,
+						},
+					},
+				}
+
+				config := Config{
+					Registry:       "test.registry.io",
+					AppsRepository: "apps",
+				}
+
+				service := corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service",
+						Namespace: workbench.Namespace,
+					},
+				}
+
+				app := defaultv1alpha1.WorkbenchApp{
+					Name: "test-app",
+				}
+
+				// Create a storage manager for testing
+				reconciler := &WorkbenchReconciler{
+					Client: k8sClient,
+					Config: config,
+				}
+				storageManager := NewStorageManager(reconciler)
+
+				ctx := context.Background()
+				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+
+				// Verify no storage volumes were added
+				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(0))
+
+				// Verify no storage volume mounts were added
+				container := job.Spec.Template.Spec.Containers[0]
+				Expect(len(container.VolumeMounts)).To(Equal(0))
+			})
+		})
+	})
 })

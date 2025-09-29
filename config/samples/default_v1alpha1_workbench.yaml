@@ -10,6 +10,9 @@ spec:
     version: "6.2.1-1"
     user: user_name
     userid: 1002
+  storage:
+    s3: true
+    nfs: true
   apps:
     jlab:
       name: jupyterlab

@@ -3,6 +3,11 @@ juicefs:
   secretName: juicefs-secret
   secretNamespace: kube-system
 
+# NFS configuration
+nfs:
+  secretName: nfs-secret
+  secretNamespace: kube-system
+
 controllerManager:
   manager:
     args:
@@ -13,6 +18,10 @@ controllerManager:
     - --apps-repository=apps
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
     - --socat-image=alpine/socat:1.8.0.0
+    - --juicefs-secret-name={{ .Values.juicefs.secretName }}
+    - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
+    - --nfs-secret-name={{ .Values.nfs.secretName }}
+    - --nfs-secret-namespace={{ .Values.nfs.secretNamespace }}
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -20,7 +29,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.3.31
+      tag: 0.3.32
     resources:
       limits:
         cpu: 500m

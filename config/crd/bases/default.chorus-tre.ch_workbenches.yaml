@@ -224,6 +224,19 @@ spec:
                 default: default
                 description: Service Account to be used by the pods.
                 type: string
+              storage:
+                description: Storage defines storage mount configuration for S3 and
+                  NFS
+                properties:
+                  nfs:
+                    default: true
+                    description: NFS enables NFS storage mounting at /home/{user}/workspace-scratch
+                    type: boolean
+                  s3:
+                    default: true
+                    description: S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
+                    type: boolean
+                type: object
             type: object
           status:
             description: WorkbenchStatus defines the observed state of Workbench
