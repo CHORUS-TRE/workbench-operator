@@ -81,17 +81,19 @@ func NewStorageManager(reconciler *WorkbenchReconciler) *StorageManager {
 func (sm *StorageManager) GetEnabledProviders(workbench defaultv1alpha1.Workbench) []StorageProvider {
 	var enabled []StorageProvider
 
-	if workbench.Spec.Storage == nil {
-		return enabled
+	storage := workbench.Spec.Storage
+	if storage == nil {
+		// Apply CRD defaults when storage section is missing
+		storage = &defaultv1alpha1.StorageConfig{S3: true, NFS: true}
 	}
 
-	if workbench.Spec.Storage.S3 {
+	if storage.S3 {
 		if provider, exists := sm.providers[StorageTypeS3]; exists {
 			enabled = append(enabled, provider)
 		}
 	}
 
-	if workbench.Spec.Storage.NFS {
+	if storage.NFS {
 		if provider, exists := sm.providers[StorageTypeNFS]; exists {
 			enabled = append(enabled, provider)
 		}
