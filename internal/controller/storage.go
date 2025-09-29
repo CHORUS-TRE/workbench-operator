@@ -409,8 +409,8 @@ func (b *BaseProvider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.
 	return nil
 }
 
-// Common PV creation - needs provider-specific volumeAttributes
-func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]string) (*corev1.PersistentVolume, error) {
+// Common PV creation - needs provider-specific volumeAttributes and optional secret reference
+func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]string, nodePublishSecretRef *corev1.SecretReference) (*corev1.PersistentVolume, error) {
 	pvName := b.getPVName(namespace)
 
 	pv := &corev1.PersistentVolume{
@@ -419,7 +419,7 @@ func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]st
 		},
 		Spec: corev1.PersistentVolumeSpec{
 			Capacity: corev1.ResourceList{
-				corev1.ResourceStorage: resource.MustParse("10Gi"),
+				corev1.ResourceStorage: resource.MustParse("1Gi"),
 			},
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteMany,
@@ -428,9 +428,10 @@ func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]st
 			StorageClassName:              "",
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
 				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver:           b.driverName,
-					VolumeHandle:     fmt.Sprintf("%s-%s", b.mountType, namespace),
-					VolumeAttributes: volumeAttributes,
+					Driver:               b.driverName,
+					VolumeHandle:         fmt.Sprintf("%s-%s", namespace, b.mountType),
+					VolumeAttributes:     volumeAttributes,
+					NodePublishSecretRef: nodePublishSecretRef,
 				},
 			},
 		},
@@ -461,7 +462,7 @@ func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.
 			},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("10Gi"),
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
 				},
 			},
 			VolumeName:       pvName,
@@ -584,7 +585,14 @@ func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wor
 		"bucket":  bucket,
 		"subPath": fmt.Sprintf("workspaces/%s", workbench.Namespace),
 	}
-	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes)
+
+	// JuiceFS requires NodePublishSecretRef for authentication
+	nodePublishSecretRef := &corev1.SecretReference{
+		Name:      s.secretName,
+		Namespace: s.secretNamespace,
+	}
+
+	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
 }
 
 // =============================================================================
@@ -709,5 +717,7 @@ func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wo
 		"server": server,
 		"share":  share,
 	}
-	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes)
+
+	// NFS doesn't require NodePublishSecretRef
+	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nil)
 }
