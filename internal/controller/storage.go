@@ -296,9 +296,7 @@ type S3Provider struct {
 
 // HasDriver checks if the JuiceFS CSI driver is installed in the cluster
 func (s *S3Provider) HasDriver(ctx context.Context, client client.Client) bool {
-	csiDriver := &storagev1.CSIDriver{}
-	err := client.Get(ctx, types.NamespacedName{Name: "csi.juicefs.com"}, csiDriver)
-	return err == nil
+	return hasCSIDriver(ctx, client, s.GetDriverName())
 }
 
 // HasSecret checks if the configured JuiceFS secret exists
@@ -382,42 +380,17 @@ func (s *S3Provider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.Wo
 
 // DeletePVC deletes the PVC for S3 storage
 func (s *S3Provider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	pvcName := s.GetPVCName(workbench.Namespace)
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: workbench.Namespace,
-		},
-	}
-
-	err := s.reconciler.Client.Delete(ctx, pvc)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete S3 PVC %s: %w", pvcName, err)
-	}
-
-	return nil
+	return deletePVC(ctx, s.reconciler.Client, s.GetPVCName(workbench.Namespace), workbench.Namespace, string(s.GetStorageType()))
 }
 
 // GetVolumeSpec returns the volume specification for job pods
 func (s *S3Provider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return corev1.Volume{
-		Name: s.GetVolumeName(),
-		VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: pvcName,
-			},
-		},
-	}
+	return createVolumeSpec(s.GetVolumeName(), pvcName)
 }
 
 // GetVolumeMountSpec returns the volume mount specification for job containers
 func (s *S3Provider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return corev1.VolumeMount{
-		Name:      s.GetVolumeName(),
-		MountPath: s.GetMountPath(user),
-		SubPath:   getWorkspaceSubPath(namespace),
-	}
+	return createVolumeMountSpec(s.GetVolumeName(), s.GetMountPath(user), namespace)
 }
 
 // GetPVCName returns the PVC name for this storage type
@@ -471,9 +444,7 @@ type NFSProvider struct {
 
 // HasDriver checks if the NFS CSI driver is installed in the cluster
 func (n *NFSProvider) HasDriver(ctx context.Context, client client.Client) bool {
-	csiDriver := &storagev1.CSIDriver{}
-	err := client.Get(ctx, types.NamespacedName{Name: "nfs.csi.k8s.io"}, csiDriver)
-	return err == nil
+	return hasCSIDriver(ctx, client, n.GetDriverName())
 }
 
 // HasSecret checks if the NFS secret exists
@@ -582,42 +553,17 @@ func (n *NFSProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.W
 
 // DeletePVC deletes the PVC for NFS storage
 func (n *NFSProvider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	pvcName := n.GetPVCName(workbench.Namespace)
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: workbench.Namespace,
-		},
-	}
-
-	err := n.reconciler.Client.Delete(ctx, pvc)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete NFS PVC %s: %w", pvcName, err)
-	}
-
-	return nil
+	return deletePVC(ctx, n.reconciler.Client, n.GetPVCName(workbench.Namespace), workbench.Namespace, string(n.GetStorageType()))
 }
 
 // GetVolumeSpec returns the volume specification for job pods
 func (n *NFSProvider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return corev1.Volume{
-		Name: n.GetVolumeName(),
-		VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: pvcName,
-			},
-		},
-	}
+	return createVolumeSpec(n.GetVolumeName(), pvcName)
 }
 
 // GetVolumeMountSpec returns the volume mount specification for job containers
 func (n *NFSProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return corev1.VolumeMount{
-		Name:      n.GetVolumeName(),
-		MountPath: n.GetMountPath(user),
-		SubPath:   getWorkspaceSubPath(namespace),
-	}
+	return createVolumeMountSpec(n.GetVolumeName(), n.GetMountPath(user), namespace)
 }
 
 // GetPVCName returns the PVC name for this storage type
@@ -813,6 +759,51 @@ func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench 
 // =============================================================================
 // Helper functions
 // =============================================================================
+
+// deletePVC is a shared helper function to delete PVCs for any storage type
+func deletePVC(ctx context.Context, client client.Client, pvcName, namespace, storageType string) error {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: namespace,
+		},
+	}
+
+	err := client.Delete(ctx, pvc)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete %s PVC %s: %w", storageType, pvcName, err)
+	}
+
+	return nil
+}
+
+// createVolumeSpec is a shared helper function to create volume specs for PVCs
+func createVolumeSpec(volumeName, pvcName string) corev1.Volume {
+	return corev1.Volume{
+		Name: volumeName,
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcName,
+			},
+		},
+	}
+}
+
+// createVolumeMountSpec is a shared helper function to create volume mount specs
+func createVolumeMountSpec(volumeName, mountPath, namespace string) corev1.VolumeMount {
+	return corev1.VolumeMount{
+		Name:      volumeName,
+		MountPath: mountPath,
+		SubPath:   getWorkspaceSubPath(namespace),
+	}
+}
+
+// hasCSIDriver is a shared helper function to check if a CSI driver is installed
+func hasCSIDriver(ctx context.Context, client client.Client, driverName string) bool {
+	csiDriver := &storagev1.CSIDriver{}
+	err := client.Get(ctx, types.NamespacedName{Name: driverName}, csiDriver)
+	return err == nil
+}
 
 // Helper function to get zero storage class pointer
 func getZeroStorageClass() *string {
