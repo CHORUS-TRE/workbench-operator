@@ -75,6 +75,19 @@ type KioskConfig struct {
 	URL string `json:"url"`
 }
 
+// StorageConfig defines storage mount configuration
+type StorageConfig struct {
+	// S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
+	// +optional
+	// +default:value=false
+	S3 bool `json:"s3,omitempty"`
+
+	// NFS enables NFS storage mounting at /home/{user}/workspace-scratch
+	// +optional
+	// +default:value=false
+	NFS bool `json:"nfs,omitempty"`
+}
+
 // WorkbenchApp defines one application running in the workbench.
 type WorkbenchApp struct {
 	// Name is the application name (likely its OCI image name as well)
@@ -134,6 +147,9 @@ type WorkbenchSpec struct {
 	// +optional
 	// +kubebuilder:validation:items:MinLength:=1
 	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+	// Storage defines storage mount configuration for S3 and NFS
+	// +optional
+	Storage *StorageConfig `json:"storage,omitempty"`
 }
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.

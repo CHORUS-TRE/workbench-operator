@@ -14,4 +14,8 @@ type Config struct {
 	JuiceFSSecretName string
 	// JuiceFSSecretNamespace is the namespace of the JuiceFS secret.
 	JuiceFSSecretNamespace string
+	// NFSSecretName is the name of the NFS secret.
+	NFSSecretName string
+	// NFSSecretNamespace is the namespace of the NFS secret.
+	NFSSecretNamespace string
 }

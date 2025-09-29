@@ -47,6 +47,8 @@ func main() {
 	var socatImage string
 	var juiceFSSecretName string
 	var juiceFSSecretNamespace string
+	var nfsSecretName string
+	var nfsSecretNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -63,6 +65,8 @@ func main() {
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
 	flag.StringVar(&juiceFSSecretName, "juicefs-secret-name", "juicefs-secret", "Name of the JuiceFS secret")
 	flag.StringVar(&juiceFSSecretNamespace, "juicefs-secret-namespace", "kube-system", "Namespace of the JuiceFS secret")
+	flag.StringVar(&nfsSecretName, "nfs-secret-name", "nfs-secret", "Name of the NFS secret")
+	flag.StringVar(&nfsSecretNamespace, "nfs-secret-namespace", "kube-system", "Namespace of the NFS secret")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -130,6 +134,8 @@ func main() {
 			XpraServerImage:        xpraServerImage,
 			JuiceFSSecretName:      juiceFSSecretName,
 			JuiceFSSecretNamespace: juiceFSSecretNamespace,
+			NFSSecretName:          nfsSecretName,
+			NFSSecretNamespace:     nfsSecretNamespace,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
