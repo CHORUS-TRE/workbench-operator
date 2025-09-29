@@ -199,7 +199,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	storageManager := NewStorageManager(r)
 	_, err = storageManager.ProcessEnabledStorage(ctx, workbench)
 	if err != nil {
-		log.V(1).Error(err, "Error processing storage")
+		log.Error(err, "Error processing storage")
 		return ctrl.Result{}, err
 	}
 

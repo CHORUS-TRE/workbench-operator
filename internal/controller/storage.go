@@ -193,7 +193,7 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 			provider.GetStorageType(),
 			provider.GetStorageType())
 
-		log.V(1).Info("Secret not found - skipping PV/PVC creation",
+		log.Info("Secret not found - skipping PV/PVC creation",
 			"storage", provider.GetStorageType(),
 			"secret", provider.GetSecretName(),
 			"namespace", provider.GetSecretNamespace())
@@ -212,7 +212,7 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	}
 
 	// Both driver and secret exist - proceed with storage setup and creation
-	log.V(1).Info("Storage driver and secret detected - creating PV/PVC resources",
+	log.Info("Storage driver and secret detected - creating PV/PVC resources",
 		"storage", provider.GetStorageType(),
 		"driver", provider.GetDriverName(),
 		"secret", provider.GetSecretName())
@@ -220,7 +220,7 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	// Create PV
 	pv, err := provider.CreatePV(ctx, workbench)
 	if err != nil {
-		log.V(1).Error(err, "Error creating PV")
+		log.Error(err, "Error creating PV")
 		return "", err
 	}
 
@@ -229,19 +229,19 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	err = sm.reconciler.Get(ctx, types.NamespacedName{Name: pv.Name}, &foundPV)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			log.V(1).Error(err, "Error checking PV", "pv", pv.Name)
+			log.Error(err, "Error checking PV", "pv", pv.Name)
 			return "", err
 		}
 
 		// PV doesn't exist - do setup phase (e.g., NFS directory creation) before creating PV
 		if err := provider.Setup(ctx, workbench); err != nil {
-			log.V(1).Error(err, "Error during storage setup")
+			log.Error(err, "Error during storage setup")
 			return "", err
 		}
 
 		log.V(1).Info("Creating PV", "pv", pv.Name)
 		if err := sm.reconciler.Create(ctx, pv); err != nil {
-			log.V(1).Error(err, "Error creating PV", "pv", pv.Name)
+			log.Error(err, "Error creating PV", "pv", pv.Name)
 			return "", err
 		}
 	} else {
@@ -251,7 +251,7 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	// Create PVC
 	pvc, err := provider.CreatePVC(ctx, workbench)
 	if err != nil {
-		log.V(1).Error(err, "Error creating PVC")
+		log.Error(err, "Error creating PVC")
 		return "", err
 	}
 
@@ -265,13 +265,13 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	err = sm.reconciler.Get(ctx, pvcNamespacedName, &foundPVC)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			log.V(1).Error(err, "Error checking PVC", "pvc", pvc.Name)
+			log.Error(err, "Error checking PVC", "pvc", pvc.Name)
 			return "", err
 		}
 
 		log.V(1).Info("Creating PVC", "pvc", pvc.Name, "namespace", pvc.Namespace)
 		if err := sm.reconciler.Create(ctx, pvc); err != nil {
-			log.V(1).Error(err, "Error creating PVC", "pvc", pvc.Name)
+			log.Error(err, "Error creating PVC", "pvc", pvc.Name)
 			return "", err
 		}
 	} else {
