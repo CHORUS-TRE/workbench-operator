@@ -46,7 +46,6 @@ type StorageProvider interface {
 	GetVolumeSpec(pvcName string) corev1.Volume
 	GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount
 
-
 	// Metadata
 	GetPVCName(namespace string) string
 	GetMountPath(user string) string
@@ -331,7 +330,6 @@ type BaseProvider struct {
 	driverName      string
 	secretName      string
 	secretNamespace string
-	volumeName      string
 	mountType       string
 	pvcLabel        string
 }
@@ -341,8 +339,8 @@ func (b *BaseProvider) GetStorageType() StorageType { return b.storageType }
 func (b *BaseProvider) GetDriverName() string       { return b.driverName }
 func (b *BaseProvider) GetSecretName() string       { return b.secretName }
 func (b *BaseProvider) GetSecretNamespace() string  { return b.secretNamespace }
-func (b *BaseProvider) GetVolumeName() string       { return b.volumeName }
 func (b *BaseProvider) GetMountType() string        { return b.mountType }
+func (b *BaseProvider) GetVolumeName() string       { return fmt.Sprintf("workspace-%s", b.mountType) }
 
 // Common computed methods
 func (b *BaseProvider) GetPVCName(namespace string) string {
@@ -386,11 +384,11 @@ func (b *BaseProvider) HasSecret(ctx context.Context, client client.Client) bool
 
 // Common volume methods
 func (b *BaseProvider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return b.createVolumeSpec(b.volumeName, pvcName)
+	return b.createVolumeSpec(pvcName)
 }
 
 func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return b.createVolumeMountSpec(b.volumeName, b.GetMountPath(user), namespace)
+	return b.createVolumeMountSpec(b.GetMountPath(user), namespace)
 }
 
 // Common resource management - DeletePVC implemented directly
@@ -476,9 +474,9 @@ func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.
 }
 
 // Helper methods for BaseProvider
-func (b *BaseProvider) createVolumeSpec(volumeName, pvcName string) corev1.Volume {
+func (b *BaseProvider) createVolumeSpec(pvcName string) corev1.Volume {
 	return corev1.Volume{
-		Name: volumeName,
+		Name: b.GetVolumeName(),
 		VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 				ClaimName: pvcName,
@@ -487,9 +485,9 @@ func (b *BaseProvider) createVolumeSpec(volumeName, pvcName string) corev1.Volum
 	}
 }
 
-func (b *BaseProvider) createVolumeMountSpec(volumeName, mountPath, namespace string) corev1.VolumeMount {
+func (b *BaseProvider) createVolumeMountSpec(mountPath, namespace string) corev1.VolumeMount {
 	return corev1.VolumeMount{
-		Name:      volumeName,
+		Name:      b.GetVolumeName(),
 		MountPath: mountPath,
 		SubPath:   b.getWorkspaceSubPath(namespace),
 	}
@@ -519,9 +517,8 @@ func NewS3Provider(reconciler *WorkbenchReconciler) *S3Provider {
 			reconciler:      reconciler,
 			storageType:     StorageTypeS3,
 			driverName:      "csi.juicefs.com",
-			secretName:      "juicefs-secret",
-			secretNamespace: "kube-system",
-			volumeName:      "workspace-archive",
+			secretName:      reconciler.Config.JuiceFSSecretName,
+			secretNamespace: reconciler.Config.JuiceFSSecretNamespace,
 			mountType:       "archive",
 			pvcLabel:        "use-juicefs",
 		},
@@ -534,9 +531,8 @@ func NewNFSProvider(reconciler *WorkbenchReconciler) *NFSProvider {
 			reconciler:      reconciler,
 			storageType:     StorageTypeNFS,
 			driverName:      "nfs.csi.k8s.io",
-			secretName:      "nfs-secret",
-			secretNamespace: "kube-system",
-			volumeName:      "workspace-scratch",
+			secretName:      reconciler.Config.NFSSecretName,
+			secretNamespace: reconciler.Config.NFSSecretNamespace,
 			mountType:       "scratch",
 			pvcLabel:        "", // No label for NFS
 		},
@@ -551,7 +547,6 @@ func NewNFSProvider(reconciler *WorkbenchReconciler) *NFSProvider {
 type S3Provider struct {
 	BaseProvider
 }
-
 
 // HasSecret validates that the JuiceFS secret exists and has required fields
 func (s *S3Provider) HasSecret(ctx context.Context, client client.Client) bool {

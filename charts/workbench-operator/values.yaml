@@ -18,6 +18,10 @@ controllerManager:
     - --apps-repository=apps
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
     - --socat-image=alpine/socat:1.8.0.0
+    - --juicefs-secret-name={{ .Values.juicefs.secretName }}
+    - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
+    - --nfs-secret-name={{ .Values.nfs.secretName }}
+    - --nfs-secret-namespace={{ .Values.nfs.secretNamespace }}
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
