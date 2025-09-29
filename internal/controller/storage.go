@@ -46,6 +46,7 @@ type StorageProvider interface {
 	GetVolumeSpec(pvcName string) corev1.Volume
 	GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount
 
+
 	// Metadata
 	GetPVCName(namespace string) string
 	GetMountPath(user string) string
@@ -160,8 +161,8 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 
 	// Check if driver is available
 	if !provider.HasDriver(ctx, sm.reconciler.Client) {
-		log.V(1).Info(fmt.Sprintf("Storage driver '%s' not detected - skipping %s PV/PVC creation",
-			provider.GetDriverName(), provider.GetStorageType()),
+		log.V(1).Info("Storage driver not detected - skipping PV/PVC creation",
+			"storage", provider.GetStorageType(),
 			"driver", provider.GetDriverName())
 
 		// Driver missing - emit warning event but continue reconciliation
@@ -196,8 +197,8 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 			provider.GetStorageType(),
 			provider.GetStorageType())
 
-		log.V(1).Info(fmt.Sprintf("Secret '%s' not found in namespace '%s' - skipping %s PV/PVC creation",
-			provider.GetSecretName(), provider.GetSecretNamespace(), provider.GetStorageType()),
+		log.V(1).Info("Secret not found - skipping PV/PVC creation",
+			"storage", provider.GetStorageType(),
 			"secret", provider.GetSecretName(),
 			"namespace", provider.GetSecretNamespace())
 
@@ -215,8 +216,8 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	}
 
 	// Both driver and secret exist - proceed with storage setup and creation
-	log.V(1).Info(fmt.Sprintf("Storage driver '%s' and secret '%s' detected - creating %s PV/PVC resources",
-		provider.GetDriverName(), provider.GetSecretName(), provider.GetStorageType()),
+	log.V(1).Info("Storage driver and secret detected - creating PV/PVC resources",
+		"storage", provider.GetStorageType(),
 		"driver", provider.GetDriverName(),
 		"secret", provider.GetSecretName())
 
@@ -301,11 +302,12 @@ func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench 
 	for _, provider := range enabledProviders {
 		err := provider.DeletePVC(ctx, workbench)
 		if err != nil {
-			log.V(1).Error(err, fmt.Sprintf("Failed to delete %s PVC", provider.GetStorageType()))
+			log.V(1).Error(err, "Failed to delete PVC", "storage", provider.GetStorageType())
 			allErrors = append(allErrors, err)
 		} else {
 			deletedCount++
-			log.V(1).Info(fmt.Sprintf("Successfully deleted %s PVC", provider.GetStorageType()),
+			log.V(1).Info("Successfully deleted PVC",
+				"storage", provider.GetStorageType(),
 				"pvc", provider.GetPVCName(workbench.Namespace))
 		}
 	}
@@ -358,6 +360,19 @@ func (b *BaseProvider) GetMountPath(user string) string {
 // Common detection methods
 func (b *BaseProvider) HasDriver(ctx context.Context, client client.Client) bool {
 	return b.hasCSIDriver(ctx, client, b.driverName)
+}
+
+func (b *BaseProvider) getSecret(ctx context.Context) (*corev1.Secret, error) {
+	secret := &corev1.Secret{}
+	err := b.reconciler.Client.Get(ctx, types.NamespacedName{
+		Name:      b.secretName,
+		Namespace: b.secretNamespace,
+	}, secret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %s secret: %w", b.storageType, err)
+	}
+
+	return secret, nil
 }
 
 func (b *BaseProvider) HasSecret(ctx context.Context, client client.Client) bool {
@@ -537,15 +552,42 @@ type S3Provider struct {
 	BaseProvider
 }
 
+
+// HasSecret validates that the JuiceFS secret exists and has required fields
+func (s *S3Provider) HasSecret(ctx context.Context, client client.Client) bool {
+	_, err := s.getSecretConfig(ctx)
+	return err == nil
+}
+
 // Setup performs any pre-creation tasks - S3 doesn't need any setup
 func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
 	return nil
 }
 
+// getSecretConfig gets the JuiceFS secret and extracts bucket
+func (s *S3Provider) getSecretConfig(ctx context.Context) (string, error) {
+	secret, err := s.BaseProvider.getSecret(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	bucket := string(secret.Data["bucket"])
+	if bucket == "" {
+		return "", fmt.Errorf("JuiceFS secret missing required 'bucket' field")
+	}
+
+	return bucket, nil
+}
+
 // CreatePV creates a PersistentVolume for S3 storage
 func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
+	bucket, err := s.getSecretConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	volumeAttributes := map[string]string{
-		"bucket":  "my-juicefs-bucket",
+		"bucket":  bucket,
 		"subPath": fmt.Sprintf("workspaces/%s", workbench.Namespace),
 	}
 	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes)
@@ -560,10 +602,16 @@ type NFSProvider struct {
 	BaseProvider
 }
 
+// HasSecret validates that the NFS secret exists and has required fields
+func (n *NFSProvider) HasSecret(ctx context.Context, client client.Client) bool {
+	_, _, err := n.getSecretConfig(ctx)
+	return err == nil
+}
+
 // Setup performs NFS directory creation using a Job
 func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
 	// Get NFS secret and extract server/share
-	server, share, err := n.getNFSSecretConfig(ctx)
+	server, share, err := n.getSecretConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -596,6 +644,16 @@ func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workb
 								"-p",
 								fmt.Sprintf("/nfs/workspaces/%s", workbench.Namespace),
 							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("100m"),
+									corev1.ResourceMemory: resource.MustParse("64Mi"),
+								},
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("10m"),
+									corev1.ResourceMemory: resource.MustParse("16Mi"),
+								},
+							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "nfs-volume",
@@ -626,19 +684,15 @@ func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workb
 	return n.reconciler.Client.Create(ctx, job)
 }
 
-// getNFSSecretConfig gets the NFS secret and extracts server and share
-func (n *NFSProvider) getNFSSecretConfig(ctx context.Context) (string, string, error) {
-	nfsSecret := &corev1.Secret{}
-	err := n.reconciler.Client.Get(ctx, types.NamespacedName{
-		Name:      n.GetSecretName(),
-		Namespace: n.GetSecretNamespace(),
-	}, nfsSecret)
+// getSecretConfig gets the NFS secret and extracts server and share
+func (n *NFSProvider) getSecretConfig(ctx context.Context) (string, string, error) {
+	secret, err := n.BaseProvider.getSecret(ctx)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to get NFS secret: %w", err)
+		return "", "", err
 	}
 
-	server := string(nfsSecret.Data["server"])
-	share := string(nfsSecret.Data["share"])
+	server := string(secret.Data["server"])
+	share := string(secret.Data["share"])
 
 	if server == "" {
 		return "", "", fmt.Errorf("NFS secret missing required 'server' field")
@@ -652,7 +706,7 @@ func (n *NFSProvider) getNFSSecretConfig(ctx context.Context) (string, string, e
 
 // CreatePV creates a PersistentVolume for NFS storage
 func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
-	server, share, err := n.getNFSSecretConfig(ctx)
+	server, share, err := n.getSecretConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
