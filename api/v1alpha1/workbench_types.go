@@ -79,12 +79,12 @@ type KioskConfig struct {
 type StorageConfig struct {
 	// S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
 	// +optional
-	// +default:value=false
+	// +default:value=true
 	S3 bool `json:"s3,omitempty"`
 
 	// NFS enables NFS storage mounting at /home/{user}/workspace-scratch
 	// +optional
-	// +default:value=false
+	// +default:value=true
 	NFS bool `json:"nfs,omitempty"`
 }
 

@@ -229,11 +229,11 @@ spec:
                   NFS
                 properties:
                   nfs:
-                    default: false
+                    default: true
                     description: NFS enables NFS storage mounting at /home/{user}/workspace-scratch
                     type: boolean
                   s3:
-                    default: false
+                    default: true
                     description: S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
                     type: boolean
                 type: object

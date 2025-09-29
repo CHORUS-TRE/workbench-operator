@@ -3,9 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -72,8 +71,8 @@ func NewStorageManager(reconciler *WorkbenchReconciler) *StorageManager {
 	return &StorageManager{
 		reconciler: reconciler,
 		providers: map[StorageType]StorageProvider{
-			StorageTypeS3:  &S3Provider{reconciler: reconciler},
-			StorageTypeNFS: &NFSProvider{reconciler: reconciler},
+			StorageTypeS3:  NewS3Provider(reconciler),
+			StorageTypeNFS: NewNFSProvider(reconciler),
 		},
 	}
 }
@@ -285,443 +284,6 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	return provider.GetPVCName(workbench.Namespace), nil
 }
 
-// =============================================================================
-// S3Provider - JuiceFS/S3 storage implementation
-// =============================================================================
-
-// S3Provider implements StorageProvider for JuiceFS/S3 storage
-type S3Provider struct {
-	reconciler *WorkbenchReconciler
-}
-
-// HasDriver checks if the JuiceFS CSI driver is installed in the cluster
-func (s *S3Provider) HasDriver(ctx context.Context, client client.Client) bool {
-	return hasCSIDriver(ctx, client, s.GetDriverName())
-}
-
-// HasSecret checks if the configured JuiceFS secret exists
-func (s *S3Provider) HasSecret(ctx context.Context, client client.Client) bool {
-	secret := &corev1.Secret{}
-	err := client.Get(ctx, types.NamespacedName{
-		Name:      s.reconciler.Config.JuiceFSSecretName,
-		Namespace: s.reconciler.Config.JuiceFSSecretNamespace,
-	}, secret)
-	return err == nil
-}
-
-// Setup performs any pre-creation tasks - S3 doesn't need any setup
-func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	// S3/JuiceFS doesn't require any setup like directory creation
-	return nil
-}
-
-// CreatePV creates a PersistentVolume for S3 storage
-func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
-	pvName := s.getPVName(workbench.Namespace)
-
-	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			Capacity: corev1.ResourceList{
-				corev1.ResourceStorage: resource.MustParse("1Gi"),
-			},
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
-			StorageClassName:              "", // Empty string for direct binding
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver:       "csi.juicefs.com",
-					VolumeHandle: fmt.Sprintf("juicefs-%s", workbench.Namespace),
-					NodePublishSecretRef: &corev1.SecretReference{
-						Name:      s.reconciler.Config.JuiceFSSecretName,
-						Namespace: s.reconciler.Config.JuiceFSSecretNamespace,
-					},
-				},
-			},
-		},
-	}
-
-	return pv, nil
-}
-
-// CreatePVC creates a PersistentVolumeClaim for S3 storage
-func (s *S3Provider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error) {
-	pvcName := s.GetPVCName(workbench.Namespace)
-	pvName := s.getPVName(workbench.Namespace)
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: workbench.Namespace,
-			Labels: map[string]string{
-				"use-juicefs": "true",
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("1Gi"),
-				},
-			},
-			VolumeName:       pvName,
-			StorageClassName: getZeroStorageClass(),
-		},
-	}
-
-	return pvc, nil
-}
-
-// DeletePVC deletes the PVC for S3 storage
-func (s *S3Provider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	return deletePVC(ctx, s.reconciler.Client, s.GetPVCName(workbench.Namespace), workbench.Namespace, string(s.GetStorageType()))
-}
-
-// GetVolumeSpec returns the volume specification for job pods
-func (s *S3Provider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return createVolumeSpec(s.GetVolumeName(), pvcName)
-}
-
-// GetVolumeMountSpec returns the volume mount specification for job containers
-func (s *S3Provider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return createVolumeMountSpec(s.GetVolumeName(), s.GetMountPath(user), namespace)
-}
-
-// GetPVCName returns the PVC name for this storage type
-func (s *S3Provider) GetPVCName(namespace string) string {
-	return fmt.Sprintf("%s-s3-pvc", namespace)
-}
-
-// getPVName returns the PV name for this storage type
-func (s *S3Provider) getPVName(namespace string) string {
-	return fmt.Sprintf("%s-s3-pv", namespace)
-}
-
-// GetMountPath returns the mount path for this storage type
-func (s *S3Provider) GetMountPath(user string) string {
-	return fmt.Sprintf("/home/%s/workspace-archive", user)
-}
-
-// GetStorageType returns the storage type identifier
-func (s *S3Provider) GetStorageType() StorageType {
-	return StorageTypeS3
-}
-
-// GetDriverName returns the CSI driver name
-func (s *S3Provider) GetDriverName() string {
-	return "csi.juicefs.com"
-}
-
-// GetSecretName returns the secret name
-func (s *S3Provider) GetSecretName() string {
-	return s.reconciler.Config.JuiceFSSecretName
-}
-
-// GetSecretNamespace returns the secret namespace
-func (s *S3Provider) GetSecretNamespace() string {
-	return s.reconciler.Config.JuiceFSSecretNamespace
-}
-
-// GetVolumeName returns the volume name for this storage type
-func (s *S3Provider) GetVolumeName() string {
-	return "workspace-archive"
-}
-
-// =============================================================================
-// NFSProvider - NFS storage implementation
-// =============================================================================
-
-// NFSProvider implements StorageProvider for NFS storage
-type NFSProvider struct {
-	reconciler *WorkbenchReconciler
-}
-
-// HasDriver checks if the NFS CSI driver is installed in the cluster
-func (n *NFSProvider) HasDriver(ctx context.Context, client client.Client) bool {
-	return hasCSIDriver(ctx, client, n.GetDriverName())
-}
-
-// HasSecret checks if the NFS secret exists
-func (n *NFSProvider) HasSecret(ctx context.Context, client client.Client) bool {
-	secret := &corev1.Secret{}
-	err := client.Get(ctx, types.NamespacedName{
-		Name:      n.GetSecretName(),
-		Namespace: n.GetSecretNamespace(),
-	}, secret)
-	return err == nil
-}
-
-// Setup performs NFS directory creation
-func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	// Get the NFS secret for directory creation
-	nfsSecret := &corev1.Secret{}
-	err := n.reconciler.Client.Get(ctx, types.NamespacedName{
-		Name:      n.GetSecretName(),
-		Namespace: n.GetSecretNamespace(),
-	}, nfsSecret)
-	if err != nil {
-		return fmt.Errorf("failed to get NFS secret: %w", err)
-	}
-
-	// Create the workspace directory in NFS
-	return n.ensureNFSWorkspaceDirectory(ctx, workbench, nfsSecret)
-}
-
-// CreatePV creates a PersistentVolume for NFS storage
-func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
-	pvName := n.getPVName(workbench.Namespace)
-
-	// Get NFS secret for server details
-	nfsSecret := &corev1.Secret{}
-	err := n.reconciler.Client.Get(ctx, types.NamespacedName{
-		Name:      n.GetSecretName(),
-		Namespace: n.GetSecretNamespace(),
-	}, nfsSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get NFS secret: %w", err)
-	}
-
-	server, share, err := n.getNFSSecretConfig(nfsSecret)
-	if err != nil {
-		return nil, err
-	}
-
-	pv := &corev1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: pvName,
-		},
-		Spec: corev1.PersistentVolumeSpec{
-			Capacity: corev1.ResourceList{
-				corev1.ResourceStorage: resource.MustParse("10Gi"),
-			},
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
-			StorageClassName:              "", // Empty string for direct binding
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver:       "nfs.csi.k8s.io",
-					VolumeHandle: fmt.Sprintf("nfs-%s", workbench.Namespace),
-					VolumeAttributes: map[string]string{
-						"server": server,
-						"share":  share,
-					},
-				},
-			},
-		},
-	}
-
-	return pv, nil
-}
-
-// CreatePVC creates a PersistentVolumeClaim for NFS storage
-func (n *NFSProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error) {
-	pvcName := n.GetPVCName(workbench.Namespace)
-	pvName := n.getPVName(workbench.Namespace)
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: workbench.Namespace,
-			Labels: map[string]string{
-				"use-nfs": "true",
-			},
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("10Gi"),
-				},
-			},
-			VolumeName:       pvName,
-			StorageClassName: getZeroStorageClass(),
-		},
-	}
-
-	return pvc, nil
-}
-
-// DeletePVC deletes the PVC for NFS storage
-func (n *NFSProvider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	return deletePVC(ctx, n.reconciler.Client, n.GetPVCName(workbench.Namespace), workbench.Namespace, string(n.GetStorageType()))
-}
-
-// GetVolumeSpec returns the volume specification for job pods
-func (n *NFSProvider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return createVolumeSpec(n.GetVolumeName(), pvcName)
-}
-
-// GetVolumeMountSpec returns the volume mount specification for job containers
-func (n *NFSProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return createVolumeMountSpec(n.GetVolumeName(), n.GetMountPath(user), namespace)
-}
-
-// GetPVCName returns the PVC name for this storage type
-func (n *NFSProvider) GetPVCName(namespace string) string {
-	return fmt.Sprintf("%s-nfs-pvc", namespace)
-}
-
-// getPVName returns the PV name for this storage type
-func (n *NFSProvider) getPVName(namespace string) string {
-	return fmt.Sprintf("%s-nfs-pv", namespace)
-}
-
-// GetMountPath returns the mount path for this storage type
-func (n *NFSProvider) GetMountPath(user string) string {
-	return fmt.Sprintf("/home/%s/workspace-scratch", user)
-}
-
-// GetStorageType returns the storage type identifier
-func (n *NFSProvider) GetStorageType() StorageType {
-	return StorageTypeNFS
-}
-
-// GetDriverName returns the CSI driver name
-func (n *NFSProvider) GetDriverName() string {
-	return "nfs.csi.k8s.io"
-}
-
-// GetSecretName returns the secret name
-func (n *NFSProvider) GetSecretName() string {
-	return n.reconciler.Config.NFSSecretName
-}
-
-// GetSecretNamespace returns the secret namespace
-func (n *NFSProvider) GetSecretNamespace() string {
-	return n.reconciler.Config.NFSSecretNamespace
-}
-
-// GetVolumeName returns the volume name for this storage type
-func (n *NFSProvider) GetVolumeName() string {
-	return "workspace-scratch"
-}
-
-// getNFSSecretConfig validates and extracts server and share from NFS secret
-func (n *NFSProvider) getNFSSecretConfig(nfsSecret *corev1.Secret) (string, string, error) {
-	server := string(nfsSecret.Data["server"])
-	share := string(nfsSecret.Data["share"])
-
-	if server == "" {
-		return "", "", fmt.Errorf("NFS secret missing required 'server' field")
-	}
-	if share == "" {
-		return "", "", fmt.Errorf("NFS secret missing required 'share' field")
-	}
-
-	return server, share, nil
-}
-
-// ensureNFSWorkspaceDirectory creates the workspace directory in NFS if it doesn't exist
-func (n *NFSProvider) ensureNFSWorkspaceDirectory(ctx context.Context, workbench defaultv1alpha1.Workbench, nfsSecret *corev1.Secret) error {
-	log := log.FromContext(ctx)
-
-	// Validate namespace for path safety (prevent directory traversal)
-	if strings.Contains(workbench.Namespace, "..") || strings.Contains(workbench.Namespace, "/") {
-		return fmt.Errorf("invalid namespace for NFS directory creation: %s", workbench.Namespace)
-	}
-
-	// Validate and extract NFS secret data
-	server, share, err := n.getNFSSecretConfig(nfsSecret)
-	if err != nil {
-		return err
-	}
-
-	// Create temporary pod to create directory
-	dirCreatorPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("nfs-dir-creator-%s", workbench.Namespace),
-			Namespace: workbench.Namespace,
-			Labels: map[string]string{
-				"app":       "nfs-directory-creator",
-				"workbench": workbench.Name,
-			},
-		},
-		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			Containers: []corev1.Container{
-				{
-					Name:  "mkdir",
-					Image: "busybox:latest",
-					Command: []string{
-						"mkdir",
-						"-p",
-						fmt.Sprintf("/nfs/workspaces/%s", workbench.Namespace),
-					},
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      "nfs-volume",
-							MountPath: "/nfs",
-						},
-					},
-				},
-			},
-			Volumes: []corev1.Volume{
-				{
-					Name: "nfs-volume",
-					VolumeSource: corev1.VolumeSource{
-						CSI: &corev1.CSIVolumeSource{
-							Driver: "nfs.csi.k8s.io",
-							VolumeAttributes: map[string]string{
-								"server": server,
-								"share":  share,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Create the pod
-	if err := n.reconciler.Client.Create(ctx, dirCreatorPod); err != nil {
-		return fmt.Errorf("failed to create directory creation pod: %w", err)
-	}
-
-	// Wait for pod completion (with timeout)
-	timeout := time.After(60 * time.Second)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			// Cleanup the pod on timeout
-			_ = n.reconciler.Client.Delete(ctx, dirCreatorPod)
-			return fmt.Errorf("directory creation pod timed out")
-		case <-ticker.C:
-			var pod corev1.Pod
-			err := n.reconciler.Client.Get(ctx, types.NamespacedName{
-				Name:      dirCreatorPod.Name,
-				Namespace: dirCreatorPod.Namespace,
-			}, &pod)
-			if err != nil {
-				continue
-			}
-
-			if pod.Status.Phase == corev1.PodSucceeded {
-				log.V(1).Info("NFS workspace directory created successfully")
-				// Cleanup the pod
-				_ = n.reconciler.Client.Delete(ctx, dirCreatorPod)
-				return nil
-			} else if pod.Status.Phase == corev1.PodFailed {
-				// Cleanup the pod
-				_ = n.reconciler.Client.Delete(ctx, dirCreatorPod)
-				return fmt.Errorf("directory creation pod failed")
-			}
-		}
-	}
-}
-
 // DeleteStorageResources deletes all storage resources (PVCs) for enabled storage providers
 // PVs are automatically deleted due to PersistentVolumeReclaimDelete policy
 func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
@@ -757,28 +319,149 @@ func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench 
 }
 
 // =============================================================================
-// Helper functions
+// BaseProvider - Common functionality for all storage providers
 // =============================================================================
 
-// deletePVC is a shared helper function to delete PVCs for any storage type
-func deletePVC(ctx context.Context, client client.Client, pvcName, namespace, storageType string) error {
+// BaseProvider contains common fields and methods for all storage providers
+type BaseProvider struct {
+	reconciler      *WorkbenchReconciler
+	storageType     StorageType
+	driverName      string
+	secretName      string
+	secretNamespace string
+	volumeName      string
+	mountType       string
+	pvcLabel        string
+}
+
+// Common getters
+func (b *BaseProvider) GetStorageType() StorageType { return b.storageType }
+func (b *BaseProvider) GetDriverName() string       { return b.driverName }
+func (b *BaseProvider) GetSecretName() string       { return b.secretName }
+func (b *BaseProvider) GetSecretNamespace() string  { return b.secretNamespace }
+func (b *BaseProvider) GetVolumeName() string       { return b.volumeName }
+func (b *BaseProvider) GetMountType() string        { return b.mountType }
+
+// Common computed methods
+func (b *BaseProvider) GetPVCName(namespace string) string {
+	return fmt.Sprintf("%s-%s-pvc", namespace, b.mountType)
+}
+
+func (b *BaseProvider) getPVName(namespace string) string {
+	return fmt.Sprintf("%s-%s-pv", namespace, b.mountType)
+}
+
+func (b *BaseProvider) GetMountPath(user string) string {
+	return fmt.Sprintf("/home/%s/workspace-%s", user, b.mountType)
+}
+
+// Common detection methods
+func (b *BaseProvider) HasDriver(ctx context.Context, client client.Client) bool {
+	return b.hasCSIDriver(ctx, client, b.driverName)
+}
+
+func (b *BaseProvider) HasSecret(ctx context.Context, client client.Client) bool {
+	secret := &corev1.Secret{}
+	err := client.Get(ctx, types.NamespacedName{
+		Name:      b.secretName,
+		Namespace: b.secretNamespace,
+	}, secret)
+	return err == nil
+}
+
+// Common volume methods
+func (b *BaseProvider) GetVolumeSpec(pvcName string) corev1.Volume {
+	return b.createVolumeSpec(b.volumeName, pvcName)
+}
+
+func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
+	return b.createVolumeMountSpec(b.volumeName, b.GetMountPath(user), namespace)
+}
+
+// Common resource management - DeletePVC implemented directly
+func (b *BaseProvider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
+	pvcName := b.GetPVCName(workbench.Namespace)
+
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
-			Namespace: namespace,
+			Namespace: workbench.Namespace,
 		},
 	}
 
-	err := client.Delete(ctx, pvc)
+	err := b.reconciler.Client.Delete(ctx, pvc)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete %s PVC %s: %w", storageType, pvcName, err)
+		return fmt.Errorf("failed to delete %s PVC %s: %w", b.storageType, pvcName, err)
 	}
 
 	return nil
 }
 
-// createVolumeSpec is a shared helper function to create volume specs for PVCs
-func createVolumeSpec(volumeName, pvcName string) corev1.Volume {
+// Common PV creation - needs provider-specific volumeAttributes
+func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]string) (*corev1.PersistentVolume, error) {
+	pvName := b.getPVName(namespace)
+
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvName,
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("10Gi"),
+			},
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteMany,
+			},
+			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimDelete,
+			StorageClassName:              "",
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver:           b.driverName,
+					VolumeHandle:     fmt.Sprintf("%s-%s", b.mountType, namespace),
+					VolumeAttributes: volumeAttributes,
+				},
+			},
+		},
+	}
+
+	return pv, nil
+}
+
+func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error) {
+	pvcName := b.GetPVCName(workbench.Namespace)
+	pvName := b.getPVName(workbench.Namespace)
+
+	// Only add label if pvcLabel is not empty
+	labels := map[string]string{}
+	if b.pvcLabel != "" {
+		labels[b.pvcLabel] = "true"
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: workbench.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteMany,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("10Gi"),
+				},
+			},
+			VolumeName:       pvName,
+			StorageClassName: b.getZeroStorageClass(),
+		},
+	}
+
+	return pvc, nil
+}
+
+// Helper methods for BaseProvider
+func (b *BaseProvider) createVolumeSpec(volumeName, pvcName string) corev1.Volume {
 	return corev1.Volume{
 		Name: volumeName,
 		VolumeSource: corev1.VolumeSource{
@@ -789,28 +472,194 @@ func createVolumeSpec(volumeName, pvcName string) corev1.Volume {
 	}
 }
 
-// createVolumeMountSpec is a shared helper function to create volume mount specs
-func createVolumeMountSpec(volumeName, mountPath, namespace string) corev1.VolumeMount {
+func (b *BaseProvider) createVolumeMountSpec(volumeName, mountPath, namespace string) corev1.VolumeMount {
 	return corev1.VolumeMount{
 		Name:      volumeName,
 		MountPath: mountPath,
-		SubPath:   getWorkspaceSubPath(namespace),
+		SubPath:   b.getWorkspaceSubPath(namespace),
 	}
 }
 
-// hasCSIDriver is a shared helper function to check if a CSI driver is installed
-func hasCSIDriver(ctx context.Context, client client.Client, driverName string) bool {
+func (b *BaseProvider) hasCSIDriver(ctx context.Context, client client.Client, driverName string) bool {
 	csiDriver := &storagev1.CSIDriver{}
 	err := client.Get(ctx, types.NamespacedName{Name: driverName}, csiDriver)
 	return err == nil
 }
 
-// Helper function to get zero storage class pointer
-func getZeroStorageClass() *string {
+func (b *BaseProvider) getZeroStorageClass() *string {
 	return new(string) // already "" by default
 }
 
-// getWorkspaceSubPath returns the common subpath for workspace storage
-func getWorkspaceSubPath(namespace string) string {
+func (b *BaseProvider) getWorkspaceSubPath(namespace string) string {
 	return fmt.Sprintf("workspaces/%s", namespace)
+}
+
+// =============================================================================
+// Provider Constructors
+// =============================================================================
+
+func NewS3Provider(reconciler *WorkbenchReconciler) *S3Provider {
+	return &S3Provider{
+		BaseProvider: BaseProvider{
+			reconciler:      reconciler,
+			storageType:     StorageTypeS3,
+			driverName:      "csi.juicefs.com",
+			secretName:      "juicefs-secret",
+			secretNamespace: "kube-system",
+			volumeName:      "workspace-archive",
+			mountType:       "archive",
+			pvcLabel:        "use-juicefs",
+		},
+	}
+}
+
+func NewNFSProvider(reconciler *WorkbenchReconciler) *NFSProvider {
+	return &NFSProvider{
+		BaseProvider: BaseProvider{
+			reconciler:      reconciler,
+			storageType:     StorageTypeNFS,
+			driverName:      "nfs.csi.k8s.io",
+			secretName:      "nfs-secret",
+			secretNamespace: "kube-system",
+			volumeName:      "workspace-scratch",
+			mountType:       "scratch",
+			pvcLabel:        "", // No label for NFS
+		},
+	}
+}
+
+// =============================================================================
+// S3Provider - JuiceFS/S3 storage implementation
+// =============================================================================
+
+// S3Provider implements StorageProvider for JuiceFS/S3 storage
+type S3Provider struct {
+	BaseProvider
+}
+
+// Setup performs any pre-creation tasks - S3 doesn't need any setup
+func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
+	return nil
+}
+
+// CreatePV creates a PersistentVolume for S3 storage
+func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
+	volumeAttributes := map[string]string{
+		"bucket":  "my-juicefs-bucket",
+		"subPath": fmt.Sprintf("workspaces/%s", workbench.Namespace),
+	}
+	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes)
+}
+
+// =============================================================================
+// NFSProvider - NFS storage implementation
+// =============================================================================
+
+// NFSProvider implements StorageProvider for NFS storage
+type NFSProvider struct {
+	BaseProvider
+}
+
+// Setup performs NFS directory creation using a Job
+func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
+	// Get NFS secret and extract server/share
+	server, share, err := n.getNFSSecretConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Create Job to create NFS directory
+	ttl := int32(300)   // 5 minutes cleanup
+	backoff := int32(2) // 2 retries
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("nfs-mkdir-%s", workbench.Namespace),
+			Namespace: workbench.Namespace,
+			Labels: map[string]string{
+				"app":       "nfs-directory-creator",
+				"workbench": workbench.Name,
+			},
+		},
+		Spec: batchv1.JobSpec{
+			TTLSecondsAfterFinished: &ttl,
+			BackoffLimit:            &backoff,
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:  "mkdir",
+							Image: "busybox:latest",
+							Command: []string{
+								"mkdir",
+								"-p",
+								fmt.Sprintf("/nfs/workspaces/%s", workbench.Namespace),
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "nfs-volume",
+									MountPath: "/nfs",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "nfs-volume",
+							VolumeSource: corev1.VolumeSource{
+								CSI: &corev1.CSIVolumeSource{
+									Driver: n.GetDriverName(),
+									VolumeAttributes: map[string]string{
+										"server": server,
+										"share":  share,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return n.reconciler.Client.Create(ctx, job)
+}
+
+// getNFSSecretConfig gets the NFS secret and extracts server and share
+func (n *NFSProvider) getNFSSecretConfig(ctx context.Context) (string, string, error) {
+	nfsSecret := &corev1.Secret{}
+	err := n.reconciler.Client.Get(ctx, types.NamespacedName{
+		Name:      n.GetSecretName(),
+		Namespace: n.GetSecretNamespace(),
+	}, nfsSecret)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get NFS secret: %w", err)
+	}
+
+	server := string(nfsSecret.Data["server"])
+	share := string(nfsSecret.Data["share"])
+
+	if server == "" {
+		return "", "", fmt.Errorf("NFS secret missing required 'server' field")
+	}
+	if share == "" {
+		return "", "", fmt.Errorf("NFS secret missing required 'share' field")
+	}
+
+	return server, share, nil
+}
+
+// CreatePV creates a PersistentVolume for NFS storage
+func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
+	server, share, err := n.getNFSSecretConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	volumeAttributes := map[string]string{
+		"server": server,
+		"share":  share,
+	}
+	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes)
 }
