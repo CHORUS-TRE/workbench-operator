@@ -283,7 +283,6 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	return provider.GetPVCName(workbench.Namespace), nil
 }
 
-// checkPVCExists is a private helper to check if a PVC exists for a provider
 func (sm *StorageManager) checkPVCExists(ctx context.Context, provider StorageProvider, workbench defaultv1alpha1.Workbench) (bool, error) {
 	pvcName := provider.GetPVCName(workbench.Namespace)
 
