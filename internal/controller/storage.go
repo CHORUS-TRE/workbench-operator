@@ -577,13 +577,10 @@ func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wor
 	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
 }
 
-// GetWorkspaceSubPath overrides base implementation for S3 to avoid double path
-// Since PV VolumeAttributes already contains workspaces/namespace, VolumeMount subPath should just be namespace
 func (s *S3Provider) GetWorkspaceSubPath(namespace string) string {
 	return namespace
 }
 
-// GetVolumeMountSpec overrides base implementation to use S3-specific subPath
 func (s *S3Provider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
 	return corev1.VolumeMount{
 		Name:      s.GetVolumeName(),
@@ -719,12 +716,10 @@ func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wo
 	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nil)
 }
 
-// GetWorkspaceSubPath implements the interface for NFS - uses full workspaces/namespace path
 func (n *NFSProvider) GetWorkspaceSubPath(namespace string) string {
 	return fmt.Sprintf("workspaces/%s", namespace)
 }
 
-// GetVolumeMountSpec overrides base implementation to use NFS-specific subPath
 func (n *NFSProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
 	return corev1.VolumeMount{
 		Name:      n.GetVolumeName(),
