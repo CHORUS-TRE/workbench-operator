@@ -576,14 +576,10 @@ func (s *S3Provider) getSecretConfig(ctx context.Context) (string, error) {
 
 // CreatePV creates a PersistentVolume for S3 storage
 func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
-	bucket, err := s.getSecretConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+	// JuiceFS is configured purely through NodePublishSecretRef
+	// No VolumeAttributes needed - filesystem mounted at root, SubPath handles navigation
 	volumeAttributes := map[string]string{
-		"bucket":  bucket,
-		"subPath": fmt.Sprintf("workspaces/%s", workbench.Namespace),
+		// JuiceFS specific attributes can be added here if needed
 	}
 
 	// JuiceFS requires NodePublishSecretRef for authentication
