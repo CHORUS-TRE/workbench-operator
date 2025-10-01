@@ -54,7 +54,6 @@ type StorageProvider interface {
 	GetSecretName() string
 	GetSecretNamespace() string
 	GetVolumeName() string
-	GetWorkspaceSubPath(namespace string) string
 }
 
 // =============================================================================
@@ -387,7 +386,6 @@ func (b *BaseProvider) GetVolumeSpec(pvcName string) corev1.Volume {
 	return b.createVolumeSpec(pvcName)
 }
 
-
 // Common resource management - DeletePVC implemented directly
 func (b *BaseProvider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
 	pvcName := b.GetPVCName(workbench.Namespace)
@@ -483,7 +481,6 @@ func (b *BaseProvider) createVolumeSpec(pvcName string) corev1.Volume {
 	}
 }
 
-
 func (b *BaseProvider) hasCSIDriver(ctx context.Context, client client.Client, driverName string) bool {
 	csiDriver := &storagev1.CSIDriver{}
 	err := client.Get(ctx, types.NamespacedName{Name: driverName}, csiDriver)
@@ -494,6 +491,17 @@ func (b *BaseProvider) getZeroStorageClass() *string {
 	return new(string) // already "" by default
 }
 
+func (b *BaseProvider) getWorkspaceSubPath(namespace string) string {
+	return fmt.Sprintf("workspaces/%s", namespace)
+}
+
+func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
+	return corev1.VolumeMount{
+		Name:      b.GetVolumeName(),
+		MountPath: b.GetMountPath(user),
+		SubPath:   b.getWorkspaceSubPath(namespace),
+	}
+}
 
 // =============================================================================
 // Provider Constructors
@@ -547,25 +555,31 @@ func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbe
 	return nil
 }
 
-// getSecretConfig gets the JuiceFS secret and extracts bucket
+// getSecretConfig gets the JuiceFS secret and extracts filesystem name
 func (s *S3Provider) getSecretConfig(ctx context.Context) (string, error) {
 	secret, err := s.BaseProvider.getSecret(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	bucket := string(secret.Data["bucket"])
-	if bucket == "" {
-		return "", fmt.Errorf("JuiceFS secret missing required 'bucket' field")
+	name := string(secret.Data["name"])
+	if name == "" {
+		return "", fmt.Errorf("JuiceFS secret missing required 'name' field")
 	}
 
-	return bucket, nil
+	return name, nil
 }
 
 // CreatePV creates a PersistentVolume for S3 storage
 func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
+	fsName, err := s.getSecretConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	volumeAttributes := map[string]string{
-		"subPath": fmt.Sprintf("workspaces/%s", workbench.Namespace), // Required for CSI driver deletion
+		"name": fsName,
+		"path": "/",
 	}
 
 	// JuiceFS requires NodePublishSecretRef for authentication
@@ -575,18 +589,6 @@ func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wor
 	}
 
 	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
-}
-
-func (s *S3Provider) GetWorkspaceSubPath(namespace string) string {
-	return namespace
-}
-
-func (s *S3Provider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return corev1.VolumeMount{
-		Name:      s.GetVolumeName(),
-		MountPath: s.GetMountPath(user),
-		SubPath:   s.GetWorkspaceSubPath(namespace),
-	}
 }
 
 // =============================================================================
@@ -714,16 +716,4 @@ func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wo
 
 	// NFS doesn't require NodePublishSecretRef
 	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nil)
-}
-
-func (n *NFSProvider) GetWorkspaceSubPath(namespace string) string {
-	return fmt.Sprintf("workspaces/%s", namespace)
-}
-
-func (n *NFSProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return corev1.VolumeMount{
-		Name:      n.GetVolumeName(),
-		MountPath: n.GetMountPath(user),
-		SubPath:   n.GetWorkspaceSubPath(namespace),
-	}
 }
