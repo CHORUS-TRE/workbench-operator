@@ -283,11 +283,30 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	return provider.GetPVCName(workbench.Namespace), nil
 }
 
+func (sm *StorageManager) checkPVCExists(ctx context.Context, provider StorageProvider, workbench defaultv1alpha1.Workbench) (bool, error) {
+	pvcName := provider.GetPVCName(workbench.Namespace)
+
+	pvc := &corev1.PersistentVolumeClaim{}
+	err := sm.reconciler.Client.Get(ctx, types.NamespacedName{
+		Name:      pvcName,
+		Namespace: workbench.Namespace,
+	}, pvc)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check %s PVC %s: %w", provider.GetStorageType(), pvcName, err)
+	}
+
+	return true, nil
+}
+
 // DeleteStorageResources deletes all storage resources (PVCs) for enabled storage providers
 // PVs are automatically deleted due to PersistentVolumeReclaimDelete policy
+// Returns the count of PVCs that exist (not the count of deletion attempts)
 func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
 	log := log.FromContext(ctx)
-	deletedCount := 0
 
 	enabledProviders := sm.GetEnabledProviders(workbench)
 	if len(enabledProviders) == 0 {
@@ -295,27 +314,66 @@ func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench 
 		return 0, nil
 	}
 
-	var allErrors []error
+	// First, count PVCs that actually exist
+	existingCount := 0
+	var checkErrors []error
 
 	for _, provider := range enabledProviders {
-		err := provider.DeletePVC(ctx, workbench)
+		exists, err := sm.checkPVCExists(ctx, provider, workbench)
 		if err != nil {
-			log.V(1).Error(err, "Failed to delete PVC", "storage", provider.GetStorageType())
-			allErrors = append(allErrors, err)
-		} else {
-			deletedCount++
-			log.V(1).Info("Successfully deleted PVC",
+			log.V(1).Error(err, "Failed to check PVC existence",
+				"storage", provider.GetStorageType())
+			checkErrors = append(checkErrors, err)
+			continue
+		}
+
+		if exists {
+			existingCount++
+			log.V(1).Info("Found PVC to delete",
 				"storage", provider.GetStorageType(),
 				"pvc", provider.GetPVCName(workbench.Namespace))
 		}
 	}
 
-	// Return the first error if any occurred
-	if len(allErrors) > 0 {
-		return deletedCount, allErrors[0]
+	// If we had errors checking, return the first one
+	if len(checkErrors) > 0 {
+		return existingCount, checkErrors[0]
 	}
 
-	return deletedCount, nil
+	// If no PVCs exist, we're done
+	if existingCount == 0 {
+		log.V(1).Info("No PVCs to delete - storage cleanup complete")
+		return 0, nil
+	}
+
+	// Delete PVCs that exist
+	log.V(1).Info("Deleting PVCs", "count", existingCount)
+	var deleteErrors []error
+
+	for _, provider := range enabledProviders {
+		exists, _ := sm.checkPVCExists(ctx, provider, workbench)
+		if !exists {
+			continue
+		}
+
+		err := provider.DeletePVC(ctx, workbench)
+		if err != nil {
+			log.V(1).Error(err, "Failed to delete PVC",
+				"storage", provider.GetStorageType())
+			deleteErrors = append(deleteErrors, err)
+		} else {
+			log.V(1).Info("Initiated PVC deletion",
+				"storage", provider.GetStorageType(),
+				"pvc", provider.GetPVCName(workbench.Namespace))
+		}
+	}
+
+	// Return the first delete error if any occurred
+	if len(deleteErrors) > 0 {
+		return existingCount, deleteErrors[0]
+	}
+
+	return existingCount, nil
 }
 
 // =============================================================================
