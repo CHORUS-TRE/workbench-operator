@@ -212,6 +212,16 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		workbench.Spec.Apps = make(map[string]defaultv1alpha1.WorkbenchApp)
 	}
 
+	// Check if xpra server is ready before creating app jobs
+	xpraReady := workbench.Status.ServerDeployment.ServerContainer != nil &&
+		workbench.Status.ServerDeployment.ServerContainer.Ready
+
+	if !xpraReady {
+		log.V(1).Info("Xpra server not ready yet, skipping app job creation")
+		// Requeue to check again later
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	for uid, app := range workbench.Spec.Apps {
 		job := initJob(ctx, workbench, r.Config, uid, app, service, storageManager)
 
