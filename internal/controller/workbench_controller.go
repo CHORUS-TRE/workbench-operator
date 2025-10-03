@@ -219,7 +219,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if !xpraReady {
 		log.V(1).Info("Xpra server not ready yet, skipping app job creation")
 		// Requeue to check again later
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	for uid, app := range workbench.Spec.Apps {
