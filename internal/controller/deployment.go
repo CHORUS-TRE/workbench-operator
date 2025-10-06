@@ -27,7 +27,7 @@ func NewHTTPProbe(path, portName string, delay, period int) *corev1.Probe {
 		PeriodSeconds:       int32(period),
 		TimeoutSeconds:      2,
 		SuccessThreshold:    1,
-		FailureThreshold:    3,
+		FailureThreshold:    10,
 	}
 }
 
@@ -161,8 +161,8 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 			},
 		},
 		VolumeMounts:   volumeMounts,
-		LivenessProbe:  NewHTTPProbe("/", "http", 10, 10),
-		ReadinessProbe: NewHTTPProbe("/", "http", 5, 5),
+		LivenessProbe:  NewHTTPProbe("/", "http", 1, 2),
+		ReadinessProbe: NewHTTPProbe("/", "http", 1, 2),
 	}
 
 	if workbench.Spec.Server.InitialResolutionWidth != 0 && workbench.Spec.Server.InitialResolutionHeight != 0 {
