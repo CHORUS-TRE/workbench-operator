@@ -607,12 +607,9 @@ func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workb
 						{
 							Name: "nfs-volume",
 							VolumeSource: corev1.VolumeSource{
-								CSI: &corev1.CSIVolumeSource{
-									Driver: n.GetDriverName(),
-									VolumeAttributes: map[string]string{
-										"server": server,
-										"share":  share,
-									},
+								NFS: &corev1.NFSVolumeSource{
+									Server: server,
+									Path:   share,
 								},
 							},
 						},
