@@ -39,9 +39,6 @@ type StorageProvider interface {
 	CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error)
 	CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error)
 
-	// Resource cleanup
-	DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error
-
 	// Volume configuration for jobs
 	GetVolumeSpec(pvcName string) corev1.Volume
 	GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount
@@ -283,99 +280,6 @@ func (sm *StorageManager) processStorageProvider(ctx context.Context, workbench 
 	return provider.GetPVCName(workbench.Namespace), nil
 }
 
-func (sm *StorageManager) checkPVCExists(ctx context.Context, provider StorageProvider, workbench defaultv1alpha1.Workbench) (bool, error) {
-	pvcName := provider.GetPVCName(workbench.Namespace)
-
-	pvc := &corev1.PersistentVolumeClaim{}
-	err := sm.reconciler.Client.Get(ctx, types.NamespacedName{
-		Name:      pvcName,
-		Namespace: workbench.Namespace,
-	}, pvc)
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to check %s PVC %s: %w", provider.GetStorageType(), pvcName, err)
-	}
-
-	return true, nil
-}
-
-// DeleteStorageResources deletes all storage resources (PVCs) for enabled storage providers
-// PVs are automatically deleted due to PersistentVolumeReclaimDelete policy
-// Returns the count of PVCs that exist (not the count of deletion attempts)
-func (sm *StorageManager) DeleteStorageResources(ctx context.Context, workbench defaultv1alpha1.Workbench) (int, error) {
-	log := log.FromContext(ctx)
-
-	enabledProviders := sm.GetEnabledProviders(workbench)
-	if len(enabledProviders) == 0 {
-		log.V(1).Info("No storage providers enabled - skipping storage cleanup")
-		return 0, nil
-	}
-
-	// First, count PVCs that actually exist
-	existingCount := 0
-	var checkErrors []error
-
-	for _, provider := range enabledProviders {
-		exists, err := sm.checkPVCExists(ctx, provider, workbench)
-		if err != nil {
-			log.V(1).Error(err, "Failed to check PVC existence",
-				"storage", provider.GetStorageType())
-			checkErrors = append(checkErrors, err)
-			continue
-		}
-
-		if exists {
-			existingCount++
-			log.V(1).Info("Found PVC to delete",
-				"storage", provider.GetStorageType(),
-				"pvc", provider.GetPVCName(workbench.Namespace))
-		}
-	}
-
-	// If we had errors checking, return the first one
-	if len(checkErrors) > 0 {
-		return existingCount, checkErrors[0]
-	}
-
-	// If no PVCs exist, we're done
-	if existingCount == 0 {
-		log.V(1).Info("No PVCs to delete - storage cleanup complete")
-		return 0, nil
-	}
-
-	// Delete PVCs that exist
-	log.V(1).Info("Deleting PVCs", "count", existingCount)
-	var deleteErrors []error
-
-	for _, provider := range enabledProviders {
-		exists, _ := sm.checkPVCExists(ctx, provider, workbench)
-		if !exists {
-			continue
-		}
-
-		err := provider.DeletePVC(ctx, workbench)
-		if err != nil {
-			log.V(1).Error(err, "Failed to delete PVC",
-				"storage", provider.GetStorageType())
-			deleteErrors = append(deleteErrors, err)
-		} else {
-			log.V(1).Info("Initiated PVC deletion",
-				"storage", provider.GetStorageType(),
-				"pvc", provider.GetPVCName(workbench.Namespace))
-		}
-	}
-
-	// Return the first delete error if any occurred
-	if len(deleteErrors) > 0 {
-		return existingCount, deleteErrors[0]
-	}
-
-	return existingCount, nil
-}
-
 // =============================================================================
 // BaseProvider - Common functionality for all storage providers
 // =============================================================================
@@ -442,25 +346,6 @@ func (b *BaseProvider) HasSecret(ctx context.Context, client client.Client) bool
 // Common volume methods
 func (b *BaseProvider) GetVolumeSpec(pvcName string) corev1.Volume {
 	return b.createVolumeSpec(pvcName)
-}
-
-// Common resource management - DeletePVC implemented directly
-func (b *BaseProvider) DeletePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	pvcName := b.GetPVCName(workbench.Namespace)
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: workbench.Namespace,
-		},
-	}
-
-	err := b.reconciler.Client.Delete(ctx, pvc)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete %s PVC %s: %w", b.storageType, pvcName, err)
-	}
-
-	return nil
 }
 
 // Common PV creation - needs provider-specific volumeAttributes and optional secret reference
