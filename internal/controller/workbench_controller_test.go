@@ -585,7 +585,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				Expect(changed).To(BeTrue())
 				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
-				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("sidecar not found"))
+				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("init container not found"))
 
 				// Cleanup
 				Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
@@ -662,7 +662,7 @@ var _ = Describe("Workbench Controller", func() {
 				// Should detect that no container statuses are available and mark as Unknown
 				Expect(changed).To(BeTrue())
 				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
-				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("sidecar not found"))
+				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("init container not found"))
 
 				// Cleanup
 				Expect(k8sClient.Delete(ctx, olderPod)).To(Succeed())

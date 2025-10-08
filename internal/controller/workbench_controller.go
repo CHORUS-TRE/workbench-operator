@@ -485,18 +485,18 @@ func (r *WorkbenchReconciler) updateServerPodHealth(
 	}
 
 	// Find xpra-server-bind init container status
-	var sidecarStatus *corev1.ContainerStatus
+	var initContainerStatus *corev1.ContainerStatus
 	for i := range latestPod.Status.InitContainerStatuses {
 		if latestPod.Status.InitContainerStatuses[i].Name == "xpra-server-bind" {
-			sidecarStatus = &latestPod.Status.InitContainerStatuses[i]
+			initContainerStatus = &latestPod.Status.InitContainerStatuses[i]
 			break
 		}
 	}
 
-	if sidecarStatus == nil {
+	if initContainerStatus == nil {
 		return r.setServerPodHealth(workbench, defaultv1alpha1.ServerPodHealth{
 			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
-			Message: "xpra-server-bind sidecar not found",
+			Message: "xpra-server-bind init container not found",
 		})
 	}
 
@@ -517,7 +517,7 @@ func (r *WorkbenchReconciler) updateServerPodHealth(
 	}
 
 	// Determine status from both containers
-	health := r.determineServerPodHealth(sidecarStatus, containerStatus)
+	health := r.determineServerPodHealth(initContainerStatus, containerStatus)
 
 	// Check if Service has endpoints and is reachable
 	if health.Ready {
