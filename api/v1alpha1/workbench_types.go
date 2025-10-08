@@ -221,12 +221,12 @@ const (
 	ServerContainerStatusUnknown ServerContainerStatus = "Unknown"
 )
 
-// ServerContainerHealth provides health information for the server container.
-type ServerContainerHealth struct {
-	// Status represents the current status of the server container
+// ServerPodHealth provides health information for the server pod.
+type ServerPodHealth struct {
+	// Status represents the current status of the server pod
 	Status ServerContainerStatus `json:"status"`
 
-	// Ready indicates if the readiness probe is passing
+	// Ready indicates if all containers are ready
 	Ready bool `json:"ready"`
 
 	// RestartCount shows container restart count
@@ -245,9 +245,9 @@ type WorkbenchStatusServer struct {
 	// Status informs about the real state of the app.
 	Status WorkbenchStatusServerStatus `json:"status"`
 
-	// ServerContainer provides health information for the server container
+	// ServerPod provides health information for the server pod
 	// +optional
-	ServerContainer *ServerContainerHealth `json:"serverContainer,omitempty"`
+	ServerPod *ServerPodHealth `json:"serverPod,omitempty"`
 }
 
 // WorkbenchStatusappStatus informs about the state of the apps.

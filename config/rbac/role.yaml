@@ -7,6 +7,15 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - endpoints
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -32,14 +41,6 @@ rules:
   verbs:
   - create
   - delete
-  - get
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
   - get
   - list
   - watch
