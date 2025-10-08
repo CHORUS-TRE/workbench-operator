@@ -244,25 +244,6 @@ var _ = Describe("Workbench Controller", func() {
 			}
 			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
 
-			// Create mock Endpoints for the Service
-			endpoints := &corev1.Endpoints{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      resourceName,
-					Namespace: "default",
-				},
-				Subsets: []corev1.EndpointSubset{
-					{
-						Addresses: []corev1.EndpointAddress{
-							{IP: "10.0.0.1"},
-						},
-						Ports: []corev1.EndpointPort{
-							{Port: 8080, Protocol: corev1.ProtocolTCP},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, endpoints)).To(Succeed())
-
 			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
@@ -416,10 +397,9 @@ var _ = Describe("Workbench Controller", func() {
 
 			// The deployment is created, so server container health should be populated
 			Expect(finalWorkbench.Status.ServerDeployment.ServerPod).NotTo(BeNil())
-			// Status could be Ready (if mock pod + endpoints exist), Starting (if endpoints missing), or Unknown (if no pods)
+			// Status could be Ready (if mock pod exists) or Unknown (if no pods)
 			Expect(finalWorkbench.Status.ServerDeployment.ServerPod.Status).To(BeElementOf(
 				defaultv1alpha1.ServerContainerStatusUnknown,
-				defaultv1alpha1.ServerContainerStatusStarting,
 				defaultv1alpha1.ServerContainerStatusReady,
 			))
 

@@ -18,9 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -48,7 +46,6 @@ var ErrSuspendedJob = errors.New("suspended job")
 // +kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services/status,verbs=get
-// +kubebuilder:rbac:groups=core,resources=endpoints,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;delete
@@ -519,60 +516,7 @@ func (r *WorkbenchReconciler) updateServerPodHealth(
 	// Determine status from both containers
 	health := r.determineServerPodHealth(initContainerStatus, containerStatus)
 
-	// Check if Service has endpoints and is reachable
-	if health.Ready {
-		serviceReady, serviceMsg := r.checkServiceEndpoints(ctx, workbench, latestPod)
-		if !serviceReady {
-			health.Ready = false
-			health.Status = defaultv1alpha1.ServerContainerStatusStarting
-			health.Message = serviceMsg
-		}
-	}
-
 	return r.setServerPodHealth(workbench, health)
-}
-
-// checkServiceEndpoints verifies that the Service has ready endpoints matching the pod
-func (r *WorkbenchReconciler) checkServiceEndpoints(ctx context.Context, workbench *defaultv1alpha1.Workbench, pod *corev1.Pod) (bool, string) {
-	log := log.FromContext(ctx)
-
-	// Create a context with timeout for this operation to avoid blocking reconciliation
-	timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	// Get the Endpoints for the Service
-	endpoints := &corev1.Endpoints{}
-	serviceNamespacedName := types.NamespacedName{
-		Name:      workbench.Name,
-		Namespace: workbench.Namespace,
-	}
-
-	if err := r.Get(timeoutCtx, serviceNamespacedName, endpoints); err != nil {
-		if timeoutCtx.Err() == context.DeadlineExceeded {
-			log.V(1).Error(err, "Timeout getting service endpoints", "service", workbench.Name)
-			return false, "Service endpoint check timed out"
-		}
-		log.V(1).Error(err, "Failed to get service endpoints", "service", workbench.Name)
-		return false, "Service endpoints not found"
-	}
-
-	// Get pod IP for validation
-	podIP := pod.Status.PodIP
-	if podIP == "" {
-		return false, "Pod has no IP assigned"
-	}
-
-	// Check if there are any ready addresses matching this specific pod
-	for _, subset := range endpoints.Subsets {
-		for _, address := range subset.Addresses {
-			if address.IP == podIP {
-				// Found matching endpoint for this pod
-				return true, ""
-			}
-		}
-	}
-
-	return false, "Service endpoints do not include this pod"
 }
 
 // determineServerPodHealth maps container statuses to pod health status
@@ -688,23 +632,5 @@ func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
-		Watches(
-			&corev1.Endpoints{},
-			handler.EnqueueRequestsFromMapFunc(r.mapEndpointToWorkbench),
-		).
 		Complete(r)
-}
-
-// mapEndpointToWorkbench maps Endpoint changes to Workbench reconciliation requests.
-// When Service endpoints are updated, we reconcile the corresponding Workbench.
-func (r *WorkbenchReconciler) mapEndpointToWorkbench(ctx context.Context, endpoint client.Object) []reconcile.Request {
-	// Endpoint name matches the Service name, which matches the Workbench name
-	return []reconcile.Request{
-		{
-			NamespacedName: types.NamespacedName{
-				Name:      endpoint.GetName(),
-				Namespace: endpoint.GetNamespace(),
-			},
-		},
-	}
 }
