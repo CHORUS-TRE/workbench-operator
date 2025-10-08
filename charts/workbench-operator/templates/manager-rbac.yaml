@@ -56,7 +56,6 @@ rules:
   - persistentvolumes
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
@@ -68,7 +67,6 @@ rules:
   - persistentvolumeclaims
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
