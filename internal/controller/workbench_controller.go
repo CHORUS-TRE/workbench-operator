@@ -18,7 +18,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -574,15 +576,33 @@ func (r *WorkbenchReconciler) checkServiceEndpoints(ctx context.Context, workben
 }
 
 // determineServerPodHealth maps container statuses to pod health status
-func (r *WorkbenchReconciler) determineServerPodHealth(sidecarStatus *corev1.ContainerStatus, serverStatus *corev1.ContainerStatus) defaultv1alpha1.ServerPodHealth {
-	// Check sidecar first - if it's not ready, pod can't be ready
-	if !sidecarStatus.Ready {
-		health := r.determineContainerHealth(sidecarStatus)
-		health.Message = fmt.Sprintf("Sidecar: %s", health.Message)
+func (r *WorkbenchReconciler) determineServerPodHealth(initContainerStatus *corev1.ContainerStatus, serverStatus *corev1.ContainerStatus) defaultv1alpha1.ServerPodHealth {
+	// Check init container first - it must have completed successfully
+	if initContainerStatus.State.Terminated == nil || initContainerStatus.State.Terminated.ExitCode != 0 {
+		// Init container hasn't completed successfully yet
+		health := defaultv1alpha1.ServerPodHealth{
+			Ready:        false,
+			RestartCount: initContainerStatus.RestartCount,
+		}
+
+		if initContainerStatus.State.Waiting != nil {
+			health.Status = defaultv1alpha1.ServerContainerStatusWaiting
+			health.Message = fmt.Sprintf("Init container waiting: %s", initContainerStatus.State.Waiting.Reason)
+		} else if initContainerStatus.State.Running != nil {
+			health.Status = defaultv1alpha1.ServerContainerStatusStarting
+			health.Message = "Init container running"
+		} else if initContainerStatus.State.Terminated != nil {
+			health.Status = defaultv1alpha1.ServerContainerStatusFailing
+			health.Message = fmt.Sprintf("Init container failed with exit code %d", initContainerStatus.State.Terminated.ExitCode)
+		} else {
+			health.Status = defaultv1alpha1.ServerContainerStatusUnknown
+			health.Message = "Init container state unknown"
+		}
+
 		return health
 	}
 
-	// Sidecar is ready, now check the main server container
+	// Init container completed successfully, now check the main server container
 	return r.determineContainerHealth(serverStatus)
 }
 
@@ -668,5 +688,23 @@ func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
+		Watches(
+			&corev1.Endpoints{},
+			handler.EnqueueRequestsFromMapFunc(r.mapEndpointToWorkbench),
+		).
 		Complete(r)
+}
+
+// mapEndpointToWorkbench maps Endpoint changes to Workbench reconciliation requests.
+// When Service endpoints are updated, we reconcile the corresponding Workbench.
+func (r *WorkbenchReconciler) mapEndpointToWorkbench(ctx context.Context, endpoint client.Object) []reconcile.Request {
+	// Endpoint name matches the Service name, which matches the Workbench name
+	return []reconcile.Request{
+		{
+			NamespacedName: types.NamespacedName{
+				Name:      endpoint.GetName(),
+				Namespace: endpoint.GetNamespace(),
+			},
+		},
+	}
 }

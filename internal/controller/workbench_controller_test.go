@@ -232,8 +232,12 @@ var _ = Describe("Workbench Controller", func() {
 			pod.Status = corev1.PodStatus{
 				InitContainerStatuses: []corev1.ContainerStatus{
 					createMockContainerStatus("xpra-server-bind", corev1.ContainerState{
-						Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()},
-					}, true, 0),
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode:   0,
+							Reason:     "Completed",
+							FinishedAt: metav1.Now(),
+						},
+					}, false, 0),
 				},
 				ContainerStatuses: []corev1.ContainerStatus{createReadyContainerStatus()},
 				PodIP:             "10.0.0.1",
