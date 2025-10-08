@@ -137,8 +137,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if foundDeployment != nil {
 		statusUpdated := (&workbench).UpdateStatusFromDeployment(*foundDeployment)
 
-		// Update server container health
-		serverHealthUpdated := r.updateServerContainerHealth(ctx, &workbench, *foundDeployment)
+		// Update server pod health
+		serverHealthUpdated := r.updateServerPodHealth(ctx, &workbench, *foundDeployment)
 		statusUpdated = statusUpdated || serverHealthUpdated
 
 		if statusUpdated {
@@ -213,8 +213,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Check if xpra server is ready before creating app jobs
-	xpraReady := workbench.Status.ServerDeployment.ServerContainer != nil &&
-		workbench.Status.ServerDeployment.ServerContainer.Ready
+	xpraReady := workbench.Status.ServerDeployment.ServerPod != nil &&
+		workbench.Status.ServerDeployment.ServerPod.Ready
 
 	if !xpraReady {
 		log.V(1).Info("Xpra server not ready yet, skipping app job creation")
@@ -432,8 +432,8 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 	return &foundJob, err
 }
 
-// updateServerContainerHealth monitors the xpra-server container and updates status
-func (r *WorkbenchReconciler) updateServerContainerHealth(
+// updateServerPodHealth monitors the xpra-server pod and updates status
+func (r *WorkbenchReconciler) updateServerPodHealth(
 	ctx context.Context,
 	workbench *defaultv1alpha1.Workbench,
 	deployment appsv1.Deployment,
@@ -451,7 +451,7 @@ func (r *WorkbenchReconciler) updateServerContainerHealth(
 
 	if err := r.List(ctx, podList, listOpts...); err != nil {
 		log.V(1).Error(err, "Failed to list pods for deployment", "deployment", deployment.Name)
-		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+		return r.setServerPodHealth(workbench, defaultv1alpha1.ServerPodHealth{
 			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
 			Message: "Failed to list pods",
 		})
@@ -467,7 +467,7 @@ func (r *WorkbenchReconciler) updateServerContainerHealth(
 	}
 
 	if latestPod == nil {
-		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+		return r.setServerPodHealth(workbench, defaultv1alpha1.ServerPodHealth{
 			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
 			Message: "No pods found",
 		})
@@ -475,9 +475,25 @@ func (r *WorkbenchReconciler) updateServerContainerHealth(
 
 	// Check if pod is terminating
 	if latestPod.DeletionTimestamp != nil {
-		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+		return r.setServerPodHealth(workbench, defaultv1alpha1.ServerPodHealth{
 			Status:  defaultv1alpha1.ServerContainerStatusTerminating,
 			Message: "Pod is terminating",
+		})
+	}
+
+	// Find xpra-server-bind init container status
+	var initContainerStatus *corev1.ContainerStatus
+	for i := range latestPod.Status.InitContainerStatuses {
+		if latestPod.Status.InitContainerStatuses[i].Name == "xpra-server-bind" {
+			initContainerStatus = &latestPod.Status.InitContainerStatuses[i]
+			break
+		}
+	}
+
+	if initContainerStatus == nil {
+		return r.setServerPodHealth(workbench, defaultv1alpha1.ServerPodHealth{
+			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
+			Message: "xpra-server-bind init container not found",
 		})
 	}
 
@@ -491,20 +507,52 @@ func (r *WorkbenchReconciler) updateServerContainerHealth(
 	}
 
 	if containerStatus == nil {
-		return r.setServerContainerHealth(workbench, defaultv1alpha1.ServerContainerHealth{
+		return r.setServerPodHealth(workbench, defaultv1alpha1.ServerPodHealth{
 			Status:  defaultv1alpha1.ServerContainerStatusUnknown,
 			Message: "xpra-server container not found",
 		})
 	}
 
-	// Determine status from container state + probes
-	health := r.determineServerHealth(containerStatus)
-	return r.setServerContainerHealth(workbench, health)
+	// Determine status from both containers
+	health := r.determineServerPodHealth(initContainerStatus, containerStatus)
+
+	return r.setServerPodHealth(workbench, health)
 }
 
-// determineServerHealth maps container status to our health status
-func (r *WorkbenchReconciler) determineServerHealth(containerStatus *corev1.ContainerStatus) defaultv1alpha1.ServerContainerHealth {
-	health := defaultv1alpha1.ServerContainerHealth{
+// determineServerPodHealth maps container statuses to pod health status
+func (r *WorkbenchReconciler) determineServerPodHealth(initContainerStatus *corev1.ContainerStatus, serverStatus *corev1.ContainerStatus) defaultv1alpha1.ServerPodHealth {
+	// Check init container first - it must have completed successfully
+	if initContainerStatus.State.Terminated == nil || initContainerStatus.State.Terminated.ExitCode != 0 {
+		// Init container hasn't completed successfully yet
+		health := defaultv1alpha1.ServerPodHealth{
+			Ready:        false,
+			RestartCount: initContainerStatus.RestartCount,
+		}
+
+		if initContainerStatus.State.Waiting != nil {
+			health.Status = defaultv1alpha1.ServerContainerStatusWaiting
+			health.Message = fmt.Sprintf("Init container waiting: %s", initContainerStatus.State.Waiting.Reason)
+		} else if initContainerStatus.State.Running != nil {
+			health.Status = defaultv1alpha1.ServerContainerStatusStarting
+			health.Message = "Init container running"
+		} else if initContainerStatus.State.Terminated != nil {
+			health.Status = defaultv1alpha1.ServerContainerStatusFailing
+			health.Message = fmt.Sprintf("Init container failed with exit code %d", initContainerStatus.State.Terminated.ExitCode)
+		} else {
+			health.Status = defaultv1alpha1.ServerContainerStatusUnknown
+			health.Message = "Init container state unknown"
+		}
+
+		return health
+	}
+
+	// Init container completed successfully, now check the main server container
+	return r.determineContainerHealth(serverStatus)
+}
+
+// determineContainerHealth maps a single container status to health status
+func (r *WorkbenchReconciler) determineContainerHealth(containerStatus *corev1.ContainerStatus) defaultv1alpha1.ServerPodHealth {
+	health := defaultv1alpha1.ServerPodHealth{
 		Ready:        containerStatus.Ready,
 		RestartCount: containerStatus.RestartCount,
 	}
@@ -557,14 +605,14 @@ func (r *WorkbenchReconciler) determineServerHealth(containerStatus *corev1.Cont
 	return health
 }
 
-// setServerContainerHealth updates workbench status and returns if changed
-func (r *WorkbenchReconciler) setServerContainerHealth(workbench *defaultv1alpha1.Workbench, health defaultv1alpha1.ServerContainerHealth) bool {
-	if workbench.Status.ServerDeployment.ServerContainer == nil {
-		workbench.Status.ServerDeployment.ServerContainer = &health
+// setServerPodHealth updates workbench status and returns if changed
+func (r *WorkbenchReconciler) setServerPodHealth(workbench *defaultv1alpha1.Workbench, health defaultv1alpha1.ServerPodHealth) bool {
+	if workbench.Status.ServerDeployment.ServerPod == nil {
+		workbench.Status.ServerDeployment.ServerPod = &health
 		return true
 	}
 
-	current := workbench.Status.ServerDeployment.ServerContainer
+	current := workbench.Status.ServerDeployment.ServerPod
 	changed := current.Status != health.Status ||
 		current.Ready != health.Ready ||
 		current.RestartCount != health.RestartCount ||
