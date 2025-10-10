@@ -232,12 +232,10 @@ var _ = Describe("Workbench Controller", func() {
 			pod.Status = corev1.PodStatus{
 				InitContainerStatuses: []corev1.ContainerStatus{
 					createMockContainerStatus("xpra-server-bind", corev1.ContainerState{
-						Terminated: &corev1.ContainerStateTerminated{
-							ExitCode:   0,
-							Reason:     "Completed",
-							FinishedAt: metav1.Now(),
+						Running: &corev1.ContainerStateRunning{
+							StartedAt: metav1.Now(),
 						},
-					}, false, 0),
+					}, true, 0),
 				},
 				ContainerStatuses: []corev1.ContainerStatus{createReadyContainerStatus()},
 				PodIP:             "10.0.0.1",
@@ -367,8 +365,8 @@ var _ = Describe("Workbench Controller", func() {
 			}
 		})
 
-		It("should successfully reconcile the resource with server container health", func() {
-			By("Manually running reconciliation to populate server container health")
+		It("should successfully reconcile the resource with server pod health", func() {
+			By("Manually running reconciliation to populate server pod health")
 
 			// Create a reconciler instance
 			controllerReconciler := &WorkbenchReconciler{
@@ -395,12 +393,12 @@ var _ = Describe("Workbench Controller", func() {
 			err = k8sClient.Get(ctx, typeNamespacedName, finalWorkbench)
 			Expect(err).NotTo(HaveOccurred())
 
-			// The deployment is created, so server container health should be populated
+			// The deployment is created, so server pod health should be populated
 			Expect(finalWorkbench.Status.ServerDeployment.ServerPod).NotTo(BeNil())
 			// Status could be Ready (if mock pod exists) or Unknown (if no pods)
 			Expect(finalWorkbench.Status.ServerDeployment.ServerPod.Status).To(BeElementOf(
-				defaultv1alpha1.ServerContainerStatusUnknown,
-				defaultv1alpha1.ServerContainerStatusReady,
+				defaultv1alpha1.ServerPodStatusUnknown,
+				defaultv1alpha1.ServerPodStatusReady,
 			))
 
 			// Verify required fields are populated
@@ -408,7 +406,7 @@ var _ = Describe("Workbench Controller", func() {
 		})
 	})
 
-	Context("Server Container Health Status", func() {
+	Context("Server Pod Health Status", func() {
 		var reconciler *WorkbenchReconciler
 
 		BeforeEach(func() {
@@ -431,7 +429,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createWaitingContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusWaiting))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusWaiting))
 				Expect(health.Ready).To(BeFalse())
 				Expect(health.RestartCount).To(Equal(int32(0)))
 				Expect(health.Message).To(ContainSubstring("Waiting: ImagePullBackOff"))
@@ -441,7 +439,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createStartingContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusStarting))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusStarting))
 				Expect(health.Ready).To(BeFalse())
 				Expect(health.RestartCount).To(Equal(int32(0)))
 				Expect(health.Message).To(ContainSubstring("Container starting up"))
@@ -451,7 +449,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createReadyContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusReady))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusReady))
 				Expect(health.Ready).To(BeTrue())
 				Expect(health.RestartCount).To(Equal(int32(0)))
 				Expect(health.Message).To(ContainSubstring("Container is ready"))
@@ -461,7 +459,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createFailingContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusFailing))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusFailing))
 				Expect(health.Ready).To(BeFalse())
 				Expect(health.RestartCount).To(Equal(int32(0)))
 				Expect(health.Message).To(ContainSubstring("Readiness probe failing"))
@@ -471,7 +469,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createRestartingContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusRestarting))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusRestarting))
 				Expect(health.Ready).To(BeTrue())
 				Expect(health.RestartCount).To(Equal(int32(3)))
 				Expect(health.Message).To(ContainSubstring("Recently restarted (3 times)"))
@@ -481,7 +479,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createTerminatedContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminated))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusTerminated))
 				Expect(health.Ready).To(BeFalse())
 				Expect(health.RestartCount).To(Equal(int32(1)))
 				Expect(health.Message).To(ContainSubstring("Terminated: Error"))
@@ -491,7 +489,7 @@ var _ = Describe("Workbench Controller", func() {
 				containerStatus := createMockContainerStatus("xpra-server", corev1.ContainerState{}, false, 0)
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusUnknown))
 				Expect(health.Message).To(ContainSubstring("Container state unknown"))
 			})
 		})
@@ -536,7 +534,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				Expect(changed).To(BeTrue())
 				Expect(workbench.Status.ServerDeployment.ServerPod).NotTo(BeNil())
-				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerPodStatusUnknown))
 				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("No pods found"))
 			})
 
@@ -564,7 +562,7 @@ var _ = Describe("Workbench Controller", func() {
 				changed := reconciler.updateServerPodHealth(ctx, workbench, deployment)
 
 				Expect(changed).To(BeTrue())
-				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerPodStatusUnknown))
 				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("init container not found"))
 
 				// Cleanup
@@ -592,7 +590,7 @@ var _ = Describe("Workbench Controller", func() {
 					changed := reconciler.updateServerPodHealth(ctx, workbench, deployment)
 
 					Expect(changed).To(BeTrue())
-					Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminating))
+					Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerPodStatusTerminating))
 					Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("Pod is terminating"))
 				} else {
 					// Pod was immediately deleted, test the logic directly with a mock
@@ -605,12 +603,12 @@ var _ = Describe("Workbench Controller", func() {
 					// Mock the API call by updating our test deployment selector to match nothing
 					// and create pod list manually
 					health := defaultv1alpha1.ServerPodHealth{
-						Status:  defaultv1alpha1.ServerContainerStatusTerminating,
+						Status:  defaultv1alpha1.ServerPodStatusTerminating,
 						Message: "Pod is terminating",
 					}
 					changed := reconciler.setServerPodHealth(workbench, health)
 					Expect(changed).To(BeTrue())
-					Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusTerminating))
+					Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerPodStatusTerminating))
 				}
 			})
 
@@ -641,7 +639,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				// Should detect that no container statuses are available and mark as Unknown
 				Expect(changed).To(BeTrue())
-				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerContainerStatusUnknown))
+				Expect(workbench.Status.ServerDeployment.ServerPod.Status).To(Equal(defaultv1alpha1.ServerPodStatusUnknown))
 				Expect(workbench.Status.ServerDeployment.ServerPod.Message).To(ContainSubstring("init container not found"))
 
 				// Cleanup

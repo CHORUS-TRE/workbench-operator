@@ -18,10 +18,7 @@ spec:
     - jsonPath: .spec.server.version
       name: Version
       type: string
-    - jsonPath: .spec.apps[*].name
-      name: Apps
-      type: string
-    - jsonPath: .status.serverDeployment.serverContainer.status
+    - jsonPath: .status.serverDeployment.serverPod.status
       name: Server-Health
       type: string
     - jsonPath: .metadata.creationTimestamp

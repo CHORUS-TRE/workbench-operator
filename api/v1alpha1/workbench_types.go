@@ -191,40 +191,40 @@ const (
 	WorkbenchStatusServerStatusFailed WorkbenchStatusServerStatus = "Failed"
 )
 
-// ServerContainerStatus represents the health status of the server container.
+// ServerPodStatus represents the health status of the server pod.
 // +kubebuilder:validation:Enum=Waiting;Starting;Ready;Failing;Restarting;Terminating;Terminated;Unknown
-type ServerContainerStatus string
+type ServerPodStatus string
 
 const (
-	// ServerContainerStatusWaiting describes a container that hasn't started
-	ServerContainerStatusWaiting ServerContainerStatus = "Waiting"
+	// ServerPodStatusWaiting describes a pod that hasn't started
+	ServerPodStatusWaiting ServerPodStatus = "Waiting"
 
-	// ServerContainerStatusStarting describes a container that is starting up
-	ServerContainerStatusStarting ServerContainerStatus = "Starting"
+	// ServerPodStatusStarting describes a pod that is starting up
+	ServerPodStatusStarting ServerPodStatus = "Starting"
 
-	// ServerContainerStatusReady describes a healthy container
-	ServerContainerStatusReady ServerContainerStatus = "Ready"
+	// ServerPodStatusReady describes a healthy pod
+	ServerPodStatusReady ServerPodStatus = "Ready"
 
-	// ServerContainerStatusFailing describes a container failing health checks
-	ServerContainerStatusFailing ServerContainerStatus = "Failing"
+	// ServerPodStatusFailing describes a pod failing health checks
+	ServerPodStatusFailing ServerPodStatus = "Failing"
 
-	// ServerContainerStatusRestarting describes a container that has restarted recently
-	ServerContainerStatusRestarting ServerContainerStatus = "Restarting"
+	// ServerPodStatusRestarting describes a pod that has restarted recently
+	ServerPodStatusRestarting ServerPodStatus = "Restarting"
 
-	// ServerContainerStatusTerminating describes a container being shut down
-	ServerContainerStatusTerminating ServerContainerStatus = "Terminating"
+	// ServerPodStatusTerminating describes a pod being shut down
+	ServerPodStatusTerminating ServerPodStatus = "Terminating"
 
-	// ServerContainerStatusTerminated describes a stopped/crashed container
-	ServerContainerStatusTerminated ServerContainerStatus = "Terminated"
+	// ServerPodStatusTerminated describes a stopped/crashed pod
+	ServerPodStatusTerminated ServerPodStatus = "Terminated"
 
-	// ServerContainerStatusUnknown describes a container in unknown state
-	ServerContainerStatusUnknown ServerContainerStatus = "Unknown"
+	// ServerPodStatusUnknown describes a pod in unknown state
+	ServerPodStatusUnknown ServerPodStatus = "Unknown"
 )
 
 // ServerPodHealth provides health information for the server pod.
 type ServerPodHealth struct {
 	// Status represents the current status of the server pod
-	Status ServerContainerStatus `json:"status"`
+	Status ServerPodStatus `json:"status"`
 
 	// Ready indicates if all containers are ready
 	Ready bool `json:"ready"`
@@ -268,8 +268,7 @@ type WorkbenchStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.server.version`
-// +kubebuilder:printcolumn:name="Apps",type=string,JSONPath=`.spec.apps[*].name`
-// +kubebuilder:printcolumn:name="Server-Health",type=string,JSONPath=`.status.serverDeployment.serverContainer.status`
+// +kubebuilder:printcolumn:name="Server-Health",type=string,JSONPath=`.status.serverDeployment.serverPod.status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workbench is the Schema for the workbenches API
