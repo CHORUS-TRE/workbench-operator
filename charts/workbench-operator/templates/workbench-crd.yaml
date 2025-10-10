@@ -271,16 +271,16 @@ spec:
                     description: Revision is the values of the "deployment.kubernetes.io/revision"
                       metadata.
                     type: integer
-                  serverContainer:
-                    description: ServerContainer provides health information for the
-                      server container
+                  serverPod:
+                    description: ServerPod provides health information for the server
+                      pod
                     properties:
                       message:
                         description: Message provides additional context about the
                           status
                         type: string
                       ready:
-                        description: Ready indicates if the readiness probe is passing
+                        description: Ready indicates if all containers are ready
                         type: boolean
                       restartCount:
                         description: RestartCount shows container restart count
@@ -288,7 +288,7 @@ spec:
                         type: integer
                       status:
                         description: Status represents the current status of the server
-                          container
+                          pod
                         enum:
                         - Waiting
                         - Starting
