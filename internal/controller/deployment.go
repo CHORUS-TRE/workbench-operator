@@ -31,6 +31,21 @@ func NewHTTPProbe(path, portName string, delay, period int) *corev1.Probe {
 	}
 }
 
+func NewTCPProbe(portName string, delay, period int) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromString(portName),
+			},
+		},
+		InitialDelaySeconds: int32(delay),
+		PeriodSeconds:       int32(period),
+		TimeoutSeconds:      2,
+		SuccessThreshold:    1,
+		FailureThreshold:    10,
+	}
+}
+
 // initDeployment creates the Xpra server deployment.
 //
 // Xpra listens on port 8080 and starts a X11 socket in the tmp folder.
@@ -111,7 +126,9 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 			"TCP-LISTEN:6080,fork,bind=0.0.0.0",
 			"UNIX-CONNECT:/tmp/.X11-unix/X80",
 		},
-		VolumeMounts: volumeMounts,
+		VolumeMounts:   volumeMounts,
+		LivenessProbe:  NewTCPProbe("x11-socket", 1, 2),
+		ReadinessProbe: NewTCPProbe("x11-socket", 1, 2),
 	}
 
 	// Non-empty registry requires a / to concatenate with the Xpra server one.
