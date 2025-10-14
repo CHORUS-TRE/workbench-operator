@@ -8,7 +8,7 @@ metadata:
   namespace: workbench
 spec:
   server:
-    version: "6.2.1-1"
+    version: "6.3.2-1"
     user: nathalie
     userid: 1002
   storage:
