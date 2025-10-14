@@ -4,11 +4,12 @@ metadata:
   labels:
     app.kubernetes.io/name: workbench-operator
     app.kubernetes.io/managed-by: kustomize
-  name: workbench-sample
+  name: workbench
+  namespace: workbench
 spec:
   server:
     version: "6.2.1-1"
-    user: user_name
+    user: nathalie
     userid: 1002
   storage:
     s3: true
@@ -18,7 +19,4 @@ spec:
       name: jupyterlab
       version: "4.2.5-1"
       shmSize: 1Gi
-    wezterm:
-      name: wezterm
-      version: "0.0.1"
       state: Stopped
