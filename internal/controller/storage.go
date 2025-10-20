@@ -21,8 +21,9 @@ import (
 type StorageType string
 
 const (
-	StorageTypeS3  StorageType = "s3"
-	StorageTypeNFS StorageType = "nfs"
+	StorageTypeS3    StorageType = "s3"
+	StorageTypeNFS   StorageType = "nfs"
+	StorageTypeLocal StorageType = "local"
 	// Future: StorageTypeCeph, StorageTypeEFS, etc.
 )
 
@@ -65,12 +66,19 @@ type StorageManager struct {
 
 // NewStorageManager creates a new StorageManager with all available providers
 func NewStorageManager(reconciler *WorkbenchReconciler) *StorageManager {
+	providers := map[StorageType]StorageProvider{
+		StorageTypeS3:  NewS3Provider(reconciler),
+		StorageTypeNFS: NewNFSProvider(reconciler),
+	}
+
+	// Add local provider if enabled
+	if reconciler.Config.LocalStorageEnabled {
+		providers[StorageTypeLocal] = NewLocalProvider(reconciler)
+	}
+
 	return &StorageManager{
 		reconciler: reconciler,
-		providers: map[StorageType]StorageProvider{
-			StorageTypeS3:  NewS3Provider(reconciler),
-			StorageTypeNFS: NewNFSProvider(reconciler),
-		},
+		providers:  providers,
 	}
 }
 
@@ -92,6 +100,13 @@ func (sm *StorageManager) GetEnabledProviders(workbench defaultv1alpha1.Workbenc
 
 	if storage.NFS {
 		if provider, exists := sm.providers[StorageTypeNFS]; exists {
+			enabled = append(enabled, provider)
+		}
+	}
+
+	// Add local provider if enabled in both config and spec
+	if storage.Local {
+		if provider, exists := sm.providers[StorageTypeLocal]; exists {
 			enabled = append(enabled, provider)
 		}
 	}

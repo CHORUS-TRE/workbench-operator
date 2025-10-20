@@ -86,6 +86,12 @@ type StorageConfig struct {
 	// +optional
 	// +default:value=true
 	NFS bool `json:"nfs,omitempty"`
+
+	// Local enables local storage mounting for development at /home/{user}/workspace-local
+	// This is only available when the operator is started with --local-storage-enabled flag
+	// +optional
+	// +default:value=false
+	Local bool `json:"local,omitempty"`
 }
 
 // WorkbenchApp defines one application running in the workbench.

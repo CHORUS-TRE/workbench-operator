@@ -18,4 +18,8 @@ type Config struct {
 	NFSSecretName string
 	// NFSSecretNamespace is the namespace of the NFS secret.
 	NFSSecretNamespace string
+	// LocalStorageEnabled enables local storage provider for development
+	LocalStorageEnabled bool
+	// LocalStorageHostPath is the host path for local storage volumes
+	LocalStorageHostPath string
 }
