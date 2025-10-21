@@ -45,8 +45,6 @@ func (l *LocalProvider) HasSecret(ctx context.Context, client client.Client) boo
 
 // Setup performs any pre-creation tasks - local storage doesn't need setup
 func (l *LocalProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	// For hostPath volumes, Kubernetes will handle directory creation with DirectoryOrCreate
-	// No setup needed like NFS directory creation or S3 bucket verification
 	return nil
 }
 
@@ -61,7 +59,6 @@ func (l *LocalProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.
 	}
 
 	// Use the base path directly - subPath will add workspaces/{namespace}
-	// This matches S3 (path: "/") and NFS (path: share) pattern
 	// Final path will be: {hostPath}/workspaces/{namespace}
 
 	// Create PV with hostPath
@@ -75,7 +72,7 @@ func (l *LocalProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.
 		},
 		Spec: corev1.PersistentVolumeSpec{
 			Capacity: corev1.ResourceList{
-				corev1.ResourceStorage: resource.MustParse("10Gi"), // Generous size for local testing
+				corev1.ResourceStorage: resource.MustParse("10Gi"),
 			},
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteMany,
