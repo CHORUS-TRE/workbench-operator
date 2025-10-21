@@ -225,6 +225,12 @@ spec:
                 description: Storage defines storage mount configuration for S3 and
                   NFS
                 properties:
+                  local:
+                    default: false
+                    description: |-
+                      Local enables local storage mounting for development at /home/{user}/workspace-local
+                      This is only available when the operator is started with --local-storage-enabled flag
+                    type: boolean
                   nfs:
                     default: true
                     description: NFS enables NFS storage mounting at /home/{user}/workspace-scratch

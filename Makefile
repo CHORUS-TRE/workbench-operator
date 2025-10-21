@@ -86,6 +86,13 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
+.PHONY: run-local
+run-local: manifests generate fmt vet ## Run a controller from your host with local storage enabled for development.
+	@echo "Running with local storage enabled for development..."
+	go run ./cmd/main.go \
+		--local-storage-enabled=true \
+		--local-storage-host-path=/tmp/workbench-local-storage
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
