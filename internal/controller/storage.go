@@ -327,7 +327,7 @@ func (b *BaseProvider) getPVName(namespace string) string {
 }
 
 func (b *BaseProvider) GetMountPath(user string) string {
-	return fmt.Sprintf("/home/%s/workspace-%s", user, b.mountType)
+	return fmt.Sprintf("/mnt/workspace-%s", b.mountType)
 }
 
 // Common detection methods
@@ -459,4 +459,3 @@ func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.
 		SubPath:   b.getWorkspaceSubPath(namespace),
 	}
 }
-

@@ -350,7 +350,7 @@ var _ = Describe("Workbench Controller", func() {
 					}
 				}
 				Expect(workspaceMount).NotTo(BeNil())
-				Expect(workspaceMount.MountPath).To(Equal(fmt.Sprintf("/home/%s/workspace-archive", workbench.Spec.Server.User)))
+				Expect(workspaceMount.MountPath).To(Equal("/mnt/workspace-archive"))
 				Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
 
 				// Verify that the namespace-specific PVC exists and is correctly configured

@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
@@ -40,9 +43,84 @@ func (s *S3Provider) HasSecret(ctx context.Context, client client.Client) bool {
 	return err == nil
 }
 
-// Setup performs any pre-creation tasks - S3 doesn't need any setup
+// Setup performs JuiceFS directory creation using a Job
 func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	return nil
+	// Get JuiceFS secret and filesystem name
+	fsName, err := s.getSecretConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Create Job to create JuiceFS directories (data and config)
+	ttl := int32(300)   // 5 minutes cleanup
+	backoff := int32(2) // 2 retries
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("juicefs-mkdir-%s", workbench.Namespace),
+			Namespace: workbench.Namespace,
+			Labels: map[string]string{
+				"app":       "juicefs-directory-creator",
+				"workbench": workbench.Name,
+			},
+		},
+		Spec: batchv1.JobSpec{
+			TTLSecondsAfterFinished: &ttl,
+			BackoffLimit:            &backoff,
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:  "mkdir",
+							Image: "busybox:latest",
+							Command: []string{
+								"sh",
+								"-c",
+								fmt.Sprintf("mkdir -p /juicefs/workspaces/%s/data /juicefs/workspaces/%s/config && chmod 2770 /juicefs/workspaces/%s/data && chmod 2750 /juicefs/workspaces/%s/config && chgrp 1001 /juicefs/workspaces/%s/data /juicefs/workspaces/%s/config",
+									workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace),
+							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("100m"),
+									corev1.ResourceMemory: resource.MustParse("64Mi"),
+								},
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("10m"),
+									corev1.ResourceMemory: resource.MustParse("16Mi"),
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "juicefs-volume",
+									MountPath: "/juicefs",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "juicefs-volume",
+							VolumeSource: corev1.VolumeSource{
+								CSI: &corev1.CSIVolumeSource{
+									Driver: s.driverName,
+									VolumeAttributes: map[string]string{
+										"name": fsName,
+										"path": "/",
+									},
+									NodePublishSecretRef: &corev1.LocalObjectReference{
+										Name: s.secretName,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return s.reconciler.Client.Create(ctx, job)
 }
 
 // getSecretConfig gets the JuiceFS secret and extracts filesystem name
