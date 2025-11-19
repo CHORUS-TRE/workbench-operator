@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +30,116 @@ var defaultResources = corev1.ResourceRequirements{
 		corev1.ResourceMemory:           resource.MustParse("1Ki"),
 		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
 	},
+}
+
+// checkImageForUIDCollisions inspects an image's /etc/passwd for UIDs in the Chorus range (1001-9999)
+func checkImageForUIDCollisions(ctx context.Context, imageName string) ([]string, error) {
+	log := log.FromContext(ctx)
+
+	// Use docker/podman to inspect the image's /etc/passwd
+	// Try docker first, fall back to podman
+	var cmd *exec.Cmd
+	dockerPath, dockerErr := exec.LookPath("docker")
+	if dockerErr == nil {
+		cmd = exec.CommandContext(ctx, dockerPath, "run", "--rm", "--entrypoint", "cat", imageName, "/etc/passwd")
+	} else {
+		podmanPath, podmanErr := exec.LookPath("podman")
+		if podmanErr != nil {
+			log.V(1).Info("Neither docker nor podman found, skipping UID collision check", "image", imageName)
+			return nil, nil // Skip validation if no container runtime available
+		}
+		cmd = exec.CommandContext(ctx, podmanPath, "run", "--rm", "--entrypoint", "cat", imageName, "/etc/passwd")
+	}
+
+	// Set timeout for the command
+	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd = exec.CommandContext(cmdCtx, cmd.Path, cmd.Args[1:]...)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Image might not exist locally, or /etc/passwd doesn't exist
+		log.V(1).Info("Could not read /etc/passwd from image", "image", imageName, "error", err.Error())
+		return nil, nil // Don't fail validation, just skip the check
+	}
+
+	// Parse /etc/passwd and find UIDs in range 1001-9999
+	var collisions []string
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, ":")
+		if len(fields) < 3 {
+			continue
+		}
+
+		username := fields[0]
+		uidStr := fields[2]
+		uid, err := strconv.Atoi(uidStr)
+		if err != nil {
+			continue
+		}
+
+		// Check if UID is in Chorus user range
+		if uid >= 1001 && uid <= 9999 {
+			collisions = append(collisions, fmt.Sprintf("UID %d (%s)", uid, username))
+		}
+	}
+
+	return collisions, nil
+}
+
+// validateAppImage ensures the app image is compatible and doesn't have UID collisions
+func validateAppImage(ctx context.Context, appImage string) error {
+	// The init container uses Ubuntu 24.04 with specific tools (useradd, groupadd, libnss-wrapper)
+	// App images must be Ubuntu-based for libc and tool compatibility
+
+	// SECURITY: App images must NOT create users with UIDs in the Chorus user range (1001-9999)
+	// This prevents UID collisions that would confuse audit trails when users bypass libnss_wrapper
+	//
+	// Reserved UID ranges:
+	//   0-999:   System users (root, daemon, nobody, etc.)
+	//   1001-9999: Chorus users (managed by operator)
+	//   10000+:  Available for app-specific users (if needed)
+	//
+	// Example collision scenario:
+	//   1. Workbench user has UID 1234 (alice)
+	//   2. App image contains: useradd --uid 1234 vscode-user
+	//   3. User bypasses libnss_wrapper: unset LD_PRELOAD
+	//   4. whoami returns "vscode-user" instead of "alice"
+	//   5. Audit logs show wrong username (security issue for incident response)
+	//
+	// While this doesn't enable privilege escalation (Kubernetes enforces the real UID),
+	// it creates audit trail confusion which is a security concern.
+
+	log := log.FromContext(ctx)
+	log.V(1).Info("Validating app image", "image", appImage)
+
+	// Check for UID collisions
+	collisions, err := checkImageForUIDCollisions(ctx, appImage)
+	if err != nil {
+		// Log error but don't fail validation - this is a best-effort check
+		log.V(1).Info("Error checking for UID collisions", "image", appImage, "error", err.Error())
+		return nil
+	}
+
+	if len(collisions) > 0 {
+		log.Error(nil, "UID collision detected in app image",
+			"image", appImage,
+			"collisions", strings.Join(collisions, ", "),
+			"reserved_range", "1001-9999",
+			"impact", "audit trail confusion when users bypass libnss_wrapper",
+			"fix", "Remove users in range 1001-9999 or change UIDs to >= 10000")
+
+		return fmt.Errorf("image %s contains UIDs in reserved Chorus range (1001-9999): %s. "+
+			"This causes audit trail confusion. See APP-DEVELOPMENT-GUIDELINES.md for details",
+			appImage, strings.Join(collisions, ", "))
+	}
+
+	log.V(1).Info("No UID collisions detected", "image", appImage)
+	return nil
 }
 
 func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) *batchv1.Job {
@@ -123,6 +235,14 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
 	}
 
+	// Validate that the app image is compatible with the init container
+	if err := validateAppImage(ctx, appImage); err != nil {
+		log := log.FromContext(ctx)
+		log.Error(err, "App image validation failed", "image", appImage)
+		// Return nil to skip creating this job - the reconciler will retry
+		return nil
+	}
+
 	// Security: Main container runs as non-root user with zero capabilities
 	// User creation and setup is handled by init container (user-setup)
 	// This container starts directly as the target user with no privileged operations
@@ -213,15 +333,24 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		appContainer.VolumeMounts = append(appContainer.VolumeMounts, storageMounts...)
 	}
 
+	// Construct init container image from registry (same pattern as app images)
+	// Security: Uses a separate trusted image (not the app image) to prevent
+	// malicious app images from running privileged code.
+	registry := config.Registry
+	if registry != "" {
+		registry = strings.TrimRight(registry, "/") + "/"
+	}
+	initContainerImage := fmt.Sprintf("%schorus/init-container:latest", registry)
+
 	// Create init container for user setup and directory creation
-	// This container runs as root with minimal capabilities to create the user,
-	// setup directories, and configure the environment. It runs to completion
-	// before the main application container starts.
+	// The init container runs as root with minimal capabilities to create the user,
+	// setup directories, and configure the environment. It runs to completion before
+	// the main application container starts.
 	initContainer := corev1.Container{
 		Name:            "user-setup",
-		Image:           appImage,
-		ImagePullPolicy: imagePullPolicy,
-		Command:         []string{"/docker-entrypoint.sh"},
+		Image:           initContainerImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"/docker-entrypoint-init.sh"},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                ptr.To(int64(0)), // Init container runs as root
 			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
@@ -266,7 +395,18 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 				Value: "echo 'Init container setup complete'", // Dummy command for init
 			},
 		},
-		Resources: defaultResources,
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:              resource.MustParse("100m"),
+				corev1.ResourceMemory:           resource.MustParse("64Mi"),
+				corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+			},
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:              resource.MustParse("10m"),
+				corev1.ResourceMemory:           resource.MustParse("16Mi"),
+				corev1.ResourceEphemeralStorage: resource.MustParse("100Mi"),
+			},
+		},
 	}
 
 	// Add shm volume mount to init container if needed
