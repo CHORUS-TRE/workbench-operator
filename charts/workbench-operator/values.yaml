@@ -8,6 +8,7 @@ nfs:
   secretName: nfs-secret
   secretNamespace: kube-system
 
+priorityClassName: high-priority
 controllerManager:
   manager:
     args:
