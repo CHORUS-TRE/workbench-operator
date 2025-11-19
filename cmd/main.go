@@ -51,6 +51,8 @@ func main() {
 	var nfsSecretNamespace string
 	var localStorageEnabled bool
 	var localStorageHostPath string
+	var workbenchPriorityClassName string
+	var applicationPriorityClassName string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -71,6 +73,8 @@ func main() {
 	flag.StringVar(&nfsSecretNamespace, "nfs-secret-namespace", "kube-system", "Namespace of the NFS secret")
 	flag.BoolVar(&localStorageEnabled, "local-storage-enabled", false, "Enable local storage provider for development (uses hostPath volumes)")
 	flag.StringVar(&localStorageHostPath, "local-storage-host-path", "/tmp/workbench-local-storage", "Host path for local storage volumes")
+	flag.StringVar(&workbenchPriorityClassName, "workbench-priority-class-name", "", "Priority class name to set on Workbench pods")
+	flag.StringVar(&applicationPriorityClassName, "application-priority-class-name", "", "Priority class name to set on Application pods")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -139,16 +143,18 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("workbench-controller"),
 		Config: controller.Config{
-			Registry:               registry,
-			AppsRepository:         appsRepository,
-			SocatImage:             socatImage,
-			XpraServerImage:        xpraServerImage,
-			JuiceFSSecretName:      juiceFSSecretName,
-			JuiceFSSecretNamespace: juiceFSSecretNamespace,
-			NFSSecretName:          nfsSecretName,
-			NFSSecretNamespace:     nfsSecretNamespace,
-			LocalStorageEnabled:    localStorageEnabled,
-			LocalStorageHostPath:   localStorageHostPath,
+			Registry:                     registry,
+			AppsRepository:               appsRepository,
+			SocatImage:                   socatImage,
+			XpraServerImage:              xpraServerImage,
+			JuiceFSSecretName:            juiceFSSecretName,
+			JuiceFSSecretNamespace:       juiceFSSecretNamespace,
+			NFSSecretName:                nfsSecretName,
+			NFSSecretNamespace:           nfsSecretNamespace,
+			LocalStorageEnabled:          localStorageEnabled,
+			LocalStorageHostPath:         localStorageHostPath,
+			WorkbenchPriorityClassName:   workbenchPriorityClassName,
+			ApplicationPriorityClassName: applicationPriorityClassName,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
