@@ -17,6 +17,7 @@ controllerManager:
     - --registry=harbor.build.chorus-tre.local
     - --apps-repository=apps
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
+    - --init-container-image=harbor.build.chorus-tre.local/chorus/init-container
     - --socat-image=alpine/socat:1.8.0.0
     - --juicefs-secret-name={{ .Values.juicefs.secretName }}
     - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
@@ -29,7 +30,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.3.47
+      tag: 0.3.48
     resources:
       limits:
         cpu: 500m

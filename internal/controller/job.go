@@ -333,14 +333,20 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		appContainer.VolumeMounts = append(appContainer.VolumeMounts, storageMounts...)
 	}
 
-	// Construct init container image from registry (same pattern as app images)
+	// Construct init container image (same pattern as xpra-server-image)
 	// Security: Uses a separate trusted image (not the app image) to prevent
 	// malicious app images from running privileged code.
-	registry := config.Registry
-	if registry != "" {
-		registry = strings.TrimRight(registry, "/") + "/"
+	initContainerImage := config.InitContainerImage
+	if initContainerImage != "" {
+		initContainerImage = fmt.Sprintf("%s:latest", initContainerImage)
+	} else {
+		// Fallback to registry-based construction if not specified
+		registry := config.Registry
+		if registry != "" {
+			registry = strings.TrimRight(registry, "/") + "/"
+		}
+		initContainerImage = fmt.Sprintf("%schorus/init-container:latest", registry)
 	}
-	initContainerImage := fmt.Sprintf("%schorus/init-container:latest", registry)
 
 	// Create init container for user setup and directory creation
 	// The init container runs as root with minimal capabilities to create the user,

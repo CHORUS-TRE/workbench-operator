@@ -77,17 +77,20 @@ type KioskConfig struct {
 
 // StorageConfig defines storage mount configuration
 type StorageConfig struct {
-	// S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
+	// S3 enables S3 storage mounting via JuiceFS at /mnt/workspace-archive
+	// The init container creates a symlink from /home/{user}/workspace-archive to this mount point
 	// +optional
 	// +default:value=true
 	S3 bool `json:"s3,omitempty"`
 
-	// NFS enables NFS storage mounting at /home/{user}/workspace-scratch
+	// NFS enables NFS storage mounting at /mnt/workspace-scratch
+	// The init container creates a symlink from /home/{user}/workspace-scratch to this mount point
 	// +optional
 	// +default:value=true
 	NFS bool `json:"nfs,omitempty"`
 
-	// Local enables local storage mounting for development at /home/{user}/workspace-local
+	// Local enables local storage mounting for development at /mnt/workspace-local
+	// The init container creates a symlink from /home/{user}/workspace-local to this mount point
 	// This is only available when the operator is started with --local-storage-enabled flag
 	// +optional
 	// +default:value=false
