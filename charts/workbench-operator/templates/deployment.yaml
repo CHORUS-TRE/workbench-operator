@@ -54,7 +54,7 @@ spec:
       securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
         8 }}
       serviceAccountName: {{ include "workbench-operator.fullname" . }}-controller-manager
-      {{- if .Values.priorityClassName }}
-      priorityClassName: {{ .Values.priorityClassName }}
+      {{- if .Values.controllerManager.priorityClassName }}
+      priorityClassName: {{ .Values.controllerManager.priorityClassName }}
       {{- end }}
       terminationGracePeriodSeconds: 10

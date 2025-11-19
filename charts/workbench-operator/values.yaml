@@ -8,8 +8,14 @@ nfs:
   secretName: nfs-secret
   secretNamespace: kube-system
 
-priorityClassName: high-priority
+workbench:
+  priorityClassName: low-priority
+
+application:
+  priorityClassName: preemptible
+
 controllerManager:
+  priorityClassName: high-priority
   manager:
     args:
     - --metrics-bind-address=:8080
