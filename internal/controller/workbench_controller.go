@@ -261,7 +261,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		// TODO: move that check to an admission webhook.
 		if job.Name != foundJob.Name {
-			err := fmt.Errorf("one simply cannot change the application name: %s != %s", job.Name, foundJob.Name)
+			err := fmt.Errorf("One simply cannot change the application name: %s != %s", job.Name, foundJob.Name)
 			return ctrl.Result{}, err
 		}
 
@@ -413,7 +413,7 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 
 		// Do no create a job in the suspended state. It's a feature to have things in the
 		// Workbench definitions that do not exist yet.
-		if job.Spec.Suspend != nil && *job.Spec.Suspend {
+		if job.Spec.Suspend != nil && *job.Spec.Suspend == true {
 			log.V(1).Info("Skip suspended job", "job", job.Name)
 			return nil, fmt.Errorf("skipping job %q: %w", job.Name, ErrSuspendedJob)
 		}
