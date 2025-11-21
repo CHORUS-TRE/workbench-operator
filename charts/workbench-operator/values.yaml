@@ -48,7 +48,7 @@ controllerManager:
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
 serviceMonitor:
-  enabled: false
+  enabled: true
 metricsService:
   ports:
   - name: http
