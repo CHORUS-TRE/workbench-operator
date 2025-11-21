@@ -73,6 +73,12 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		deployment.Spec.Template.Spec.ServiceAccountName = serviceAccountName
 	}
 
+	// Pod priority class
+	workbenchPriorityClassName := config.WorkbenchPriorityClassName
+	if workbenchPriorityClassName != "" {
+		deployment.Spec.Template.Spec.PriorityClassName = workbenchPriorityClassName
+	}
+
 	// Shared by the containers
 	volume := corev1.Volume{
 		Name: "x11-unix",

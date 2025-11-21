@@ -22,4 +22,8 @@ type Config struct {
 	LocalStorageEnabled bool
 	// LocalStorageHostPath is the host path for local storage volumes
 	LocalStorageHostPath string
+	// WorkbenchPriorityClassName is the priority class name to set on Workbench pods
+	WorkbenchPriorityClassName string
+	// ApplicationPriorityClassName is the priority class name to set on Application pods
+	ApplicationPriorityClassName string
 }

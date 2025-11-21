@@ -20,12 +20,14 @@ spec:
         kubectl.kubernetes.io/default-container: manager
     spec:
       containers:
-      - args: 
+      - args:
         {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
         - --juicefs-secret-name={{ .Values.juicefs.secretName }}
         - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
         - --nfs-secret-name={{ .Values.nfs.secretName }}
         - --nfs-secret-namespace={{ .Values.nfs.secretNamespace }}
+        - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
+        - --application-priority-class-name={{ .Values.application.priorityClassName }}
         command:
         - /manager
         env:
@@ -54,4 +56,7 @@ spec:
       securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
         8 }}
       serviceAccountName: {{ include "workbench-operator.fullname" . }}-controller-manager
+      {{- if .Values.controllerManager.priorityClassName }}
+      priorityClassName: {{ .Values.controllerManager.priorityClassName }}
+      {{- end }}
       terminationGracePeriodSeconds: 10
