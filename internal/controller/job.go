@@ -201,6 +201,12 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		job.Spec.Template.Spec.ServiceAccountName = serviceAccountName
 	}
 
+	// Pod priority class
+	applicationPriorityClassName := config.ApplicationPriorityClassName
+	if applicationPriorityClassName != "" {
+		job.Spec.Template.Spec.PriorityClassName = applicationPriorityClassName
+	}
+
 	var appImage string
 	imagePullPolicy := corev1.PullIfNotPresent
 
