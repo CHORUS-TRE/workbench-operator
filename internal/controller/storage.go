@@ -449,7 +449,7 @@ func (b *BaseProvider) getZeroStorageClass() *string {
 }
 
 func (b *BaseProvider) getWorkspaceSubPath(namespace string) string {
-	return fmt.Sprintf("workspaces/%s", namespace)
+	return fmt.Sprintf("workspaces/data/%s", namespace)
 }
 
 func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
