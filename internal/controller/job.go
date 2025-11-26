@@ -351,7 +351,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		if registry != "" {
 			registry = strings.TrimRight(registry, "/") + "/"
 		}
-		initContainerImage = fmt.Sprintf("%schorus/init-container:latest", registry)
+		initContainerImage = fmt.Sprintf("%schorus/app-init:latest", registry)
 	}
 
 	// Create init container for user setup and directory creation
@@ -359,10 +359,10 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	// setup directories, and configure the environment. It runs to completion before
 	// the main application container starts.
 	initContainer := corev1.Container{
-		Name:            "user-setup",
+		Name:            "app-init",
 		Image:           initContainerImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{"/docker-entrypoint-init.sh"},
+		Command:         []string{"/docker-entrypoint.sh"},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                ptr.To(int64(0)), // Init container runs as root
 			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
@@ -421,14 +421,6 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		},
 	}
 
-	// Add shm volume mount to init container if needed
-	if shmDir != nil {
-		initContainer.VolumeMounts = append(initContainer.VolumeMounts, corev1.VolumeMount{
-			Name:      shmDir.Name,
-			MountPath: "/dev/shm",
-		})
-	}
-
 	// Mount /home directory in init container (shared with main container)
 	initContainer.VolumeMounts = append(initContainer.VolumeMounts, corev1.VolumeMount{
 		Name:      "home",
@@ -439,9 +431,6 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	if err == nil {
 		initContainer.VolumeMounts = append(initContainer.VolumeMounts, storageMounts...)
 	}
-
-	// Add APP_DATA_DIR_ARRAY if this app has it
-	// (This would need to be passed from the WorkbenchApp spec if supported)
 
 	// Add init container to pod spec
 	job.Spec.Template.Spec.InitContainers = []corev1.Container{

@@ -43,7 +43,7 @@ func (s *S3Provider) HasSecret(ctx context.Context, client client.Client) bool {
 	return err == nil
 }
 
-// Setup performs JuiceFS directory creation using a Job
+// Setup performs S3 directory creation using a Job
 func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
 	// Get JuiceFS secret and filesystem name
 	fsName, err := s.getSecretConfig(ctx)
@@ -51,16 +51,16 @@ func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbe
 		return err
 	}
 
-	// Create Job to create JuiceFS directories (data and config)
+	// Job to create S3 directories (data and app_data)
 	ttl := int32(300)   // 5 minutes cleanup
 	backoff := int32(2) // 2 retries
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("juicefs-mkdir-%s", workbench.Namespace),
+			Name:      fmt.Sprintf("s3-mkdir-%s", workbench.Namespace),
 			Namespace: workbench.Namespace,
 			Labels: map[string]string{
-				"app":       "juicefs-directory-creator",
+				"app":       "s3-directory-creator",
 				"workbench": workbench.Name,
 			},
 		},
@@ -77,7 +77,7 @@ func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbe
 							Command: []string{
 								"sh",
 								"-c",
-								fmt.Sprintf("mkdir -p /juicefs/workspaces/%s/data /juicefs/workspaces/%s/config && chmod 2770 /juicefs/workspaces/%s/data && chmod 2750 /juicefs/workspaces/%s/config && chgrp 1001 /juicefs/workspaces/%s/data /juicefs/workspaces/%s/config",
+								fmt.Sprintf("mkdir -p /juicefs/workspaces/%s/data /juicefs/workspaces/%s/app_data && chmod 2770 /juicefs/workspaces/%s/data && chmod 2750 /juicefs/workspaces/%s/app_data && chgrp 1001 /juicefs/workspaces/%s/data /juicefs/workspaces/%s/app_data",
 									workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace),
 							},
 							Resources: corev1.ResourceRequirements{

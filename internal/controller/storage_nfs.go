@@ -51,7 +51,7 @@ func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workb
 		return err
 	}
 
-	// Create Job to create NFS directory
+	// Job to create NFS directory
 	ttl := int32(300)   // 5 minutes cleanup
 	backoff := int32(2) // 2 retries
 

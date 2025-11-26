@@ -79,7 +79,7 @@ func (l *LocalProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Wor
 							Command: []string{
 								"sh",
 								"-c",
-								fmt.Sprintf("mkdir -p /local/workspaces/%s/data /local/workspaces/%s/config && chmod 2770 /local/workspaces/%s/data && chmod 2750 /local/workspaces/%s/config && chgrp 1001 /local/workspaces/%s/data /local/workspaces/%s/config",
+								fmt.Sprintf("mkdir -p /local/workspaces/%s/data /local/workspaces/%s/app_data && chmod 2770 /local/workspaces/%s/data && chmod 2750 /local/workspaces/%s/app_data && chgrp 1001 /local/workspaces/%s/data /local/workspaces/%s/app_data",
 									workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace),
 							},
 							Resources: corev1.ResourceRequirements{

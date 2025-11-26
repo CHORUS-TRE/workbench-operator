@@ -24,7 +24,7 @@ controllerManager:
     - --registry=harbor.build.chorus-tre.local
     - --apps-repository=apps
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
-    - --init-container-image=harbor.build.chorus-tre.local/chorus/init-container
+    - --init-container-image=harbor.build.chorus-tre.local/chorus/app-init
     - --socat-image=alpine/socat:1.8.0.0
     containerSecurityContext:
       allowPrivilegeEscalation: false
