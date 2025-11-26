@@ -77,7 +77,7 @@ func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbe
 							Command: []string{
 								"sh",
 								"-c",
-								fmt.Sprintf("mkdir -p /juicefs/workspaces/%s/data /juicefs/workspaces/%s/app_data && chmod 2770 /juicefs/workspaces/%s/data && chmod 2750 /juicefs/workspaces/%s/app_data && chgrp 1001 /juicefs/workspaces/%s/data /juicefs/workspaces/%s/app_data",
+								fmt.Sprintf("mkdir -p /juicefs/workspaces/%s/data /juicefs/workspaces/%s/app_data && chmod 2770 /juicefs/workspaces/%s/data && chmod 2770 /juicefs/workspaces/%s/app_data && chgrp 1001 /juicefs/workspaces/%s/data /juicefs/workspaces/%s/app_data",
 									workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace, workbench.Namespace),
 							},
 							Resources: corev1.ResourceRequirements{
