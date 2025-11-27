@@ -73,6 +73,13 @@ type KioskConfig struct {
 	// URL to load in the kiosk browser
 	// +kubebuilder:validation:Pattern=`^https://.*`
 	URL string `json:"url"`
+	// JWTURL is the URL to refresh the short lived JWT token
+	// +optional
+	// +kubebuilder:validation:Pattern=`^https://.*`
+	JWTURL string `json:"jwtUrl"`
+	// JWTToken is a short lived jwt used to authenticate to the JWTURL
+	// +optional
+	JWTToken string `json:"jwtToken"`
 }
 
 // StorageConfig defines storage mount configuration
