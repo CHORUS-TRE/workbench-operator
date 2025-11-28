@@ -32,6 +32,40 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
+// buildAppSecurityContext creates a security context for app containers based on debug mode.
+// In debug mode, allows root access and elevated privileges for debugging.
+// In normal mode, enforces strict security with specified user/group and no capabilities.
+func buildAppSecurityContext(debugMode bool, userID, groupID int64) *corev1.SecurityContext {
+	if debugMode {
+		return &corev1.SecurityContext{
+			RunAsUser:                &userID,
+			RunAsGroup:               &groupID,
+			AllowPrivilegeEscalation: ptr.To(true),
+			RunAsNonRoot:             ptr.To(false), // Allow root
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+				Add: []corev1.Capability{
+					"SYS_PTRACE",   // For debugging tools (strace, gdb)
+					"SYS_ADMIN",    // For namespace operations
+					"DAC_OVERRIDE", // Bypass file permission checks
+				},
+			},
+		}
+	}
+
+	runAsNonRoot := true
+	return &corev1.SecurityContext{
+		RunAsUser:                &userID,
+		RunAsGroup:               &groupID,
+		RunAsNonRoot:             &runAsNonRoot,
+		AllowPrivilegeEscalation: ptr.To(false),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+			// No capabilities added - main container needs none!
+		},
+	}
+}
+
 // checkImageForUIDCollisions inspects an image's /etc/passwd for UIDs in the Chorus range (1001-9999)
 func checkImageForUIDCollisions(ctx context.Context, imageName string) ([]string, error) {
 	log := log.FromContext(ctx)
@@ -252,26 +286,14 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	// Security: Main container runs as non-root user with zero capabilities
 	// User creation and setup is handled by init container (user-setup)
 	// This container starts directly as the target user with no privileged operations
-	allowPrivilegeEscalation := false
 	userID := int64(workbench.Spec.Server.UserID)
 	groupID := int64(1001) // Match FSGroup
-	runAsNonRoot := true
 
 	appContainer := corev1.Container{
 		Name:            app.Name,
 		Image:           appImage,
 		ImagePullPolicy: imagePullPolicy,
 		Resources:       defaultResources, // Set default resources
-		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                &userID,
-			RunAsGroup:               &groupID,
-			RunAsNonRoot:             &runAsNonRoot,
-			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-				// No capabilities added - main container needs none!
-			},
-		},
 		Env: []corev1.EnvVar{
 			{
 				Name:  "DISPLAY",
@@ -295,6 +317,9 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			},
 		},
 	}
+
+	// Configure security context based on debug mode
+	appContainer.SecurityContext = buildAppSecurityContext(workbench.Spec.DebugMode, userID, groupID)
 
 	// Add kiosk configuration if this is a kiosk app and has kiosk config
 	if strings.Contains(appContainer.Image, "apps/kiosk") && app.KioskConfig != nil {
@@ -375,7 +400,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		Command:         []string{"/docker-entrypoint.sh"},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                ptr.To(int64(0)), // Init container runs as root
-			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			AllowPrivilegeEscalation: ptr.To(false),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 				Add: []corev1.Capability{
@@ -476,6 +501,21 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
+	}
+
+	// Add debug mode annotation and logging if enabled
+	if workbench.Spec.DebugMode {
+		if job.Spec.Template.Annotations == nil {
+			job.Spec.Template.Annotations = make(map[string]string)
+		}
+		job.Spec.Template.Annotations["chorus-tre.ch/debug-mode"] = "enabled"
+		job.Spec.Template.Annotations["chorus-tre.ch/debug-warning"] = "Elevated privileges enabled. Not for production use."
+
+		logger := log.FromContext(ctx)
+		logger.Info("[!] DEBUG MODE ENABLED [!]",
+			"app", app.Name,
+			"workbench", workbench.Name,
+			"warning", "Elevated privileges enabled. Not for production use.")
 	}
 
 	// This allows the end user to stop the application from within Xpra.

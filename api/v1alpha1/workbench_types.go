@@ -170,6 +170,28 @@ type WorkbenchSpec struct {
 	// Storage defines storage mount configuration for S3 and NFS
 	// +optional
 	Storage *StorageConfig `json:"storage,omitempty"`
+	// DebugMode enables elevated privileges for all containers in this workbench.
+	// When enabled, allows kubectl exec as root into both the xpra server deployment
+	// and all application job containers for debugging purposes.
+	//
+	// Security Impact:
+	// - Sets RunAsNonRoot: false (allows root access)
+	// - Sets AllowPrivilegeEscalation: true
+	// - Adds capabilities: SYS_PTRACE, SYS_ADMIN, DAC_OVERRIDE
+	//
+	// WARNING: This significantly reduces the security posture of the workbench.
+	// Only use this flag in local development environments for debugging application images.
+	// NEVER enable this in production environments.
+	//
+	// Use cases:
+	// - Debugging application images during local development
+	// - Installing debug tools (strace, gdb) on the fly
+	// - Inspecting file permissions and ownership
+	// - Troubleshooting xpra server display issues
+	//
+	// +optional
+	// +kubebuilder:default=false
+	DebugMode bool `json:"debugMode,omitempty"`
 }
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.
