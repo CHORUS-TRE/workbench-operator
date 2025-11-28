@@ -28,7 +28,8 @@ func NewLocalProvider(reconciler *WorkbenchReconciler) *LocalProvider {
 			secretName:      "", // No secret needed
 			secretNamespace: "",
 			mountType:       "local",
-			pvcLabel:        "", // No label for local storage
+			pvcLabel:        "",   // No label for local storage
+			mountAppData:    true, // Local storage supports app_data PVC
 		},
 	}
 }

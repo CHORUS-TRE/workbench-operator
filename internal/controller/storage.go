@@ -40,17 +40,18 @@ type StorageProvider interface {
 	CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error)
 
 	// Volume configuration for jobs
+	// GetVolumeSpec returns a single volume (one PVC per provider)
 	GetVolumeSpec(pvcName string) corev1.Volume
-	GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount
+	// GetVolumeMountSpecs returns mount specs - may return multiple mounts from same PVC with different subpaths
+	GetVolumeMountSpecs(user string, namespace string) []corev1.VolumeMount
 
 	// Metadata
 	GetPVCName(namespace string) string
-	GetMountPath(user string) string
+	GetVolumeName() string
 	GetStorageType() StorageType
 	GetDriverName() string
 	GetSecretName() string
 	GetSecretNamespace() string
-	GetVolumeName() string
 }
 
 // =============================================================================
@@ -130,11 +131,13 @@ func (sm *StorageManager) GetVolumeAndMountSpecs(ctx context.Context, workbench 
 		if provider.HasSecret(ctx, sm.reconciler.Client) {
 			pvcName := provider.GetPVCName(workbench.Namespace)
 
+			// Get volume spec (single volume per provider)
 			volume := provider.GetVolumeSpec(pvcName)
 			volumes = append(volumes, volume)
 
-			mount := provider.GetVolumeMountSpec(user, namespace)
-			mounts = append(mounts, mount)
+			// Get mount specs (may be multiple mounts from same PVC with different subpaths)
+			mountSpecs := provider.GetVolumeMountSpecs(user, namespace)
+			mounts = append(mounts, mountSpecs...)
 		}
 	}
 	return volumes, mounts, nil
@@ -307,6 +310,7 @@ type BaseProvider struct {
 	secretNamespace string
 	mountType       string
 	pvcLabel        string
+	mountAppData    bool // Whether this provider supports app_data PVC
 }
 
 // Common getters
@@ -317,17 +321,13 @@ func (b *BaseProvider) GetSecretNamespace() string  { return b.secretNamespace }
 func (b *BaseProvider) GetMountType() string        { return b.mountType }
 func (b *BaseProvider) GetVolumeName() string       { return fmt.Sprintf("workspace-%s", b.mountType) }
 
-// Common computed methods
+// GetPVCName returns the PVC name for this provider
 func (b *BaseProvider) GetPVCName(namespace string) string {
 	return fmt.Sprintf("%s-%s-pvc", namespace, b.mountType)
 }
 
 func (b *BaseProvider) getPVName(namespace string) string {
 	return fmt.Sprintf("%s-%s-pv", namespace, b.mountType)
-}
-
-func (b *BaseProvider) GetMountPath(user string) string {
-	return fmt.Sprintf("/mnt/workspace-%s", b.mountType)
 }
 
 // Common detection methods
@@ -357,13 +357,48 @@ func (b *BaseProvider) HasSecret(ctx context.Context, client client.Client) bool
 	return err == nil
 }
 
-// Common volume methods
+// GetVolumeSpec returns a single volume spec for this provider's PVC
 func (b *BaseProvider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return b.createVolumeSpec(pvcName)
+	return corev1.Volume{
+		Name: b.GetVolumeName(),
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcName,
+			},
+		},
+	}
+}
+
+// GetVolumeMountSpecs returns mount specs - may return multiple mounts from same PVC with different subpaths
+// For providers with mountAppData=true, this returns two mounts:
+//   - data mount: /mnt/workspace-{type} with subpath workspaces/data/{namespace}
+//   - app_data mount: /mnt/app_data with subpath workspaces/{namespace}/app_data/{user}
+func (b *BaseProvider) GetVolumeMountSpecs(user string, namespace string) []corev1.VolumeMount {
+	volumeName := b.GetVolumeName()
+
+	// Always include the data mount
+	specs := []corev1.VolumeMount{
+		{
+			Name:      volumeName,
+			MountPath: fmt.Sprintf("/mnt/workspace-%s", b.mountType),
+			SubPath:   fmt.Sprintf("workspaces/%s/data", namespace),
+		},
+	}
+
+	// Add app_data mount if enabled for this provider
+	if b.mountAppData {
+		specs = append(specs, corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: "/mnt/app_data",
+			SubPath:   fmt.Sprintf("workspaces/%s/app_data/%s", namespace, user),
+		})
+	}
+
+	return specs
 }
 
 // Common PV creation - needs provider-specific volumeAttributes and optional secret reference
-func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]string, nodePublishSecretRef *corev1.SecretReference) (*corev1.PersistentVolume, error) {
+func (b *BaseProvider) createBasePV(namespace string, volumeAttributes map[string]string, nodePublishSecretRef *corev1.SecretReference) (*corev1.PersistentVolume, error) {
 	pvName := b.getPVName(namespace)
 
 	pv := &corev1.PersistentVolume{
@@ -393,6 +428,7 @@ func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]st
 	return pv, nil
 }
 
+// CreatePVC creates a single PVC bound to the PV
 func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error) {
 	pvcName := b.GetPVCName(workbench.Namespace)
 	pvName := b.getPVName(workbench.Namespace)
@@ -427,17 +463,6 @@ func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.
 }
 
 // Helper methods for BaseProvider
-func (b *BaseProvider) createVolumeSpec(pvcName string) corev1.Volume {
-	return corev1.Volume{
-		Name: b.GetVolumeName(),
-		VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: pvcName,
-			},
-		},
-	}
-}
-
 func (b *BaseProvider) hasCSIDriver(ctx context.Context, client client.Client, driverName string) bool {
 	csiDriver := &storagev1.CSIDriver{}
 	err := client.Get(ctx, types.NamespacedName{Name: driverName}, csiDriver)
@@ -446,16 +471,4 @@ func (b *BaseProvider) hasCSIDriver(ctx context.Context, client client.Client, d
 
 func (b *BaseProvider) getZeroStorageClass() *string {
 	return new(string) // already "" by default
-}
-
-func (b *BaseProvider) getWorkspaceSubPath(namespace string) string {
-	return fmt.Sprintf("workspaces/data/%s", namespace)
-}
-
-func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return corev1.VolumeMount{
-		Name:      b.GetVolumeName(),
-		MountPath: b.GetMountPath(user),
-		SubPath:   b.getWorkspaceSubPath(namespace),
-	}
 }

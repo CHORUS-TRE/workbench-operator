@@ -30,6 +30,7 @@ func NewS3Provider(reconciler *WorkbenchReconciler) *S3Provider {
 			secretNamespace: reconciler.Config.JuiceFSSecretNamespace,
 			mountType:       "archive",
 			pvcLabel:        "use-juicefs",
+			mountAppData:    true, // S3 supports app_data PVC
 		},
 	}
 }
@@ -154,5 +155,5 @@ func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wor
 		Namespace: s.secretNamespace,
 	}
 
-	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
+	return s.BaseProvider.createBasePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
 }
