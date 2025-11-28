@@ -77,6 +77,15 @@ spec:
                     kioskConfig:
                       description: KioskConfig holds kiosk-specific configuration
                       properties:
+                        jwtToken:
+                          description: JWTToken is a short lived jwt used to authenticate
+                            to the JWTURL
+                          type: string
+                        jwtUrl:
+                          description: JWTURL is the URL to refresh the short lived
+                            JWT token
+                          pattern: ^https://.*
+                          type: string
                         url:
                           description: URL to load in the kiosk browser
                           pattern: ^https://.*
