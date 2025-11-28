@@ -155,5 +155,5 @@ func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wor
 		Namespace: s.secretNamespace,
 	}
 
-	return s.BaseProvider.createBasePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
+	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
 }

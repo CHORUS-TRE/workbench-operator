@@ -151,5 +151,5 @@ func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Wo
 	}
 
 	// NFS doesn't require NodePublishSecretRef
-	return n.BaseProvider.createBasePV(workbench.Namespace, volumeAttributes, nil)
+	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nil)
 }

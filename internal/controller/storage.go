@@ -398,7 +398,7 @@ func (b *BaseProvider) GetVolumeMountSpecs(user string, namespace string) []core
 }
 
 // Common PV creation - needs provider-specific volumeAttributes and optional secret reference
-func (b *BaseProvider) createBasePV(namespace string, volumeAttributes map[string]string, nodePublishSecretRef *corev1.SecretReference) (*corev1.PersistentVolume, error) {
+func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]string, nodePublishSecretRef *corev1.SecretReference) (*corev1.PersistentVolume, error) {
 	pvName := b.getPVName(namespace)
 
 	pv := &corev1.PersistentVolume{
