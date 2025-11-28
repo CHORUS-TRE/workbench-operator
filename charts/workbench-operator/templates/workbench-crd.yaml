@@ -192,6 +192,16 @@ spec:
                   minLength: 1
                   type: string
                 type: array
+              initContainer:
+                description: InitContainer represents the configuration of the init
+                  container.
+                properties:
+                  version:
+                    default: latest
+                    description: Version defines the version to use for the app-init
+                      container.
+                    type: string
+                type: object
               server:
                 description: Server represents the configuration of the server part.
                 properties:
@@ -214,7 +224,7 @@ spec:
                     type: integer
                   version:
                     default: latest
-                    description: Version defines the version to use.
+                    description: Version defines the version to use for the xpra server.
                     type: string
                 type: object
               serviceAccountName:

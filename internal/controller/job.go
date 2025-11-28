@@ -342,16 +342,26 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	// Construct init container image (same pattern as xpra-server-image)
 	// Security: Uses a separate trusted image (not the app image) to prevent
 	// malicious app images from running privileged code.
+	initContainerVersion := "latest"
+	if workbench.Spec.InitContainer != nil && workbench.Spec.InitContainer.Version != "" {
+		initContainerVersion = workbench.Spec.InitContainer.Version
+	}
+
+	initContainerImagePullPolicy := corev1.PullIfNotPresent
+	if initContainerVersion == "latest" {
+		initContainerImagePullPolicy = corev1.PullAlways
+	}
+
 	initContainerImage := config.InitContainerImage
 	if initContainerImage != "" {
-		initContainerImage = fmt.Sprintf("%s:latest", initContainerImage)
+		initContainerImage = fmt.Sprintf("%s:%s", initContainerImage, initContainerVersion)
 	} else {
 		// Fallback to registry-based construction if not specified
 		registry := config.Registry
 		if registry != "" {
 			registry = strings.TrimRight(registry, "/") + "/"
 		}
-		initContainerImage = fmt.Sprintf("%schorus/app-init:latest", registry)
+		initContainerImage = fmt.Sprintf("%schorus/app-init:%s", registry, initContainerVersion)
 	}
 
 	// Create init container for user setup and directory creation
@@ -361,7 +371,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	initContainer := corev1.Container{
 		Name:            "app-init",
 		Image:           initContainerImage,
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		ImagePullPolicy: initContainerImagePullPolicy,
 		Command:         []string{"/docker-entrypoint.sh"},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                ptr.To(int64(0)), // Init container runs as root

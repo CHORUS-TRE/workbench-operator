@@ -31,7 +31,7 @@ const (
 
 // WorkbenchServer defines the server configuration.
 type WorkbenchServer struct {
-	// Version defines the version to use.
+	// Version defines the version to use for the xpra server.
 	// +optional
 	// +default:value="latest"
 	Version string `json:"version,omitempty"`
@@ -73,6 +73,14 @@ type KioskConfig struct {
 	// URL to load in the kiosk browser
 	// +kubebuilder:validation:Pattern=`^https://.*`
 	URL string `json:"url"`
+}
+
+// InitContainerConfig defines the init container configuration.
+type InitContainerConfig struct {
+	// Version defines the version to use for the app-init container.
+	// +optional
+	// +default:value="latest"
+	Version string `json:"version,omitempty"`
 }
 
 // StorageConfig defines storage mount configuration
@@ -145,6 +153,9 @@ type WorkbenchSpec struct {
 	// Server represents the configuration of the server part.
 	// +optional
 	Server WorkbenchServer `json:"server,omitempty"`
+	// InitContainer represents the configuration of the init container.
+	// +optional
+	InitContainer *InitContainerConfig `json:"initContainer,omitempty"`
 	// Apps represent a map of applications any their state
 	// +optional
 	Apps map[string]WorkbenchApp `json:"apps,omitempty"`
