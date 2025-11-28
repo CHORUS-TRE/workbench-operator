@@ -298,13 +298,13 @@ var _ = Describe("Workbench Controller", func() {
 
 			// Check volumes and mounts based on JuiceFS driver and secret availability
 			if hasJuiceFSDriver && hasJuiceFSSecret {
-				// With JuiceFS driver and secret, workspace volume is present
+				// With JuiceFS driver and secret, home + workspace volumes
+				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(2))
+				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2))
+			} else {
+				// Without JuiceFS driver or secret, only home volume
 				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
 				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
-			} else {
-				// Without JuiceFS driver or secret, no workspace volume
-				Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(0))
-				Expect(job.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(0))
 			}
 
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my-registry/applications/"))
@@ -315,13 +315,13 @@ var _ = Describe("Workbench Controller", func() {
 
 			// Check volumes and mounts for job1 (has shm volume) based on JuiceFS driver and secret availability
 			if hasJuiceFSDriver && hasJuiceFSSecret {
-				// With JuiceFS driver and secret, both shm and workspace volumes
+				// With JuiceFS driver and secret, shm + home + workspace volumes
+				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(3))
+				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(3))
+			} else {
+				// Without JuiceFS driver or secret, shm + home volumes
 				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(2))
 				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(2))
-			} else {
-				// Without JuiceFS driver or secret, only shm volume
-				Expect(job1.Spec.Template.Spec.Volumes).To(HaveLen(1))
-				Expect(job1.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
 			}
 
 			Expect(job1.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("quay.io/kitty"))
@@ -350,7 +350,7 @@ var _ = Describe("Workbench Controller", func() {
 					}
 				}
 				Expect(workspaceMount).NotTo(BeNil())
-				Expect(workspaceMount.MountPath).To(Equal(fmt.Sprintf("/home/%s/workspace-archive", workbench.Spec.Server.User)))
+				Expect(workspaceMount.MountPath).To(Equal("/mnt/workspace-archive"))
 				Expect(workspaceMount.SubPath).To(Equal("workspaces/default"))
 
 				// Verify that the namespace-specific PVC exists and is correctly configured
@@ -698,12 +698,12 @@ var _ = Describe("Workbench Controller", func() {
 				ctx := context.Background()
 				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
 
-				// Verify no volumes were added since drivers are not available
-				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(0))
+				// Verify only home volume was added since storage drivers are not available
+				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))
 
-				// Verify no volume mounts were added since storage is not available
+				// Verify only home volume mount was added since storage is not available
 				container := job.Spec.Template.Spec.Containers[0]
-				Expect(len(container.VolumeMounts)).To(Equal(0))
+				Expect(len(container.VolumeMounts)).To(Equal(1))
 			})
 
 			It("should not add volumes when PVC names are empty", func() {
@@ -746,12 +746,12 @@ var _ = Describe("Workbench Controller", func() {
 				ctx := context.Background()
 				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
 
-				// Verify no storage volumes were added
-				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(0))
+				// Verify only home volume was added (no storage volumes)
+				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))
 
-				// Verify no storage volume mounts were added
+				// Verify only home volume mount was added (no storage mounts)
 				container := job.Spec.Template.Spec.Containers[0]
-				Expect(len(container.VolumeMounts)).To(Equal(0))
+				Expect(len(container.VolumeMounts)).To(Equal(1))
 			})
 		})
 	})

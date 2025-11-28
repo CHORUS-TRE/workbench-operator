@@ -31,7 +31,7 @@ const (
 
 // WorkbenchServer defines the server configuration.
 type WorkbenchServer struct {
-	// Version defines the version to use.
+	// Version defines the version to use for the xpra server.
 	// +optional
 	// +default:value="latest"
 	Version string `json:"version,omitempty"`
@@ -82,19 +82,30 @@ type KioskConfig struct {
 	JWTToken string `json:"jwtToken"`
 }
 
+// InitContainerConfig defines the init container configuration.
+type InitContainerConfig struct {
+	// Version defines the version to use for the app-init container.
+	// +optional
+	// +default:value="latest"
+	Version string `json:"version,omitempty"`
+}
+
 // StorageConfig defines storage mount configuration
 type StorageConfig struct {
-	// S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
+	// S3 enables S3 storage mounting via JuiceFS at /mnt/workspace-archive
+	// The init container creates a symlink from /home/{user}/workspace-archive to this mount point
 	// +optional
 	// +default:value=true
 	S3 bool `json:"s3,omitempty"`
 
-	// NFS enables NFS storage mounting at /home/{user}/workspace-scratch
+	// NFS enables NFS storage mounting at /mnt/workspace-scratch
+	// The init container creates a symlink from /home/{user}/workspace-scratch to this mount point
 	// +optional
 	// +default:value=true
 	NFS bool `json:"nfs,omitempty"`
 
-	// Local enables local storage mounting for development at /home/{user}/workspace-local
+	// Local enables local storage mounting for development at /mnt/workspace-local
+	// The init container creates a symlink from /home/{user}/workspace-local to this mount point
 	// This is only available when the operator is started with --local-storage-enabled flag
 	// +optional
 	// +default:value=false
@@ -149,6 +160,9 @@ type WorkbenchSpec struct {
 	// Server represents the configuration of the server part.
 	// +optional
 	Server WorkbenchServer `json:"server,omitempty"`
+	// InitContainer represents the configuration of the init container.
+	// +optional
+	InitContainer *InitContainerConfig `json:"initContainer,omitempty"`
 	// Apps represent a map of applications any their state
 	// +optional
 	Apps map[string]WorkbenchApp `json:"apps,omitempty"`

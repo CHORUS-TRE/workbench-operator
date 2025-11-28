@@ -6,6 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: workbench-sample
 spec:
+  initContainer:
+    version: "0.0.1-1"
   server:
     version: "6.2.1-1"
     user: user_name

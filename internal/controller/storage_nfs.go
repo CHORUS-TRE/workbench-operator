@@ -32,7 +32,8 @@ func NewNFSProvider(reconciler *WorkbenchReconciler) *NFSProvider {
 			secretName:      reconciler.Config.NFSSecretName,
 			secretNamespace: reconciler.Config.NFSSecretNamespace,
 			mountType:       "scratch",
-			pvcLabel:        "", // No label for NFS
+			pvcLabel:        "",    // No label for NFS
+			mountAppData:    false, // NFS does NOT support app_data PVC
 		},
 	}
 }
@@ -51,7 +52,7 @@ func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workb
 		return err
 	}
 
-	// Create Job to create NFS directory
+	// Job to create NFS directory
 	ttl := int32(300)   // 5 minutes cleanup
 	backoff := int32(2) // 2 retries
 
@@ -75,9 +76,10 @@ func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workb
 							Name:  "mkdir",
 							Image: "busybox:latest",
 							Command: []string{
-								"mkdir",
-								"-p",
-								fmt.Sprintf("/nfs/workspaces/%s", workbench.Namespace),
+								"sh",
+								"-c",
+								fmt.Sprintf("mkdir -p /nfs/workspaces/%s/data && chmod 2770 /nfs/workspaces/%s/data && chgrp 1001 /nfs/workspaces/%s/data",
+									workbench.Namespace, workbench.Namespace, workbench.Namespace),
 							},
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
