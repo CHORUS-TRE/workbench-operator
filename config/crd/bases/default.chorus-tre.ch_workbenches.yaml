@@ -192,16 +192,6 @@ spec:
                   minLength: 1
                   type: string
                 type: array
-              initContainer:
-                description: InitContainer represents the configuration of the init
-                  container.
-                properties:
-                  version:
-                    default: latest
-                    description: Version defines the version to use for the app-init
-                      container.
-                    type: string
-                type: object
               server:
                 description: Server represents the configuration of the server part.
                 properties:
@@ -224,7 +214,7 @@ spec:
                     type: integer
                   version:
                     default: latest
-                    description: Version defines the version to use for the xpra server.
+                    description: Version defines the version to use.
                     type: string
                 type: object
               serviceAccountName:
@@ -238,21 +228,16 @@ spec:
                   local:
                     default: false
                     description: |-
-                      Local enables local storage mounting for development at /mnt/workspace-local
-                      The init container creates a symlink from /home/{user}/workspace-local to this mount point
+                      Local enables local storage mounting for development at /home/{user}/workspace-local
                       This is only available when the operator is started with --local-storage-enabled flag
                     type: boolean
                   nfs:
                     default: true
-                    description: |-
-                      NFS enables NFS storage mounting at /mnt/workspace-scratch
-                      The init container creates a symlink from /home/{user}/workspace-scratch to this mount point
+                    description: NFS enables NFS storage mounting at /home/{user}/workspace-scratch
                     type: boolean
                   s3:
                     default: true
-                    description: |-
-                      S3 enables S3 storage mounting via JuiceFS at /mnt/workspace-archive
-                      The init container creates a symlink from /home/{user}/workspace-archive to this mount point
+                    description: S3 enables S3 storage mounting via JuiceFS at /home/{user}/workspace-archive
                     type: boolean
                 type: object
             type: object

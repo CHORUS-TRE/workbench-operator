@@ -44,7 +44,6 @@ func main() {
 	var registry string
 	var appsRepository string
 	var xpraServerImage string
-	var initContainerImage string
 	var socatImage string
 	var juiceFSSecretName string
 	var juiceFSSecretNamespace string
@@ -67,7 +66,6 @@ func main() {
 	flag.StringVar(&registry, "registry", "harbor.build.chorus-tre.local", "The hostname of the OCI registry")
 	flag.StringVar(&appsRepository, "apps-repository", "apps", "The repository holding the apps")
 	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
-	flag.StringVar(&initContainerImage, "init-container-image", "", "Init container OCI image name (no version)")
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
 	flag.StringVar(&juiceFSSecretName, "juicefs-secret-name", "juicefs-secret", "Name of the JuiceFS secret")
 	flag.StringVar(&juiceFSSecretNamespace, "juicefs-secret-namespace", "kube-system", "Namespace of the JuiceFS secret")
@@ -149,7 +147,6 @@ func main() {
 			AppsRepository:               appsRepository,
 			SocatImage:                   socatImage,
 			XpraServerImage:              xpraServerImage,
-			InitContainerImage:           initContainerImage,
 			JuiceFSSecretName:            juiceFSSecretName,
 			JuiceFSSecretNamespace:       juiceFSSecretNamespace,
 			NFSSecretName:                nfsSecretName,
