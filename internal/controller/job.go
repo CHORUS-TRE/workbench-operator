@@ -361,7 +361,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		if registry != "" {
 			registry = strings.TrimRight(registry, "/") + "/"
 		}
-		initContainerImage = fmt.Sprintf("%schorus/app-init:%s", registry, initContainerVersion)
+		initContainerImage = fmt.Sprintf("%sapps/app-init:%s", registry, initContainerVersion)
 	}
 
 	// Create init container for user setup and directory creation
