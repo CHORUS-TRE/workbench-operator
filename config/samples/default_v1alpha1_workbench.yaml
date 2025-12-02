@@ -15,8 +15,24 @@ spec:
     s3: true
     nfs: true
   apps:
-    jlab:
-      name: jupyterlab
-      version: "4.2.5-1"
+    benchmark:
+      name: benchmark
+      version: "0.0.1-1"
+      state: Running
+      resources:
+        limits:
+          cpu: 750m
+          ephemeral-storage: 10Gi
+          memory: 768Mi
+    kiosk:
+      name: kiosk
+      version: "1506976-10"
+      resources:
+        limits:
+          cpu: 750m
+          ephemeral-storage: 10Gi
+          memory: 768Mi
+      kioskConfig:
+        url: https://pt-frontend.rdeid.unil.ch/
       shmSize: 1Gi
-      state: Stopped
+      state: Running
