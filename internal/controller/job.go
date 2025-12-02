@@ -66,6 +66,20 @@ func buildAppSecurityContext(debugMode bool, userID, groupID int64) *corev1.Secu
 	}
 }
 
+// getAppName extracts the base app name for use in container paths.
+// When app.Image is set, extracts from repository (e.g., "apps/freesurfer" -> "freesurfer")
+// Otherwise returns empty string to trigger validation error.
+// This is needed because app.Name in the CR may include instance suffixes (e.g., "freesurfer-159")
+// but the Dockerfile uses the base name for paths like /apps/freesurfer/config/
+func getAppName(app defaultv1alpha1.WorkbenchApp) string {
+	if app.Image == nil {
+		return ""
+	}
+	// Extract the last path component from repository (e.g., "apps/freesurfer" -> "freesurfer")
+	parts := strings.Split(app.Image.Repository, "/")
+	return parts[len(parts)-1]
+}
+
 // checkImageForUIDCollisions inspects an image's /etc/passwd for UIDs in the Chorus range (1001-9999)
 func checkImageForUIDCollisions(ctx context.Context, imageName string) ([]string, error) {
 	log := log.FromContext(ctx)
@@ -176,7 +190,7 @@ func validateAppImage(ctx context.Context, appImage string) error {
 	return nil
 }
 
-func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) *batchv1.Job {
+func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) (*batchv1.Job, error) {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -277,10 +291,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 
 	// Validate that the app image is compatible with the init container
 	if err := validateAppImage(ctx, appImage); err != nil {
-		log := log.FromContext(ctx)
-		log.Error(err, "App image validation failed", "image", appImage)
-		// Return nil to skip creating this job - the reconciler will retry
-		return nil
+		return nil, fmt.Errorf("app image validation failed for %s: %w", appImage, err)
 	}
 
 	// Security: Main container runs as non-root user with zero capabilities
@@ -289,8 +300,13 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	userID := int64(workbench.Spec.Server.UserID)
 	groupID := int64(1001) // Match FSGroup
 
+	appName := getAppName(app)
+	if appName == "" {
+		return nil, fmt.Errorf("app.Image is required: app %q has no image configured", app.Name)
+	}
+
 	appContainer := corev1.Container{
-		Name:            app.Name,
+		Name:            appName,
 		Image:           appImage,
 		ImagePullPolicy: imagePullPolicy,
 		Resources:       defaultResources, // Set default resources
@@ -339,7 +355,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			},
 			{
 				Name:  "APP_NAME",
-				Value: app.Name,
+				Value: appName,
 			},
 		},
 	}
@@ -560,7 +576,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		job.Spec.Suspend = &fal
 	}
 
-	return job
+	return job, nil
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.
