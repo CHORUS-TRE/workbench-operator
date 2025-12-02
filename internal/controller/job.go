@@ -34,14 +34,16 @@ var defaultResources = corev1.ResourceRequirements{
 
 // getAppName extracts the base app name for use in container paths.
 // When app.Image is set, extracts from repository (e.g., "apps/freesurfer" -> "freesurfer")
-// Otherwise falls back to app.Name.
+// Otherwise returns empty string to trigger validation error.
 // This is needed because app.Name in the CR may include instance suffixes (e.g., "freesurfer-159")
 // but the Dockerfile uses the base name for paths like /apps/freesurfer/config/
 func getAppName(app defaultv1alpha1.WorkbenchApp) string {
-	if app.Image != nil {
-		return strings.TrimPrefix(app.Image.Repository, "apps/")
+	if app.Image == nil {
+		return ""
 	}
-	return app.Name
+	// Extract the last path component from repository (e.g., "apps/freesurfer" -> "freesurfer")
+	parts := strings.Split(app.Image.Repository, "/")
+	return parts[len(parts)-1]
 }
 
 // checkImageForUIDCollisions inspects an image's /etc/passwd for UIDs in the Chorus range (1001-9999)
@@ -269,8 +271,15 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	groupID := int64(1001) // Match FSGroup
 	runAsNonRoot := true
 
+	appName := getAppName(app)
+	if appName == "" {
+		log := log.FromContext(ctx)
+		log.Error(nil, "App name is empty", "app", app)
+		return nil
+	}
+
 	appContainer := corev1.Container{
-		Name:            app.Name,
+		Name:            appName,
 		Image:           appImage,
 		ImagePullPolicy: imagePullPolicy,
 		Resources:       defaultResources, // Set default resources
@@ -329,7 +338,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			},
 			{
 				Name:  "APP_NAME",
-				Value: getAppName(app),
+				Value: appName,
 			},
 		},
 	}

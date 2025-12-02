@@ -135,6 +135,11 @@ var _ = Describe("Workbench Controller", func() {
 		workbench.Spec.Apps = map[string]defaultv1alpha1.WorkbenchApp{
 			"uid0": {
 				Name: "wezterm",
+				Image: &defaultv1alpha1.Image{
+					Registry:   "my-registry",
+					Repository: "applications/wezterm",
+					Tag:        "latest",
+				},
 			},
 			"uid1": {
 				Name: "kitty",
@@ -148,6 +153,11 @@ var _ = Describe("Workbench Controller", func() {
 			"uid2": {
 				Name:  "alacritty",
 				State: "Stopped",
+				Image: &defaultv1alpha1.Image{
+					Registry:   "my-registry",
+					Repository: "applications/alacritty",
+					Tag:        "latest",
+				},
 			},
 		}
 
@@ -686,6 +696,11 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
+					Image: &defaultv1alpha1.Image{
+						Registry:   "test.registry.io",
+						Repository: "apps/test-app",
+						Tag:        "latest",
+					},
 				}
 
 				// Create a storage manager for testing
@@ -734,6 +749,11 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
+					Image: &defaultv1alpha1.Image{
+						Registry:   "test.registry.io",
+						Repository: "apps/test-app",
+						Tag:        "latest",
+					},
 				}
 
 				// Create a storage manager for testing
