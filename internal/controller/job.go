@@ -32,6 +32,14 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
+// getAppNameFromRepository extracts the base app name from an image repository path.
+// For example: "apps/freesurfer" -> "freesurfer"
+// This is needed because app.Name in the CR may include instance suffixes (e.g., "freesurfer-159")
+// but the Dockerfile uses the base name for paths like /apps/freesurfer/config/
+func getAppNameFromRepository(repository string) string {
+	return strings.TrimPrefix(repository, "apps/")
+}
+
 // checkImageForUIDCollisions inspects an image's /etc/passwd for UIDs in the Chorus range (1001-9999)
 func checkImageForUIDCollisions(ctx context.Context, imageName string) ([]string, error) {
 	log := log.FromContext(ctx)
@@ -317,7 +325,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			},
 			{
 				Name:  "APP_NAME",
-				Value: app.Name,
+				Value: getAppNameFromRepository(app.Image.Repository),
 			},
 		},
 	}
