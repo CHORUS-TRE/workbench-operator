@@ -24,7 +24,7 @@ controllerManager:
     - --registry=harbor.build.chorus-tre.local
     - --apps-repository=apps
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
-    - --init-container-image=harbor.build.chorus-tre.local/chorus/app-init
+    - --init-container-image=harbor.build.chorus-tre.local/apps/app-init
     - --socat-image=alpine/socat:1.8.0.0
     containerSecurityContext:
       allowPrivilegeEscalation: false
@@ -33,7 +33,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.3.49
+      tag: 0.4.2
     resources:
       limits:
         cpu: 500m
