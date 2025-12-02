@@ -33,7 +33,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.1
+      tag: 0.4.2
     resources:
       limits:
         cpu: 500m
