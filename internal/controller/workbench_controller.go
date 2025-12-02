@@ -223,7 +223,17 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	for uid, app := range workbench.Spec.Apps {
-		job := initJob(ctx, workbench, r.Config, uid, app, service, storageManager)
+		job, err := initJob(ctx, workbench, r.Config, uid, app, service, storageManager)
+		if err != nil {
+			log.Error(err, "Failed to initialize job", "app", app.Name)
+			// Set app status to Failed and continue with other apps
+			if workbench.SetAppStatusFailed(uid) {
+				if err := r.Status().Update(ctx, &workbench); err != nil {
+					log.V(1).Error(err, "Unable to update app status to Failed", "app", app.Name)
+				}
+			}
+			continue
+		}
 
 		// Link the job with the Workbench resource such that we can reconcile it
 		// when it's being changed.
