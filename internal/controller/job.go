@@ -293,6 +293,28 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 				Name:  "CHORUS_GID",
 				Value: "1001", // Must match FSGroup for volume permission compatibility
 			},
+			// NSS wrapper configuration for proper user identity resolution
+			// Required for kubectl exec sessions to resolve username correctly
+			{
+				Name:  "LD_PRELOAD",
+				Value: "/usr/lib/x86_64-linux-gnu/libnss_wrapper.so",
+			},
+			{
+				Name:  "NSS_WRAPPER_PASSWD",
+				Value: "/home/.chorus-auth/passwd",
+			},
+			{
+				Name:  "NSS_WRAPPER_GROUP",
+				Value: "/home/.chorus-auth/group",
+			},
+			{
+				Name:  "HOME",
+				Value: fmt.Sprintf("/home/%s", workbench.Spec.Server.User),
+			},
+			{
+				Name:  "USER",
+				Value: workbench.Spec.Server.User,
+			},
 		},
 	}
 
