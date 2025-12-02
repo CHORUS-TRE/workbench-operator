@@ -711,7 +711,8 @@ var _ = Describe("Workbench Controller", func() {
 				storageManager := NewStorageManager(reconciler)
 
 				ctx := context.Background()
-				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				job, err := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Verify only home volume was added since storage drivers are not available
 				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))
@@ -764,7 +765,8 @@ var _ = Describe("Workbench Controller", func() {
 				storageManager := NewStorageManager(reconciler)
 
 				ctx := context.Background()
-				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				job, err := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Verify only home volume was added (no storage volumes)
 				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))

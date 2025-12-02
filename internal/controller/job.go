@@ -156,7 +156,7 @@ func validateAppImage(ctx context.Context, appImage string) error {
 	return nil
 }
 
-func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) *batchv1.Job {
+func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) (*batchv1.Job, error) {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -257,10 +257,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 
 	// Validate that the app image is compatible with the init container
 	if err := validateAppImage(ctx, appImage); err != nil {
-		log := log.FromContext(ctx)
-		log.Error(err, "App image validation failed", "image", appImage)
-		// Return nil to skip creating this job - the reconciler will retry
-		return nil
+		return nil, fmt.Errorf("app image validation failed for %s: %w", appImage, err)
 	}
 
 	// Security: Main container runs as non-root user with zero capabilities
@@ -273,9 +270,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 
 	appName := getAppName(app)
 	if appName == "" {
-		log := log.FromContext(ctx)
-		log.Error(nil, "App name is empty", "app", app)
-		return nil
+		return nil, fmt.Errorf("app.Image is required: app %q has no image configured", app.Name)
 	}
 
 	appContainer := corev1.Container{
@@ -541,7 +536,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		job.Spec.Suspend = &fal
 	}
 
-	return job
+	return job, nil
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.
