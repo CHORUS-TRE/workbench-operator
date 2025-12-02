@@ -315,6 +315,10 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 				Name:  "USER",
 				Value: workbench.Spec.Server.User,
 			},
+			{
+				Name:  "APP_NAME",
+				Value: app.Name,
+			},
 		},
 	}
 
