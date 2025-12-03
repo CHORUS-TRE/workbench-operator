@@ -94,7 +94,7 @@ run-local: manifests generate fmt vet ## Run a controller from your host with lo
 		--local-storage-host-path=/tmp/workbench-local-storage \
 
 .PHONY: run-local-debug
-run-local: manifests generate fmt vet ## Run a controller from your host with local storage and debug mode enabled for development.
+run-local-debug: manifests generate fmt vet ## Run a controller from your host with local storage and debug mode enabled for development.
 	@echo "Running with local storage and debug mode enabled for development..."
 	go run ./cmd/main.go \
 		--local-storage-enabled=true \
