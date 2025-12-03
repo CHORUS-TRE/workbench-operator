@@ -52,6 +52,7 @@ func main() {
 	var nfsSecretNamespace string
 	var localStorageEnabled bool
 	var localStorageHostPath string
+	var debugModeEnabled bool
 	var workbenchPriorityClassName string
 	var applicationPriorityClassName string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -75,6 +76,7 @@ func main() {
 	flag.StringVar(&nfsSecretNamespace, "nfs-secret-namespace", "kube-system", "Namespace of the NFS secret")
 	flag.BoolVar(&localStorageEnabled, "local-storage-enabled", false, "Enable local storage provider for development (uses hostPath volumes)")
 	flag.StringVar(&localStorageHostPath, "local-storage-host-path", "/tmp/workbench-local-storage", "Host path for local storage volumes")
+	flag.BoolVar(&debugModeEnabled, "debug-mode-enabled", false, "Enable debug mode for all workbenches (elevated privileges for debugging). Only use for local development.")
 	flag.StringVar(&workbenchPriorityClassName, "workbench-priority-class-name", "", "Priority class name to set on Workbench pods")
 	flag.StringVar(&applicationPriorityClassName, "application-priority-class-name", "", "Priority class name to set on Application pods")
 	opts := zap.Options{
@@ -90,6 +92,12 @@ func main() {
 		setupLog.Info("LOCAL STORAGE ENABLED - Development Mode Only",
 			"path", localStorageHostPath,
 			"warning", "Local storage uses hostPath volumes and should ONLY be used for local development. Do not use in production!")
+	}
+
+	// Log debug mode configuration with security warning
+	if debugModeEnabled {
+		setupLog.Info("DEBUG MODE ENABLED - Development Mode Only",
+			"warning", "Debug mode grants elevated privileges (root access, SYS_PTRACE, SYS_ADMIN) to all workbenches. NEVER use in production!")
 	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
@@ -156,6 +164,7 @@ func main() {
 			NFSSecretNamespace:           nfsSecretNamespace,
 			LocalStorageEnabled:          localStorageEnabled,
 			LocalStorageHostPath:         localStorageHostPath,
+			DebugModeEnabled:             debugModeEnabled,
 			WorkbenchPriorityClassName:   workbenchPriorityClassName,
 			ApplicationPriorityClassName: applicationPriorityClassName,
 		},
