@@ -38,18 +38,11 @@ var defaultResources = corev1.ResourceRequirements{
 func buildAppSecurityContext(debugMode bool, userID, groupID int64) *corev1.SecurityContext {
 	if debugMode {
 		return &corev1.SecurityContext{
-			RunAsUser:                &userID,
-			RunAsGroup:               &groupID,
+			RunAsUser:                ptr.To(int64(0)), // Run as root
+			RunAsGroup:               ptr.To(int64(0)), // Run as root group
 			AllowPrivilegeEscalation: ptr.To(true),
 			RunAsNonRoot:             ptr.To(false), // Allow root
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-				Add: []corev1.Capability{
-					"SYS_PTRACE",   // For debugging tools (strace, gdb)
-					"SYS_ADMIN",    // For namespace operations
-					"DAC_OVERRIDE", // Bypass file permission checks
-				},
-			},
+			Privileged:               ptr.To(true),  // Full privileges for debugging
 		}
 	}
 
@@ -361,7 +354,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	}
 
 	// Configure security context based on debug mode
-	appContainer.SecurityContext = buildAppSecurityContext(workbench.Spec.DebugMode, userID, groupID)
+	appContainer.SecurityContext = buildAppSecurityContext(config.DebugModeEnabled, userID, groupID)
 
 	// Add kiosk configuration if this is a kiosk app and has kiosk config
 	if strings.Contains(appContainer.Image, "apps/kiosk") && app.KioskConfig != nil {
@@ -546,7 +539,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	}
 
 	// Add debug mode annotation and logging if enabled
-	if workbench.Spec.DebugMode {
+	if config.DebugModeEnabled {
 		if job.Spec.Template.Annotations == nil {
 			job.Spec.Template.Annotations = make(map[string]string)
 		}

@@ -49,30 +49,20 @@ func NewTCPProbe(portName string, delay, period int) *corev1.Probe {
 
 // buildSecurityContext creates a security context based on debug mode.
 // In debug mode, allows root access and elevated privileges for debugging.
-// In normal mode, enforces strict security with no capabilities.
+// In normal mode, returns nil to use image defaults (xpra-server handles its own privilege drop).
 func buildSecurityContext(debugMode bool) *corev1.SecurityContext {
 	if debugMode {
 		return &corev1.SecurityContext{
+			RunAsUser:                ptr.To(int64(0)), // Run as root
+			RunAsGroup:               ptr.To(int64(0)), // Run as root group
 			AllowPrivilegeEscalation: ptr.To(true),
 			RunAsNonRoot:             ptr.To(false), // Allow root
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-				Add: []corev1.Capability{
-					"SYS_PTRACE",   // For debugging tools (strace, gdb)
-					"SYS_ADMIN",    // For namespace operations
-					"DAC_OVERRIDE", // Bypass file permission checks
-				},
-			},
+			Privileged:               ptr.To(true),  // Full privileges for debugging
 		}
 	}
 
-	return &corev1.SecurityContext{
-		AllowPrivilegeEscalation: ptr.To(false),
-		RunAsNonRoot:             ptr.To(true),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
-	}
+	// No security context - let the image use its defaults
+	return nil
 }
 
 // initDeployment creates the Xpra server deployment.
@@ -97,7 +87,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	deployment.Spec.Template.Labels = labels
 
 	// Add debug mode annotation if enabled
-	if workbench.Spec.DebugMode {
+	if config.DebugModeEnabled {
 		if deployment.Spec.Template.Annotations == nil {
 			deployment.Spec.Template.Annotations = make(map[string]string)
 		}
@@ -227,7 +217,7 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	}
 
 	// Configure security context based on debug mode
-	serverContainer.SecurityContext = buildSecurityContext(workbench.Spec.DebugMode)
+	serverContainer.SecurityContext = buildSecurityContext(config.DebugModeEnabled)
 
 	if workbench.Spec.Server.InitialResolutionWidth != 0 && workbench.Spec.Server.InitialResolutionHeight != 0 {
 		initialResolution := fmt.Sprintf("%dx%d", workbench.Spec.Server.InitialResolutionWidth, workbench.Spec.Server.InitialResolutionHeight)

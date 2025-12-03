@@ -87,11 +87,16 @@ run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
 .PHONY: run-local
-run-local: manifests generate fmt vet ## Run a controller from your host with local storage enabled for development.
-	@echo "Running with local storage enabled for development..."
+run-local: manifests generate fmt vet ## Run a controller from your host with local storage and debug mode enabled for development.
+	@echo "Running with local storage and debug mode enabled for development..."
 	go run ./cmd/main.go \
 		--local-storage-enabled=true \
-		--local-storage-host-path=/tmp/workbench-local-storage
+		--local-storage-host-path=/tmp/workbench-local-storage \
+		--debug-mode-enabled=true
+
+# NOTE: When switching between debug mode (root) and non-debug mode (user), you may need to clean
+# local storage to avoid permission issues: rm -rf /tmp/workbench-local-storage
+# Debug mode creates files as root, which non-debug mode (running as user) cannot modify.
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
