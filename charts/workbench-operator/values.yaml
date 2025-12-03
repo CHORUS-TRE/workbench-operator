@@ -8,7 +8,14 @@ nfs:
   secretName: nfs-secret
   secretNamespace: kube-system
 
+workbench:
+  priorityClassName: low-priority
+
+application:
+  priorityClassName: preemptible
+
 controllerManager:
+  priorityClassName: high-priority
   manager:
     args:
     - --metrics-bind-address=:8080
@@ -17,11 +24,8 @@ controllerManager:
     - --registry=harbor.build.chorus-tre.local
     - --apps-repository=apps
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
+    - --init-container-image=harbor.build.chorus-tre.local/chorus/app-init
     - --socat-image=alpine/socat:1.8.0.0
-    - --juicefs-secret-name={{ .Values.juicefs.secretName }}
-    - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
-    - --nfs-secret-name={{ .Values.nfs.secretName }}
-    - --nfs-secret-namespace={{ .Values.nfs.secretNamespace }}
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -29,7 +33,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.3.46
+      tag: 0.4.0
     resources:
       limits:
         cpu: 500m
@@ -44,6 +48,8 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+serviceMonitor:
+  enabled: true
 metricsService:
   ports:
   - name: http

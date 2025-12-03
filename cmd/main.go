@@ -44,11 +44,16 @@ func main() {
 	var registry string
 	var appsRepository string
 	var xpraServerImage string
+	var initContainerImage string
 	var socatImage string
 	var juiceFSSecretName string
 	var juiceFSSecretNamespace string
 	var nfsSecretName string
 	var nfsSecretNamespace string
+	var localStorageEnabled bool
+	var localStorageHostPath string
+	var workbenchPriorityClassName string
+	var applicationPriorityClassName string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -62,11 +67,16 @@ func main() {
 	flag.StringVar(&registry, "registry", "harbor.build.chorus-tre.local", "The hostname of the OCI registry")
 	flag.StringVar(&appsRepository, "apps-repository", "apps", "The repository holding the apps")
 	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
+	flag.StringVar(&initContainerImage, "init-container-image", "", "Init container OCI image name (no version)")
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
 	flag.StringVar(&juiceFSSecretName, "juicefs-secret-name", "juicefs-secret", "Name of the JuiceFS secret")
 	flag.StringVar(&juiceFSSecretNamespace, "juicefs-secret-namespace", "kube-system", "Namespace of the JuiceFS secret")
 	flag.StringVar(&nfsSecretName, "nfs-secret-name", "nfs-secret", "Name of the NFS secret")
 	flag.StringVar(&nfsSecretNamespace, "nfs-secret-namespace", "kube-system", "Namespace of the NFS secret")
+	flag.BoolVar(&localStorageEnabled, "local-storage-enabled", false, "Enable local storage provider for development (uses hostPath volumes)")
+	flag.StringVar(&localStorageHostPath, "local-storage-host-path", "/tmp/workbench-local-storage", "Host path for local storage volumes")
+	flag.StringVar(&workbenchPriorityClassName, "workbench-priority-class-name", "", "Priority class name to set on Workbench pods")
+	flag.StringVar(&applicationPriorityClassName, "application-priority-class-name", "", "Priority class name to set on Application pods")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -74,6 +84,13 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Log local storage configuration with safety warning
+	if localStorageEnabled {
+		setupLog.Info("LOCAL STORAGE ENABLED - Development Mode Only",
+			"path", localStorageHostPath,
+			"warning", "Local storage uses hostPath volumes and should ONLY be used for local development. Do not use in production!")
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -128,14 +145,19 @@ func main() {
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("workbench-controller"),
 		Config: controller.Config{
-			Registry:               registry,
-			AppsRepository:         appsRepository,
-			SocatImage:             socatImage,
-			XpraServerImage:        xpraServerImage,
-			JuiceFSSecretName:      juiceFSSecretName,
-			JuiceFSSecretNamespace: juiceFSSecretNamespace,
-			NFSSecretName:          nfsSecretName,
-			NFSSecretNamespace:     nfsSecretNamespace,
+			Registry:                     registry,
+			AppsRepository:               appsRepository,
+			SocatImage:                   socatImage,
+			XpraServerImage:              xpraServerImage,
+			InitContainerImage:           initContainerImage,
+			JuiceFSSecretName:            juiceFSSecretName,
+			JuiceFSSecretNamespace:       juiceFSSecretNamespace,
+			NFSSecretName:                nfsSecretName,
+			NFSSecretNamespace:           nfsSecretNamespace,
+			LocalStorageEnabled:          localStorageEnabled,
+			LocalStorageHostPath:         localStorageHostPath,
+			WorkbenchPriorityClassName:   workbenchPriorityClassName,
+			ApplicationPriorityClassName: applicationPriorityClassName,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")

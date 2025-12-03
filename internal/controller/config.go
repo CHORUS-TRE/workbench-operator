@@ -10,6 +10,8 @@ type Config struct {
 	SocatImage string
 	// XpraServerImage is the image (no version) used as the server.
 	XpraServerImage string
+	// InitContainerImage is the image (no version) used for the init container.
+	InitContainerImage string
 	// JuiceFSSecretName is the name of the JuiceFS secret.
 	JuiceFSSecretName string
 	// JuiceFSSecretNamespace is the namespace of the JuiceFS secret.
@@ -18,4 +20,12 @@ type Config struct {
 	NFSSecretName string
 	// NFSSecretNamespace is the namespace of the NFS secret.
 	NFSSecretNamespace string
+	// LocalStorageEnabled enables local storage provider for development
+	LocalStorageEnabled bool
+	// LocalStorageHostPath is the host path for local storage volumes
+	LocalStorageHostPath string
+	// WorkbenchPriorityClassName is the priority class name to set on Workbench pods
+	WorkbenchPriorityClassName string
+	// ApplicationPriorityClassName is the priority class name to set on Application pods
+	ApplicationPriorityClassName string
 }

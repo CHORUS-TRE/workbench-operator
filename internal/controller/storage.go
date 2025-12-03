@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,8 +20,9 @@ import (
 type StorageType string
 
 const (
-	StorageTypeS3  StorageType = "s3"
-	StorageTypeNFS StorageType = "nfs"
+	StorageTypeS3    StorageType = "s3"
+	StorageTypeNFS   StorageType = "nfs"
+	StorageTypeLocal StorageType = "local"
 	// Future: StorageTypeCeph, StorageTypeEFS, etc.
 )
 
@@ -40,17 +40,18 @@ type StorageProvider interface {
 	CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error)
 
 	// Volume configuration for jobs
+	// GetVolumeSpec returns a single volume (one PVC per provider)
 	GetVolumeSpec(pvcName string) corev1.Volume
-	GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount
+	// GetVolumeMountSpecs returns mount specs - may return multiple mounts from same PVC with different subpaths
+	GetVolumeMountSpecs(user string, namespace string) []corev1.VolumeMount
 
 	// Metadata
 	GetPVCName(namespace string) string
-	GetMountPath(user string) string
+	GetVolumeName() string
 	GetStorageType() StorageType
 	GetDriverName() string
 	GetSecretName() string
 	GetSecretNamespace() string
-	GetVolumeName() string
 }
 
 // =============================================================================
@@ -65,12 +66,19 @@ type StorageManager struct {
 
 // NewStorageManager creates a new StorageManager with all available providers
 func NewStorageManager(reconciler *WorkbenchReconciler) *StorageManager {
+	providers := map[StorageType]StorageProvider{
+		StorageTypeS3:  NewS3Provider(reconciler),
+		StorageTypeNFS: NewNFSProvider(reconciler),
+	}
+
+	// Add local provider if enabled
+	if reconciler.Config.LocalStorageEnabled {
+		providers[StorageTypeLocal] = NewLocalProvider(reconciler)
+	}
+
 	return &StorageManager{
 		reconciler: reconciler,
-		providers: map[StorageType]StorageProvider{
-			StorageTypeS3:  NewS3Provider(reconciler),
-			StorageTypeNFS: NewNFSProvider(reconciler),
-		},
+		providers:  providers,
 	}
 }
 
@@ -96,6 +104,13 @@ func (sm *StorageManager) GetEnabledProviders(workbench defaultv1alpha1.Workbenc
 		}
 	}
 
+	// Add local provider if enabled in both config and spec
+	if storage.Local {
+		if provider, exists := sm.providers[StorageTypeLocal]; exists {
+			enabled = append(enabled, provider)
+		}
+	}
+
 	return enabled
 }
 
@@ -116,11 +131,13 @@ func (sm *StorageManager) GetVolumeAndMountSpecs(ctx context.Context, workbench 
 		if provider.HasSecret(ctx, sm.reconciler.Client) {
 			pvcName := provider.GetPVCName(workbench.Namespace)
 
+			// Get volume spec (single volume per provider)
 			volume := provider.GetVolumeSpec(pvcName)
 			volumes = append(volumes, volume)
 
-			mount := provider.GetVolumeMountSpec(user, namespace)
-			mounts = append(mounts, mount)
+			// Get mount specs (may be multiple mounts from same PVC with different subpaths)
+			mountSpecs := provider.GetVolumeMountSpecs(user, namespace)
+			mounts = append(mounts, mountSpecs...)
 		}
 	}
 	return volumes, mounts, nil
@@ -293,6 +310,7 @@ type BaseProvider struct {
 	secretNamespace string
 	mountType       string
 	pvcLabel        string
+	mountAppData    bool // Whether this provider supports app_data PVC
 }
 
 // Common getters
@@ -303,17 +321,13 @@ func (b *BaseProvider) GetSecretNamespace() string  { return b.secretNamespace }
 func (b *BaseProvider) GetMountType() string        { return b.mountType }
 func (b *BaseProvider) GetVolumeName() string       { return fmt.Sprintf("workspace-%s", b.mountType) }
 
-// Common computed methods
+// GetPVCName returns the PVC name for this provider
 func (b *BaseProvider) GetPVCName(namespace string) string {
 	return fmt.Sprintf("%s-%s-pvc", namespace, b.mountType)
 }
 
 func (b *BaseProvider) getPVName(namespace string) string {
 	return fmt.Sprintf("%s-%s-pv", namespace, b.mountType)
-}
-
-func (b *BaseProvider) GetMountPath(user string) string {
-	return fmt.Sprintf("/home/%s/workspace-%s", user, b.mountType)
 }
 
 // Common detection methods
@@ -343,9 +357,44 @@ func (b *BaseProvider) HasSecret(ctx context.Context, client client.Client) bool
 	return err == nil
 }
 
-// Common volume methods
+// GetVolumeSpec returns a single volume spec for this provider's PVC
 func (b *BaseProvider) GetVolumeSpec(pvcName string) corev1.Volume {
-	return b.createVolumeSpec(pvcName)
+	return corev1.Volume{
+		Name: b.GetVolumeName(),
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcName,
+			},
+		},
+	}
+}
+
+// GetVolumeMountSpecs returns mount specs - may return multiple mounts from same PVC with different subpaths
+// For providers with mountAppData=true, this returns two mounts:
+//   - data mount: /mnt/workspace-{type} with subpath workspaces/data/{namespace}
+//   - app_data mount: /mnt/app_data with subpath workspaces/{namespace}/app_data/{user}
+func (b *BaseProvider) GetVolumeMountSpecs(user string, namespace string) []corev1.VolumeMount {
+	volumeName := b.GetVolumeName()
+
+	// Always include the data mount
+	specs := []corev1.VolumeMount{
+		{
+			Name:      volumeName,
+			MountPath: fmt.Sprintf("/mnt/workspace-%s", b.mountType),
+			SubPath:   fmt.Sprintf("workspaces/%s/data", namespace),
+		},
+	}
+
+	// Add app_data mount if enabled for this provider
+	if b.mountAppData {
+		specs = append(specs, corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: "/mnt/app_data",
+			SubPath:   fmt.Sprintf("workspaces/%s/app_data/%s", namespace, user),
+		})
+	}
+
+	return specs
 }
 
 // Common PV creation - needs provider-specific volumeAttributes and optional secret reference
@@ -379,6 +428,7 @@ func (b *BaseProvider) CreatePV(namespace string, volumeAttributes map[string]st
 	return pv, nil
 }
 
+// CreatePVC creates a single PVC bound to the PV
 func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolumeClaim, error) {
 	pvcName := b.GetPVCName(workbench.Namespace)
 	pvName := b.getPVName(workbench.Namespace)
@@ -413,17 +463,6 @@ func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.
 }
 
 // Helper methods for BaseProvider
-func (b *BaseProvider) createVolumeSpec(pvcName string) corev1.Volume {
-	return corev1.Volume{
-		Name: b.GetVolumeName(),
-		VolumeSource: corev1.VolumeSource{
-			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: pvcName,
-			},
-		},
-	}
-}
-
 func (b *BaseProvider) hasCSIDriver(ctx context.Context, client client.Client, driverName string) bool {
 	csiDriver := &storagev1.CSIDriver{}
 	err := client.Get(ctx, types.NamespacedName{Name: driverName}, csiDriver)
@@ -432,228 +471,4 @@ func (b *BaseProvider) hasCSIDriver(ctx context.Context, client client.Client, d
 
 func (b *BaseProvider) getZeroStorageClass() *string {
 	return new(string) // already "" by default
-}
-
-func (b *BaseProvider) getWorkspaceSubPath(namespace string) string {
-	return fmt.Sprintf("workspaces/%s", namespace)
-}
-
-func (b *BaseProvider) GetVolumeMountSpec(user string, namespace string) corev1.VolumeMount {
-	return corev1.VolumeMount{
-		Name:      b.GetVolumeName(),
-		MountPath: b.GetMountPath(user),
-		SubPath:   b.getWorkspaceSubPath(namespace),
-	}
-}
-
-// =============================================================================
-// Provider Constructors
-// =============================================================================
-
-func NewS3Provider(reconciler *WorkbenchReconciler) *S3Provider {
-	return &S3Provider{
-		BaseProvider: BaseProvider{
-			reconciler:      reconciler,
-			storageType:     StorageTypeS3,
-			driverName:      "csi.juicefs.com",
-			secretName:      reconciler.Config.JuiceFSSecretName,
-			secretNamespace: reconciler.Config.JuiceFSSecretNamespace,
-			mountType:       "archive",
-			pvcLabel:        "use-juicefs",
-		},
-	}
-}
-
-func NewNFSProvider(reconciler *WorkbenchReconciler) *NFSProvider {
-	return &NFSProvider{
-		BaseProvider: BaseProvider{
-			reconciler:      reconciler,
-			storageType:     StorageTypeNFS,
-			driverName:      "nfs.csi.k8s.io",
-			secretName:      reconciler.Config.NFSSecretName,
-			secretNamespace: reconciler.Config.NFSSecretNamespace,
-			mountType:       "scratch",
-			pvcLabel:        "", // No label for NFS
-		},
-	}
-}
-
-// =============================================================================
-// S3Provider - JuiceFS/S3 storage implementation
-// =============================================================================
-
-// S3Provider implements StorageProvider for JuiceFS/S3 storage
-type S3Provider struct {
-	BaseProvider
-}
-
-// HasSecret validates that the JuiceFS secret exists and has required fields
-func (s *S3Provider) HasSecret(ctx context.Context, client client.Client) bool {
-	_, err := s.getSecretConfig(ctx)
-	return err == nil
-}
-
-// Setup performs any pre-creation tasks - S3 doesn't need any setup
-func (s *S3Provider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	return nil
-}
-
-// getSecretConfig gets the JuiceFS secret and extracts filesystem name
-func (s *S3Provider) getSecretConfig(ctx context.Context) (string, error) {
-	secret, err := s.BaseProvider.getSecret(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	name := string(secret.Data["name"])
-	if name == "" {
-		return "", fmt.Errorf("JuiceFS secret missing required 'name' field")
-	}
-
-	return name, nil
-}
-
-// CreatePV creates a PersistentVolume for S3 storage
-func (s *S3Provider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
-	fsName, err := s.getSecretConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	volumeAttributes := map[string]string{
-		"name": fsName,
-		"path": "/",
-	}
-
-	// JuiceFS requires NodePublishSecretRef for authentication
-	nodePublishSecretRef := &corev1.SecretReference{
-		Name:      s.secretName,
-		Namespace: s.secretNamespace,
-	}
-
-	return s.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nodePublishSecretRef)
-}
-
-// =============================================================================
-// NFSProvider - NFS storage implementation
-// =============================================================================
-
-// NFSProvider implements StorageProvider for NFS storage
-type NFSProvider struct {
-	BaseProvider
-}
-
-// HasSecret validates that the NFS secret exists and has required fields
-func (n *NFSProvider) HasSecret(ctx context.Context, client client.Client) bool {
-	_, _, err := n.getSecretConfig(ctx)
-	return err == nil
-}
-
-// Setup performs NFS directory creation using a Job
-func (n *NFSProvider) Setup(ctx context.Context, workbench defaultv1alpha1.Workbench) error {
-	// Get NFS secret and extract server/share
-	server, share, err := n.getSecretConfig(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Create Job to create NFS directory
-	ttl := int32(300)   // 5 minutes cleanup
-	backoff := int32(2) // 2 retries
-
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("nfs-mkdir-%s", workbench.Namespace),
-			Namespace: workbench.Namespace,
-			Labels: map[string]string{
-				"app":       "nfs-directory-creator",
-				"workbench": workbench.Name,
-			},
-		},
-		Spec: batchv1.JobSpec{
-			TTLSecondsAfterFinished: &ttl,
-			BackoffLimit:            &backoff,
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{
-						{
-							Name:  "mkdir",
-							Image: "busybox:latest",
-							Command: []string{
-								"mkdir",
-								"-p",
-								fmt.Sprintf("/nfs/workspaces/%s", workbench.Namespace),
-							},
-							Resources: corev1.ResourceRequirements{
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("100m"),
-									corev1.ResourceMemory: resource.MustParse("64Mi"),
-								},
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("10m"),
-									corev1.ResourceMemory: resource.MustParse("16Mi"),
-								},
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "nfs-volume",
-									MountPath: "/nfs",
-								},
-							},
-						},
-					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "nfs-volume",
-							VolumeSource: corev1.VolumeSource{
-								NFS: &corev1.NFSVolumeSource{
-									Server: server,
-									Path:   share,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	return n.reconciler.Client.Create(ctx, job)
-}
-
-// getSecretConfig gets the NFS secret and extracts server and share
-func (n *NFSProvider) getSecretConfig(ctx context.Context) (string, string, error) {
-	secret, err := n.BaseProvider.getSecret(ctx)
-	if err != nil {
-		return "", "", err
-	}
-
-	server := string(secret.Data["server"])
-	share := string(secret.Data["share"])
-
-	if server == "" {
-		return "", "", fmt.Errorf("NFS secret missing required 'server' field")
-	}
-	if share == "" {
-		return "", "", fmt.Errorf("NFS secret missing required 'share' field")
-	}
-
-	return server, share, nil
-}
-
-// CreatePV creates a PersistentVolume for NFS storage
-func (n *NFSProvider) CreatePV(ctx context.Context, workbench defaultv1alpha1.Workbench) (*corev1.PersistentVolume, error) {
-	server, share, err := n.getSecretConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	volumeAttributes := map[string]string{
-		"server": server,
-		"share":  share,
-	}
-
-	// NFS doesn't require NodePublishSecretRef
-	return n.BaseProvider.CreatePV(workbench.Namespace, volumeAttributes, nil)
 }
