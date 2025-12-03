@@ -32,6 +32,47 @@ var defaultResources = corev1.ResourceRequirements{
 	},
 }
 
+// buildAppSecurityContext creates a security context for app containers based on debug mode.
+// In debug mode, allows root access and elevated privileges for debugging.
+// In normal mode, enforces strict security with specified user/group and no capabilities.
+func buildAppSecurityContext(debugMode bool, userID, groupID int64) *corev1.SecurityContext {
+	if debugMode {
+		return &corev1.SecurityContext{
+			RunAsUser:                ptr.To(int64(0)), // Run as root
+			RunAsGroup:               ptr.To(int64(0)), // Run as root group
+			AllowPrivilegeEscalation: ptr.To(true),
+			RunAsNonRoot:             ptr.To(false), // Allow root
+			Privileged:               ptr.To(true),  // Full privileges for debugging
+		}
+	}
+
+	runAsNonRoot := true
+	return &corev1.SecurityContext{
+		RunAsUser:                &userID,
+		RunAsGroup:               &groupID,
+		RunAsNonRoot:             &runAsNonRoot,
+		AllowPrivilegeEscalation: ptr.To(false),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+			// No capabilities added - main container needs none!
+		},
+	}
+}
+
+// getAppName extracts the base app name for use in container paths.
+// When app.Image is set, extracts from repository (e.g., "apps/freesurfer" -> "freesurfer")
+// Otherwise returns empty string to trigger validation error.
+// This is needed because app.Name in the CR may include instance suffixes (e.g., "freesurfer-159")
+// but the Dockerfile uses the base name for paths like /apps/freesurfer/config/
+func getAppName(app defaultv1alpha1.WorkbenchApp) string {
+	if app.Image == nil {
+		return ""
+	}
+	// Extract the last path component from repository (e.g., "apps/freesurfer" -> "freesurfer")
+	parts := strings.Split(app.Image.Repository, "/")
+	return parts[len(parts)-1]
+}
+
 // checkImageForUIDCollisions inspects an image's /etc/passwd for UIDs in the Chorus range (1001-9999)
 func checkImageForUIDCollisions(ctx context.Context, imageName string) ([]string, error) {
 	log := log.FromContext(ctx)
@@ -142,7 +183,7 @@ func validateAppImage(ctx context.Context, appImage string) error {
 	return nil
 }
 
-func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) *batchv1.Job {
+func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) (*batchv1.Job, error) {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -243,35 +284,25 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 
 	// Validate that the app image is compatible with the init container
 	if err := validateAppImage(ctx, appImage); err != nil {
-		log := log.FromContext(ctx)
-		log.Error(err, "App image validation failed", "image", appImage)
-		// Return nil to skip creating this job - the reconciler will retry
-		return nil
+		return nil, fmt.Errorf("app image validation failed for %s: %w", appImage, err)
 	}
 
 	// Security: Main container runs as non-root user with zero capabilities
 	// User creation and setup is handled by init container (user-setup)
 	// This container starts directly as the target user with no privileged operations
-	allowPrivilegeEscalation := false
 	userID := int64(workbench.Spec.Server.UserID)
 	groupID := int64(1001) // Match FSGroup
-	runAsNonRoot := true
+
+	appName := getAppName(app)
+	if appName == "" {
+		return nil, fmt.Errorf("app.Image is required: app %q has no image configured", app.Name)
+	}
 
 	appContainer := corev1.Container{
-		Name:            app.Name,
+		Name:            appName,
 		Image:           appImage,
 		ImagePullPolicy: imagePullPolicy,
 		Resources:       defaultResources, // Set default resources
-		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                &userID,
-			RunAsGroup:               &groupID,
-			RunAsNonRoot:             &runAsNonRoot,
-			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-				// No capabilities added - main container needs none!
-			},
-		},
 		Env: []corev1.EnvVar{
 			{
 				Name:  "DISPLAY",
@@ -293,8 +324,37 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 				Name:  "CHORUS_GID",
 				Value: "1001", // Must match FSGroup for volume permission compatibility
 			},
+			// NSS wrapper configuration for proper user identity resolution
+			// Required for kubectl exec sessions to resolve username correctly
+			{
+				Name:  "LD_PRELOAD",
+				Value: "/usr/lib/x86_64-linux-gnu/libnss_wrapper.so",
+			},
+			{
+				Name:  "NSS_WRAPPER_PASSWD",
+				Value: "/home/.chorus-auth/passwd",
+			},
+			{
+				Name:  "NSS_WRAPPER_GROUP",
+				Value: "/home/.chorus-auth/group",
+			},
+			{
+				Name:  "HOME",
+				Value: fmt.Sprintf("/home/%s", workbench.Spec.Server.User),
+			},
+			{
+				Name:  "USER",
+				Value: workbench.Spec.Server.User,
+			},
+			{
+				Name:  "APP_NAME",
+				Value: appName,
+			},
 		},
 	}
+
+	// Configure security context based on debug mode
+	appContainer.SecurityContext = buildAppSecurityContext(config.DebugModeEnabled, userID, groupID)
 
 	// Add kiosk configuration if this is a kiosk app and has kiosk config
 	if strings.Contains(appContainer.Image, "apps/kiosk") && app.KioskConfig != nil {
@@ -375,7 +435,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		Command:         []string{"/docker-entrypoint.sh"},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                ptr.To(int64(0)), // Init container runs as root
-			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			AllowPrivilegeEscalation: ptr.To(false),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 				Add: []corev1.Capability{
@@ -478,6 +538,21 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		},
 	}
 
+	// Add debug mode annotation and logging if enabled
+	if config.DebugModeEnabled {
+		if job.Spec.Template.Annotations == nil {
+			job.Spec.Template.Annotations = make(map[string]string)
+		}
+		job.Spec.Template.Annotations["chorus-tre.ch/debug-mode"] = "enabled"
+		job.Spec.Template.Annotations["chorus-tre.ch/debug-warning"] = "Elevated privileges enabled. Not for production use."
+
+		logger := log.FromContext(ctx)
+		logger.Info("[!] DEBUG MODE ENABLED [!]",
+			"app", app.Name,
+			"workbench", workbench.Name,
+			"warning", "Elevated privileges enabled. Not for production use.")
+	}
+
 	// This allows the end user to stop the application from within Xpra.
 	job.Spec.Template.Spec.RestartPolicy = "OnFailure"
 
@@ -494,7 +569,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		job.Spec.Suspend = &fal
 	}
 
-	return job
+	return job, nil
 }
 
 // updateJob  makes the destination batch Job (app), like the source one.

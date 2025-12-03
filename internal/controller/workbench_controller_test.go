@@ -135,6 +135,11 @@ var _ = Describe("Workbench Controller", func() {
 		workbench.Spec.Apps = map[string]defaultv1alpha1.WorkbenchApp{
 			"uid0": {
 				Name: "wezterm",
+				Image: &defaultv1alpha1.Image{
+					Registry:   "my-registry",
+					Repository: "applications/wezterm",
+					Tag:        "latest",
+				},
 			},
 			"uid1": {
 				Name: "kitty",
@@ -148,6 +153,11 @@ var _ = Describe("Workbench Controller", func() {
 			"uid2": {
 				Name:  "alacritty",
 				State: "Stopped",
+				Image: &defaultv1alpha1.Image{
+					Registry:   "my-registry",
+					Repository: "applications/alacritty",
+					Tag:        "latest",
+				},
 			},
 		}
 
@@ -686,6 +696,11 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
+					Image: &defaultv1alpha1.Image{
+						Registry:   "test.registry.io",
+						Repository: "apps/test-app",
+						Tag:        "latest",
+					},
 				}
 
 				// Create a storage manager for testing
@@ -696,7 +711,8 @@ var _ = Describe("Workbench Controller", func() {
 				storageManager := NewStorageManager(reconciler)
 
 				ctx := context.Background()
-				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				job, err := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Verify only home volume was added since storage drivers are not available
 				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))
@@ -734,6 +750,11 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
+					Image: &defaultv1alpha1.Image{
+						Registry:   "test.registry.io",
+						Repository: "apps/test-app",
+						Tag:        "latest",
+					},
 				}
 
 				// Create a storage manager for testing
@@ -744,7 +765,8 @@ var _ = Describe("Workbench Controller", func() {
 				storageManager := NewStorageManager(reconciler)
 
 				ctx := context.Background()
-				job := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				job, err := initJob(ctx, workbench, config, "test-uid", app, service, storageManager)
+				Expect(err).NotTo(HaveOccurred())
 
 				// Verify only home volume was added (no storage volumes)
 				Expect(len(job.Spec.Template.Spec.Volumes)).To(Equal(1))

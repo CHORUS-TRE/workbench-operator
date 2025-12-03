@@ -112,3 +112,24 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
 
 	return false
 }
+
+// SetAppStatusFailed sets an app's status to Failed when job initialization fails.
+// This is used when the job cannot be created (e.g., missing image configuration).
+func (wb *Workbench) SetAppStatusFailed(uid string) bool {
+	if wb.Status.Apps == nil {
+		wb.Status.Apps = make(map[string]WorkbenchStatusApp)
+	}
+
+	app, exists := wb.Status.Apps[uid]
+	if !exists {
+		app = WorkbenchStatusApp{Revision: -1}
+	}
+
+	if app.Status != WorkbenchStatusAppStatusFailed {
+		app.Status = WorkbenchStatusAppStatusFailed
+		wb.Status.Apps[uid] = app
+		return true
+	}
+
+	return false
+}

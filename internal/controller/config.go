@@ -24,6 +24,9 @@ type Config struct {
 	LocalStorageEnabled bool
 	// LocalStorageHostPath is the host path for local storage volumes
 	LocalStorageHostPath string
+	// DebugModeEnabled enables elevated privileges for all workbenches (root access, SYS_PTRACE, SYS_ADMIN)
+	// Only use for local development and debugging
+	DebugModeEnabled bool
 	// WorkbenchPriorityClassName is the priority class name to set on Workbench pods
 	WorkbenchPriorityClassName string
 	// ApplicationPriorityClassName is the priority class name to set on Application pods
