@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -46,6 +47,24 @@ func NewTCPProbe(portName string, delay, period int) *corev1.Probe {
 	}
 }
 
+// buildSecurityContext creates a security context based on debug mode.
+// In debug mode, allows root access and elevated privileges for debugging.
+// In normal mode, returns nil to use image defaults (xpra-server handles its own privilege drop).
+func buildSecurityContext(debugMode bool) *corev1.SecurityContext {
+	if debugMode {
+		return &corev1.SecurityContext{
+			RunAsUser:                ptr.To(int64(0)), // Run as root
+			RunAsGroup:               ptr.To(int64(0)), // Run as root group
+			AllowPrivilegeEscalation: ptr.To(true),
+			RunAsNonRoot:             ptr.To(false), // Allow root
+			Privileged:               ptr.To(true),  // Full privileges for debugging
+		}
+	}
+
+	// No security context - let the image use its defaults
+	return nil
+}
+
 // initDeployment creates the Xpra server deployment.
 //
 // Xpra listens on port 8080 and starts a X11 socket in the tmp folder.
@@ -66,6 +85,15 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		MatchLabels: labels,
 	}
 	deployment.Spec.Template.Labels = labels
+
+	// Add debug mode annotation if enabled
+	if config.DebugModeEnabled {
+		if deployment.Spec.Template.Annotations == nil {
+			deployment.Spec.Template.Annotations = make(map[string]string)
+		}
+		deployment.Spec.Template.Annotations["chorus-tre.ch/debug-mode"] = "enabled"
+		deployment.Spec.Template.Annotations["chorus-tre.ch/debug-warning"] = "Elevated privileges enabled. Not for production use."
+	}
 
 	// Service account is an alternative to the image Pull Secrets
 	serviceAccountName := workbench.Spec.ServiceAccount
@@ -187,6 +215,9 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		LivenessProbe:  NewHTTPProbe("/", "http", 1, 2),
 		ReadinessProbe: NewHTTPProbe("/", "http", 1, 2),
 	}
+
+	// Configure security context based on debug mode
+	serverContainer.SecurityContext = buildSecurityContext(config.DebugModeEnabled)
 
 	if workbench.Spec.Server.InitialResolutionWidth != 0 && workbench.Spec.Server.InitialResolutionHeight != 0 {
 		initialResolution := fmt.Sprintf("%dx%d", workbench.Spec.Server.InitialResolutionWidth, workbench.Spec.Server.InitialResolutionHeight)
