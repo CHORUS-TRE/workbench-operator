@@ -222,6 +222,21 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	}
 	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *homeDir)
 
+	// Add Rosetta volume for x86_64 emulation on ARM64 (Lima/Colima local development)
+	// This allows running x86_64 container images on Apple Silicon Macs via Rosetta translation.
+	// On production Linux servers, this path won't exist and the mount will be empty (harmless).
+	hostPathDirectoryOrCreate := corev1.HostPathDirectoryOrCreate
+	rosettaVolume := &corev1.Volume{
+		Name: "lima-rosetta",
+		VolumeSource: corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: "/mnt/lima-rosetta",
+				Type: &hostPathDirectoryOrCreate,
+			},
+		},
+	}
+	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, *rosettaVolume)
+
 	// Add storage volumes and mounts from the storage manager
 	storageVolumes, storageMounts, err := storageManager.GetVolumeAndMountSpecs(ctx, workbench, workbench.Spec.Server.User, job.Namespace)
 	if err != nil {
@@ -326,10 +341,8 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			},
 			// NSS wrapper configuration for proper user identity resolution
 			// Required for kubectl exec sessions to resolve username correctly
-			{
-				Name:  "LD_PRELOAD",
-				Value: "/usr/lib/x86_64-linux-gnu/libnss_wrapper.so",
-			},
+			// Note: LD_PRELOAD is set by the container entrypoint which detects the correct
+			// architecture-specific path (x86_64 vs aarch64) at runtime
 			{
 				Name:  "NSS_WRAPPER_PASSWD",
 				Value: "/home/.chorus-auth/passwd",
@@ -392,6 +405,13 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
 		Name:      "home",
 		MountPath: "/home",
+	})
+
+	// Mount Rosetta for x86_64 emulation on ARM64 (Lima/Colima local development)
+	appContainer.VolumeMounts = append(appContainer.VolumeMounts, corev1.VolumeMount{
+		Name:      "lima-rosetta",
+		MountPath: "/mnt/lima-rosetta",
+		ReadOnly:  true,
 	})
 
 	// Add storage volume mounts (already retrieved above)
@@ -495,6 +515,13 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	initContainer.VolumeMounts = append(initContainer.VolumeMounts, corev1.VolumeMount{
 		Name:      "home",
 		MountPath: "/home",
+	})
+
+	// Mount Rosetta for x86_64 emulation on ARM64 (Lima/Colima local development)
+	initContainer.VolumeMounts = append(initContainer.VolumeMounts, corev1.VolumeMount{
+		Name:      "lima-rosetta",
+		MountPath: "/mnt/lima-rosetta",
+		ReadOnly:  true,
 	})
 
 	// Add storage volume mounts to init container
