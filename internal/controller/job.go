@@ -482,10 +482,6 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 				Name:  "APP_NAME",
 				Value: app.Name,
 			},
-			{
-				Name:  "APP_CMD",
-				Value: "echo 'Init container setup complete'", // Dummy command for init
-			},
 		},
 		Resources: corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{
