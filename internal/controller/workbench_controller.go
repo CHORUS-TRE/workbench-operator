@@ -12,6 +12,8 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -208,8 +210,13 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// ---------- NETWORK POLICY ---------------
 	if err := r.reconcileNetworkPolicy(ctx, &workbench); err != nil {
-		log.V(1).Error(err, "Error reconciling network policy", "workbench", workbench.Name)
-		return ctrl.Result{}, err
+		if apimeta.IsNoMatchError(err) {
+			// Cilium CRD not installed in the cluster/test env; skip gracefully.
+			log.V(1).Info("CiliumNetworkPolicy CRD not found, skipping network policy reconciliation")
+		} else {
+			log.V(1).Error(err, "Error reconciling network policy", "workbench", workbench.Name)
+			return ctrl.Result{}, err
+		}
 	}
 
 	// ---------- APPS ---------------

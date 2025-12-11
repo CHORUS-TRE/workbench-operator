@@ -32,17 +32,17 @@ var _ = Describe("buildNetworkPolicy", func() {
 		es := spec["endpointSelector"].(map[string]any)
 		Expect(es["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
 
-		egress := spec["egress"].([]any)
+		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(2))
 
-		dnsRule := egress[0].(map[string]any)
+		dnsRule := egress[0]
 		Expect(dnsRule["toEndpoints"]).NotTo(BeEmpty())
 		Expect(dnsRule["toPorts"]).NotTo(BeEmpty())
 
-		intraRule := egress[1].(map[string]any)
-		toEndpoints := intraRule["toEndpoints"].([]any)
+		intraRule := egress[1]
+		toEndpoints := intraRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
-		Expect(toEndpoints[0].(map[string]any)["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
+		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
 	})
 
 	It("adds FQDN allowlist rules with HTTP/HTTPS ports", func() {
@@ -53,18 +53,18 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 		cnp := buildNetworkPolicy(wb)
 		spec := cnp.Object["spec"].(map[string]any)
-		egress := spec["egress"].([]any)
+		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(3))
 
-		fqdnRule := egress[2].(map[string]any)
-		toFQDNs := fqdnRule["toFQDNs"].([]any)
+		fqdnRule := egress[2]
+		toFQDNs := fqdnRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
 
-		toPorts := fqdnRule["toPorts"].([]any)
+		toPorts := fqdnRule["toPorts"].([]map[string]any)
 		Expect(toPorts).To(HaveLen(1))
-		ports := toPorts[0].(map[string]any)["ports"].([]any)
+		ports := toPorts[0]["ports"].([]map[string]any)
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "80")))
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 	})
@@ -77,10 +77,10 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 		cnp := buildNetworkPolicy(wb)
 		spec := cnp.Object["spec"].(map[string]any)
-		egress := spec["egress"].([]any)
+		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(3))
 
-		allowInternetRule := egress[2].(map[string]any)
+		allowInternetRule := egress[2]
 		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
 	})
 })
