@@ -8,13 +8,14 @@ import (
 	"slices"
 	"time"
 
-	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,7 +51,6 @@ var ErrSuspendedJob = errors.New("suspended job")
 // +kubebuilder:rbac:groups=core,resources=services/status,verbs=get
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
-// +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumes,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
@@ -194,12 +194,6 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// ---------- NETWORK POLICY ---------------
-	if err := r.reconcileNetworkPolicy(ctx, &workbench); err != nil {
-		log.V(1).Error(err, "Error reconciling network policy", "workbench", workbench.Name)
-		return ctrl.Result{}, err
-	}
-
 	// The service definition is not affected by the CRD, and the status does have any information from it.
 
 	// ---------- STORAGE ---------------
@@ -209,6 +203,12 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	_, err = storageManager.ProcessEnabledStorage(ctx, workbench)
 	if err != nil {
 		log.Error(err, "Error processing storage")
+		return ctrl.Result{}, err
+	}
+
+	// ---------- NETWORK POLICY ---------------
+	if err := r.reconcileNetworkPolicy(ctx, &workbench); err != nil {
+		log.V(1).Error(err, "Error reconciling network policy", "workbench", workbench.Name)
 		return ctrl.Result{}, err
 	}
 
@@ -658,12 +658,19 @@ func (r *WorkbenchReconciler) setServerPodHealth(workbench *defaultv1alpha1.Work
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	cnp := &unstructured.Unstructured{}
+	cnp.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "cilium.io",
+		Version: "v2",
+		Kind:    "CiliumNetworkPolicy",
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&defaultv1alpha1.Workbench{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
-		Owns(&ciliumv2.CiliumNetworkPolicy{}).
+		Owns(cnp).
 		Complete(r)
 }
 
@@ -674,11 +681,13 @@ func (r *WorkbenchReconciler) reconcileNetworkPolicy(ctx context.Context, workbe
 		return err
 	}
 
-	existing := ciliumv2.CiliumNetworkPolicy{}
 	key := types.NamespacedName{
-		Name:      cnp.Name,
-		Namespace: cnp.Namespace,
+		Name:      cnp.GetName(),
+		Namespace: cnp.GetNamespace(),
 	}
+
+	existing := unstructured.Unstructured{}
+	existing.SetGroupVersionKind(cnp.GroupVersionKind())
 
 	if err := r.Get(ctx, key, &existing); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -689,17 +698,18 @@ func (r *WorkbenchReconciler) reconcileNetworkPolicy(ctx context.Context, workbe
 
 	updated := false
 
-	if !reflect.DeepEqual(existing.Labels, cnp.Labels) {
-		existing.Labels = cnp.Labels
+	if !reflect.DeepEqual(existing.GetLabels(), cnp.GetLabels()) {
+		existing.SetLabels(cnp.GetLabels())
 		updated = true
 	}
 
-	if !reflect.DeepEqual(existing.Spec, cnp.Spec) {
-		existing.Spec = cnp.Spec
+	desiredSpec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
+	existingSpec, _, _ := unstructured.NestedFieldCopy(existing.Object, "spec")
+	if !reflect.DeepEqual(existingSpec, desiredSpec) {
+		_ = unstructured.SetNestedField(existing.Object, desiredSpec, "spec")
 		updated = true
 	}
 
-	// Ensure owner reference is set so the policy is cleaned up with the workbench.
 	if !controllerutil.HasControllerReference(&existing) {
 		if err := controllerutil.SetControllerReference(workbench, &existing, r.Scheme); err != nil {
 			return err

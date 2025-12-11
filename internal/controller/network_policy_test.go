@@ -4,9 +4,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
-	"github.com/cilium/cilium/pkg/policy/api"
 )
 
 var _ = Describe("buildNetworkPolicy", func() {
@@ -27,19 +27,23 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 		cnp := buildNetworkPolicy(wb)
 		Expect(cnp).NotTo(BeNil())
-		Expect(cnp.Namespace).To(Equal("default"))
-		Expect(cnp.Spec).NotTo(BeNil())
-		Expect(cnp.Spec.EndpointSelector.MatchLabels).To(HaveKeyWithValue(matchingLabel, "wb"))
+		Expect(cnp.GetNamespace()).To(Equal("default"))
 
-		Expect(cnp.Spec.Egress).To(HaveLen(2))
+		spec := cnp.Object["spec"].(map[string]any)
+		es := spec["endpointSelector"].(map[string]any)
+		Expect(es["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
 
-		dnsRule := cnp.Spec.Egress[0]
-		Expect(dnsRule.ToEndpoints).NotTo(BeEmpty())
-		Expect(dnsRule.ToPorts).To(HaveLen(1))
+		egress := spec["egress"].([]any)
+		Expect(egress).To(HaveLen(2))
 
-		intraRule := cnp.Spec.Egress[1]
-		Expect(intraRule.ToEndpoints).To(HaveLen(1))
-		Expect(intraRule.ToEndpoints[0].MatchLabels).To(HaveKeyWithValue(matchingLabel, "wb"))
+		dnsRule := egress[0].(map[string]any)
+		Expect(dnsRule["toEndpoints"]).NotTo(BeEmpty())
+		Expect(dnsRule["toPorts"]).NotTo(BeEmpty())
+
+		intraRule := egress[1].(map[string]any)
+		toEndpoints := intraRule["toEndpoints"].([]any)
+		Expect(toEndpoints).To(HaveLen(1))
+		Expect(toEndpoints[0].(map[string]any)["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
 	})
 
 	It("adds FQDN allowlist rules with HTTP/HTTPS ports", func() {
@@ -49,18 +53,21 @@ var _ = Describe("buildNetworkPolicy", func() {
 		}
 
 		cnp := buildNetworkPolicy(wb)
-		Expect(cnp.Spec.Egress).To(HaveLen(3))
+		spec := cnp.Object["spec"].(map[string]any)
+		egress := spec["egress"].([]any)
+		Expect(egress).To(HaveLen(3))
 
-		fqdnRule := cnp.Spec.Egress[2]
-		Expect(fqdnRule.ToFQDNs).To(ContainElement(HaveField("MatchName", "example.com")))
-		Expect(fqdnRule.ToFQDNs).To(ContainElement(HaveField("MatchPattern", "*.example.com")))
-		Expect(fqdnRule.ToFQDNs).To(ContainElement(HaveField("MatchPattern", "*.corp.internal")))
+		fqdnRule := egress[2].(map[string]any)
+		toFQDNs := fqdnRule["toFQDNs"].([]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
 
-		Expect(fqdnRule.ToPorts).To(HaveLen(1))
-		Expect(fqdnRule.ToPorts[0].Ports).To(ContainElements(
-			HaveField("Port", "80"),
-			HaveField("Port", "443"),
-		))
+		toPorts := fqdnRule["toPorts"].([]any)
+		Expect(toPorts).To(HaveLen(1))
+		ports := toPorts[0].(map[string]any)["ports"].([]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "80")))
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 	})
 
 	It("allows full internet when enabled", func() {
@@ -70,14 +77,11 @@ var _ = Describe("buildNetworkPolicy", func() {
 		}
 
 		cnp := buildNetworkPolicy(wb)
-		Expect(cnp.Spec.Egress).To(HaveLen(3))
+		spec := cnp.Object["spec"].(map[string]any)
+		egress := spec["egress"].([]any)
+		Expect(egress).To(HaveLen(3))
 
-		allowInternetRule := cnp.Spec.Egress[2]
-		Expect(allowInternetRule.ToCIDR).To(ContainElements(apiCIDR("0.0.0.0/0"), apiCIDR("::/0")))
+		allowInternetRule := egress[2].(map[string]any)
+		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
 	})
 })
-
-// apiCIDR is a helper to avoid string casting in tests.
-func apiCIDR(value string) api.CIDR {
-	return api.CIDR(value)
-}
