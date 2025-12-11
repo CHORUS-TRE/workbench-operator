@@ -1,3 +1,5 @@
+# Add some properties somewhere but the problem is that we need a CRD since each workspace will have its own allow/denylist
+
 # JuiceFS configuration
 juicefs:
   secretName: juicefs-secret

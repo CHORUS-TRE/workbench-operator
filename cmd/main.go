@@ -20,6 +20,7 @@ import (
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 	"github.com/CHORUS-TRE/workbench-operator/internal/controller"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -31,6 +32,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
+	utilruntime.Must(ciliumv2.AddToScheme(scheme))
 	utilruntime.Must(defaultv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }

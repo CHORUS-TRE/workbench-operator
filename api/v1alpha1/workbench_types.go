@@ -112,6 +112,22 @@ type StorageConfig struct {
 	Local bool `json:"local,omitempty"`
 }
 
+// NetworkPolicySpec defines outbound network controls per workbench.
+type NetworkPolicySpec struct {
+	// AllowInternet enables full internet egress (0.0.0.0/0). Defaults to false.
+	// +optional
+	// +kubebuilder:default=false
+	AllowInternet bool `json:"allowInternet,omitempty"`
+
+	// AllowedTLDs is an allowlist of domain suffixes (e.g. example.com, *.corp.internal)
+	// permitted for egress when internet access is otherwise closed.
+	// +optional
+	// +kubebuilder:validation:MinItems=0
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:Items:Pattern=`^[A-Za-z0-9*][A-Za-z0-9*.-]*[A-Za-z0-9]$`
+	AllowedTLDs []string `json:"allowedTLDs,omitempty"`
+}
+
 // WorkbenchApp defines one application running in the workbench.
 type WorkbenchApp struct {
 	// Name is the application name (likely its OCI image name as well)
@@ -177,6 +193,9 @@ type WorkbenchSpec struct {
 	// Storage defines storage mount configuration for S3 and NFS
 	// +optional
 	Storage *StorageConfig `json:"storage,omitempty"`
+	// NetworkPolicy defines egress controls for the workbench workloads.
+	// +optional
+	NetworkPolicy *NetworkPolicySpec `json:"networkPolicy,omitempty"`
 }
 
 // WorkbenchStatusAppStatus are the effective status of a launched app.

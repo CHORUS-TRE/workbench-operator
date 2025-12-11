@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"time"
 
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -48,6 +50,7 @@ var ErrSuspendedJob = errors.New("suspended job")
 // +kubebuilder:rbac:groups=core,resources=services/status,verbs=get
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
+// +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumes,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
@@ -188,6 +191,12 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if err := r.createService(ctx, service); err != nil {
 		log.V(1).Error(err, "Error creating the service", "service", service.Name)
+		return ctrl.Result{}, err
+	}
+
+	// ---------- NETWORK POLICY ---------------
+	if err := r.reconcileNetworkPolicy(ctx, &workbench); err != nil {
+		log.V(1).Error(err, "Error reconciling network policy", "workbench", workbench.Name)
 		return ctrl.Result{}, err
 	}
 
@@ -654,5 +663,53 @@ func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
+		Owns(&ciliumv2.CiliumNetworkPolicy{}).
 		Complete(r)
+}
+
+func (r *WorkbenchReconciler) reconcileNetworkPolicy(ctx context.Context, workbench *defaultv1alpha1.Workbench) error {
+	cnp := buildNetworkPolicy(*workbench)
+
+	if err := controllerutil.SetControllerReference(workbench, cnp, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := ciliumv2.CiliumNetworkPolicy{}
+	key := types.NamespacedName{
+		Name:      cnp.Name,
+		Namespace: cnp.Namespace,
+	}
+
+	if err := r.Get(ctx, key, &existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, cnp)
+		}
+		return err
+	}
+
+	updated := false
+
+	if !reflect.DeepEqual(existing.Labels, cnp.Labels) {
+		existing.Labels = cnp.Labels
+		updated = true
+	}
+
+	if !reflect.DeepEqual(existing.Spec, cnp.Spec) {
+		existing.Spec = cnp.Spec
+		updated = true
+	}
+
+	// Ensure owner reference is set so the policy is cleaned up with the workbench.
+	if !controllerutil.HasControllerReference(&existing) {
+		if err := controllerutil.SetControllerReference(workbench, &existing, r.Scheme); err != nil {
+			return err
+		}
+		updated = true
+	}
+
+	if updated {
+		return r.Update(ctx, &existing)
+	}
+
+	return nil
 }
