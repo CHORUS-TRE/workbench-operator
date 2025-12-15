@@ -79,3 +79,5 @@ jobs:
 
       - name: Run e2e smoke tests
         run: make test-e2e
+        env:
+          KIND_CLUSTER: chart-testing
