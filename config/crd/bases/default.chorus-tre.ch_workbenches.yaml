@@ -264,6 +264,22 @@ spec:
                       The init container creates a symlink from /home/{user}/workspace-archive to this mount point
                     type: boolean
                 type: object
+              networkPolicy:
+                description: NetworkPolicy defines egress controls for the workbench workloads.
+                properties:
+                  allowInternet:
+                    default: false
+                    description: AllowInternet enables full internet egress (0.0.0.0/0). Defaults to false.
+                    type: boolean
+                  allowedTLDs:
+                    description: AllowedTLDs is an allowlist of domain suffixes (e.g. example.com, *.corp.internal) permitted for egress when internet access is otherwise closed.
+                    items:
+                      pattern: '^[A-Za-z0-9*][A-Za-z0-9*.-]*[A-Za-z0-9]$'
+                      type: string
+                    maxItems: 64
+                    minItems: 0
+                    type: array
+                type: object
             type: object
           status:
             description: WorkbenchStatus defines the observed state of Workbench

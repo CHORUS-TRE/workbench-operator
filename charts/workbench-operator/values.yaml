@@ -1,3 +1,5 @@
+# Add some properties somewhere but the problem is that we need a CRD since each workspace will have its own allow/denylist
+
 # JuiceFS configuration
 juicefs:
   secretName: juicefs-secret
@@ -10,6 +12,14 @@ nfs:
 
 workbench:
   priorityClassName: low-priority
+  # Network policy defaults applied per Workbench CR
+  networkPolicy:
+    # Allow full internet egress (defaults to false)
+    allowInternet: false
+    # Allowed TLDs when internet is closed; both exact and wildcard supported
+    allowedTLDs:
+    - deb.debian.org
+    - packages.microsoft.com
 
 application:
   priorityClassName: preemptible
