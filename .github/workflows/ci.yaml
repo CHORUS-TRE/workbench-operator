@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, master]
   workflow_dispatch:
     inputs:
@@ -69,7 +70,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Setup Kind
+      - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
           config: kind-config.yaml
@@ -78,7 +79,7 @@ jobs:
           wait: 60s
           kubectl_version: v1.31.4
 
-      - name: Run e2e smoke tests
+      - name: Run e2e tests
         run: make test-e2e
         env:
           KIND_CLUSTER: chart-testing
