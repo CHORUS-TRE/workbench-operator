@@ -8,9 +8,10 @@ on:
   workflow_dispatch:
     inputs:
       run-kind-e2e:
-        description: "Run kind-based e2e smoke test"
+        description: 'Run kind-based e2e smoke tests'
         required: false
-        default: "false"
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -67,14 +68,14 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up kind
+      - name: Setup Kind
         uses: helm/kind-action@v1
         with:
-          config: |
-            kind: Cluster
-            apiVersion: kind.x-k8s.io/v1alpha4
-            nodes:
-            - role: control-plane
+          config: kind-config.yaml
+          version: v0.26.0
+          cluster_name: chart-testing
+          wait: 60s
+          kubectl_version: v1.31.4
 
       - name: Run e2e smoke tests
         run: make test-e2e
