@@ -133,3 +133,20 @@ func (wb *Workbench) SetAppStatusFailed(uid string) bool {
 
 	return false
 }
+
+// CleanOrphanedAppStatuses removes status entries for apps that no longer exist in spec.
+// Returns true if any entries were removed.
+func (wb *Workbench) CleanOrphanedAppStatuses() bool {
+	if wb.Status.Apps == nil {
+		return false
+	}
+
+	removed := false
+	for uid := range wb.Status.Apps {
+		if _, exists := wb.Spec.Apps[uid]; !exists {
+			delete(wb.Status.Apps, uid)
+			removed = true
+		}
+	}
+	return removed
+}

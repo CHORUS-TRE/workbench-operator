@@ -310,6 +310,15 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Clean up orphaned status entries for apps that were removed from spec
+	if workbench.CleanOrphanedAppStatuses() {
+		log.V(1).Info("Cleaned up orphaned app status entries")
+		if err := r.Status().Update(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to update WorkbenchStatus after cleanup")
+			return ctrl.Result{}, err
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 

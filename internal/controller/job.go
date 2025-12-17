@@ -362,14 +362,14 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			Name:  "KIOSK_URL",
 			Value: app.KioskConfig.URL,
 		})
-		if app.KioskConfig.JWTURL != "" && app.KioskConfig.JWTToken != "" {
+		if app.KioskConfig.JWTURL != nil && *app.KioskConfig.JWTURL != "" && app.KioskConfig.JWTToken != nil && *app.KioskConfig.JWTToken != "" {
 			appContainer.Env = append(appContainer.Env, corev1.EnvVar{
 				Name:  "KIOSK_JWT_URL",
-				Value: app.KioskConfig.JWTURL,
+				Value: *app.KioskConfig.JWTURL,
 			})
 			appContainer.Env = append(appContainer.Env, corev1.EnvVar{
 				Name:  "KIOSK_JWT_TOKEN",
-				Value: app.KioskConfig.JWTToken,
+				Value: *app.KioskConfig.JWTToken,
 			})
 		}
 	}
