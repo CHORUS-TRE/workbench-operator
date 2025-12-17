@@ -659,6 +659,109 @@ var _ = Describe("Workbench Controller", func() {
 		})
 	})
 
+	Describe("CleanOrphanedAppStatuses", func() {
+		It("should remove status entries for apps no longer in spec", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cleanup-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{
+						"uid1": {Name: "app1"},
+						// uid2 was removed from spec
+					},
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+						"uid1": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},
+						"uid2": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},  // orphaned
+						"uid3": {Status: defaultv1alpha1.WorkbenchStatusAppStatusComplete}, // orphaned
+					},
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeTrue())
+			Expect(workbench.Status.Apps).To(HaveLen(1))
+			Expect(workbench.Status.Apps).To(HaveKey("uid1"))
+			Expect(workbench.Status.Apps).NotTo(HaveKey("uid2"))
+			Expect(workbench.Status.Apps).NotTo(HaveKey("uid3"))
+		})
+
+		It("should return false when no orphans exist", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-no-orphans-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{
+						"uid1": {Name: "app1"},
+						"uid2": {Name: "app2"},
+					},
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+						"uid1": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},
+						"uid2": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},
+					},
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeFalse())
+			Expect(workbench.Status.Apps).To(HaveLen(2))
+		})
+
+		It("should handle nil status.apps", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-nil-status-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{
+						"uid1": {Name: "app1"},
+					},
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: nil, // nil status apps
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeFalse())
+			Expect(workbench.Status.Apps).To(BeNil())
+		})
+
+		It("should handle empty spec.apps", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-empty-spec-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{}, // empty spec
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+						"uid1": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning}, // all are orphans
+						"uid2": {Status: defaultv1alpha1.WorkbenchStatusAppStatusComplete},
+					},
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeTrue())
+			Expect(workbench.Status.Apps).To(HaveLen(0))
+		})
+	})
+
 	Describe("Storage Configuration", func() {
 
 		Context("Job Volume Configuration", func() {
