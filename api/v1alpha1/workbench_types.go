@@ -29,6 +29,21 @@ const (
 	WorkbenchAppStateKilled WorkbenchAppState = "Killed"
 )
 
+// ClipboardDirection defines the clipboard direction between workbench and local machine.
+// +kubebuilder:validation:Enum=disabled;to-server;to-client;both
+type ClipboardDirection string
+
+const (
+	// ClipboardDisabled disables clipboard (default)
+	ClipboardDisabled ClipboardDirection = "disabled"
+	// ClipboardToServer allows paste from host to container only
+	ClipboardToServer ClipboardDirection = "to-server"
+	// ClipboardToClient allows copy from container to host only
+	ClipboardToClient ClipboardDirection = "to-client"
+	// ClipboardBoth allows bidirectional clipboard
+	ClipboardBoth ClipboardDirection = "both"
+)
+
 // WorkbenchServer defines the server configuration.
 type WorkbenchServer struct {
 	// Version defines the version to use for the xpra server.
@@ -53,6 +68,12 @@ type WorkbenchServer struct {
 	// +kubebuilder:default=1001
 	// +kubebuilder:validation:Minimum=1001
 	UserID int `json:"userid,omitempty"`
+
+	// Clipboard defines the clipboard direction between the workbench and local machine.
+	// Options: disabled (default), to-server, to-client, both
+	// +optional
+	// +kubebuilder:default=disabled
+	Clipboard ClipboardDirection `json:"clipboard,omitempty"`
 }
 
 // Image represents the configuration of a custom image for an app.
