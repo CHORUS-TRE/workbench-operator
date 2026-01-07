@@ -214,6 +214,17 @@ spec:
               server:
                 description: Server represents the configuration of the server part.
                 properties:
+                  clipboard:
+                    default: disabled
+                    description: |-
+                      Clipboard defines the clipboard direction between the workbench and local machine.
+                      Options: disabled (default), to-server, to-client, both
+                    enum:
+                    - disabled
+                    - to-server
+                    - to-client
+                    - both
+                    type: string
                   initialResolutionHeight:
                     description: InitialResolutionHeight defines the initial resolution
                       height of the Xpra server.

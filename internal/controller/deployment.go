@@ -227,6 +227,16 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		})
 	}
 
+	// Add clipboard configuration
+	clipboardDirection := string(workbench.Spec.Server.Clipboard)
+	if clipboardDirection == "" {
+		clipboardDirection = "disabled"
+	}
+	serverContainer.Env = append(serverContainer.Env, corev1.EnvVar{
+		Name:  "XPRA_CLIPBOARD_DIRECTION",
+		Value: clipboardDirection,
+	})
+
 	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
 
