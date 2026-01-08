@@ -319,6 +319,15 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// ---------- OBSERVED GENERATION ---------------
+	if workbench.UpdateObservedGeneration() {
+		log.V(1).Info("Updated observed generation", "generation", workbench.Status.ObservedGeneration)
+		if err := r.Status().Update(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to update observed generation in WorkbenchStatus")
+			return ctrl.Result{}, err
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
