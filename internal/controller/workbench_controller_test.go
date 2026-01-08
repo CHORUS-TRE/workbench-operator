@@ -659,6 +659,60 @@ var _ = Describe("Workbench Controller", func() {
 		})
 	})
 
+	Describe("UpdateObservedGeneration", func() {
+		It("should update observedGeneration when generation is higher", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-generation-workbench",
+					Namespace:  "default",
+					Generation: 5,
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					ObservedGeneration: 3,
+				},
+			}
+
+			updated := workbench.UpdateObservedGeneration()
+
+			Expect(updated).To(BeTrue())
+			Expect(workbench.Status.ObservedGeneration).To(Equal(int64(5)))
+		})
+
+		It("should not update when observedGeneration equals generation", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-generation-equal-workbench",
+					Namespace:  "default",
+					Generation: 5,
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					ObservedGeneration: 5,
+				},
+			}
+
+			updated := workbench.UpdateObservedGeneration()
+
+			Expect(updated).To(BeFalse())
+			Expect(workbench.Status.ObservedGeneration).To(Equal(int64(5)))
+		})
+
+		It("should handle first generation (generation=1, observedGeneration=0)", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-first-generation-workbench",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{}, // observedGeneration defaults to 0
+			}
+
+			updated := workbench.UpdateObservedGeneration()
+
+			Expect(updated).To(BeTrue())
+			Expect(workbench.Status.ObservedGeneration).To(Equal(int64(1)))
+		})
+	})
+
 	Describe("CleanOrphanedAppStatuses", func() {
 		It("should remove status entries for apps no longer in spec", func() {
 			workbench := &defaultv1alpha1.Workbench{

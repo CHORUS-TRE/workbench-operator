@@ -302,6 +302,9 @@ spec:
                   - status
                   type: object
                 type: object
+              observedGeneration:
+                format: int64
+                type: integer
               serverDeployment:
                 description: WorkbenchStatusServer represents the server status.
                 properties:
@@ -354,6 +357,7 @@ spec:
                 - status
                 type: object
             required:
+            - observedGeneration
             - serverDeployment
             type: object
         type: object

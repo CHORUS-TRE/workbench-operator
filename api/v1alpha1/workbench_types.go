@@ -309,8 +309,9 @@ type WorkbenchStatusApp struct {
 
 // WorkbenchStatus defines the observed state of Workbench
 type WorkbenchStatus struct {
-	ServerDeployment WorkbenchStatusServer         `json:"serverDeployment"`
-	Apps             map[string]WorkbenchStatusApp `json:"apps,omitempty"`
+	ObservedGeneration int64                         `json:"observedGeneration"`
+	ServerDeployment   WorkbenchStatusServer         `json:"serverDeployment"`
+	Apps               map[string]WorkbenchStatusApp `json:"apps,omitempty"`
 }
 
 // +kubebuilder:object:root=true
