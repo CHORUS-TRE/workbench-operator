@@ -134,6 +134,17 @@ func (wb *Workbench) SetAppStatusFailed(uid string) bool {
 	return false
 }
 
+// UpdateObservedGeneration
+// This is used to track if the status is up-to-date with the spec.
+func (wb *Workbench) UpdateObservedGeneration() bool {
+	generation := wb.Generation
+	if wb.Status.ObservedGeneration < generation {
+		wb.Status.ObservedGeneration = generation
+		return true
+	}
+	return false
+}
+
 // CleanOrphanedAppStatuses removes status entries for apps that no longer exist in spec.
 // Returns true if any entries were removed.
 func (wb *Workbench) CleanOrphanedAppStatuses() bool {
