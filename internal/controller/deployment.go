@@ -240,6 +240,12 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
 
+	// Timeout for the deployment to become ready (covers image pull, scheduling, etc.)
+	if config.WorkbenchStartupTimeout > 0 {
+		progressDeadline := int32(config.WorkbenchStartupTimeout)
+		deployment.Spec.ProgressDeadlineSeconds = &progressDeadline
+	}
+
 	return deployment
 }
 

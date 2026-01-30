@@ -135,7 +135,7 @@ var _ = Describe("Workbench Controller", func() {
 		workbench.Spec.Apps = map[string]defaultv1alpha1.WorkbenchApp{
 			"uid0": {
 				Name: "wezterm",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "my-registry",
 					Repository: "applications/wezterm",
 					Tag:        "latest",
@@ -143,7 +143,7 @@ var _ = Describe("Workbench Controller", func() {
 			},
 			"uid1": {
 				Name: "kitty",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "quay.io",
 					Repository: "kitty/kitty",
 					Tag:        "1.2.0",
@@ -153,7 +153,7 @@ var _ = Describe("Workbench Controller", func() {
 			"uid2": {
 				Name:  "alacritty",
 				State: "Stopped",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "my-registry",
 					Repository: "applications/alacritty",
 					Tag:        "latest",
@@ -475,12 +475,26 @@ var _ = Describe("Workbench Controller", func() {
 				Expect(health.Message).To(ContainSubstring("Readiness probe failing"))
 			})
 
-			It("should return Restarting for recently restarted container", func() {
+			It("should return Ready for recently restarted but ready container", func() {
 				containerStatus := createRestartingContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusRestarting))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusReady))
 				Expect(health.Ready).To(BeTrue())
+				Expect(health.RestartCount).To(Equal(int32(3)))
+				Expect(health.Message).To(ContainSubstring("Container is ready"))
+			})
+
+			It("should return Restarting for recently restarted but not ready container", func() {
+				containerStatus := createMockContainerStatus("xpra-server", corev1.ContainerState{
+					Running: &corev1.ContainerStateRunning{
+						StartedAt: metav1.Time{Time: time.Now().Add(-2 * time.Minute)},
+					},
+				}, false, 3)
+				health := reconciler.determineContainerHealth(&containerStatus)
+
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusRestarting))
+				Expect(health.Ready).To(BeFalse())
 				Expect(health.RestartCount).To(Equal(int32(3)))
 				Expect(health.Message).To(ContainSubstring("Recently restarted (3 times)"))
 			})
@@ -853,7 +867,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
-					Image: &defaultv1alpha1.Image{
+					Image: defaultv1alpha1.Image{
 						Registry:   "test.registry.io",
 						Repository: "apps/test-app",
 						Tag:        "latest",
@@ -907,7 +921,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
-					Image: &defaultv1alpha1.Image{
+					Image: defaultv1alpha1.Image{
 						Registry:   "test.registry.io",
 						Repository: "apps/test-app",
 						Tag:        "latest",
