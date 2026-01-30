@@ -9,8 +9,8 @@ spec:
   initContainer:
     version: "0.0.2-1"
   server:
-    user: user_name
     version: "6.3.2-4"
+    user: user_name
     userid: 1002
   storage:
     s3: true
