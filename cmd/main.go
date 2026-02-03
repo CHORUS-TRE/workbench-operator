@@ -55,6 +55,8 @@ func main() {
 	var debugModeEnabled bool
 	var workbenchPriorityClassName string
 	var applicationPriorityClassName string
+	var workbenchStartupTimeout int
+	var applicationStartupTimeout int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -79,6 +81,8 @@ func main() {
 	flag.BoolVar(&debugModeEnabled, "debug-mode-enabled", false, "Enable debug mode for all workbenches (elevated privileges for debugging). Only use for local development.")
 	flag.StringVar(&workbenchPriorityClassName, "workbench-priority-class-name", "", "Priority class name to set on Workbench pods")
 	flag.StringVar(&applicationPriorityClassName, "application-priority-class-name", "", "Priority class name to set on Application pods")
+	flag.IntVar(&workbenchStartupTimeout, "workbench-startup-timeout", 600, "Timeout in seconds for the xpra server deployment to become ready")
+	flag.IntVar(&applicationStartupTimeout, "application-startup-timeout", 600, "Timeout in seconds for app jobs to start (covers image pull, init, etc.)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -167,6 +171,8 @@ func main() {
 			DebugModeEnabled:             debugModeEnabled,
 			WorkbenchPriorityClassName:   workbenchPriorityClassName,
 			ApplicationPriorityClassName: applicationPriorityClassName,
+			WorkbenchStartupTimeout:      workbenchStartupTimeout,
+			ApplicationStartupTimeout:    applicationStartupTimeout,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")

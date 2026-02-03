@@ -29,6 +29,21 @@ const (
 	WorkbenchAppStateKilled WorkbenchAppState = "Killed"
 )
 
+// ClipboardDirection defines the clipboard direction between workbench and local machine.
+// +kubebuilder:validation:Enum=disabled;to-server;to-client;both
+type ClipboardDirection string
+
+const (
+	// ClipboardDisabled disables clipboard (default)
+	ClipboardDisabled ClipboardDirection = "disabled"
+	// ClipboardToServer allows paste from host to container only
+	ClipboardToServer ClipboardDirection = "to-server"
+	// ClipboardToClient allows copy from container to host only
+	ClipboardToClient ClipboardDirection = "to-client"
+	// ClipboardBoth allows bidirectional clipboard
+	ClipboardBoth ClipboardDirection = "both"
+)
+
 // WorkbenchServer defines the server configuration.
 type WorkbenchServer struct {
 	// Version defines the version to use for the xpra server.
@@ -53,14 +68,22 @@ type WorkbenchServer struct {
 	// +kubebuilder:default=1001
 	// +kubebuilder:validation:Minimum=1001
 	UserID int `json:"userid,omitempty"`
+
+	// Clipboard defines the clipboard direction between the workbench and local machine.
+	// Options: disabled (default), to-server, to-client, both
+	// +optional
+	// +kubebuilder:default=disabled
+	Clipboard ClipboardDirection `json:"clipboard,omitempty"`
 }
 
 // Image represents the configuration of a custom image for an app.
 type Image struct {
 	// Registry represents the hostname of the registry. E.g. quay.io
-	Registry string `json:"registry"`
+	// +optional
+	Registry string `json:"registry,omitempty"`
 	// Repository contains the image name. E.g. apps/myapp
-	Repository string `json:"repository"`
+	// +optional
+	Repository string `json:"repository,omitempty"`
 	// Tag contains the version identifier.
 	// +optional
 	// +default:value="latest"
@@ -73,6 +96,13 @@ type KioskConfig struct {
 	// URL to load in the kiosk browser
 	// +kubebuilder:validation:Pattern=`^https://.*`
 	URL string `json:"url"`
+	// JWTURL is the URL to refresh the short lived JWT token
+	// +optional
+	// +kubebuilder:validation:Pattern=`^https://.*`
+	JWTURL *string `json:"jwtUrl,omitempty"`
+	// JWTToken is a short lived jwt used to authenticate to the JWTURL
+	// +optional
+	JWTToken *string `json:"jwtToken,omitempty"`
 }
 
 // InitContainerConfig defines the init container configuration.
@@ -113,14 +143,6 @@ type WorkbenchApp struct {
 	// +kubebuilder:validation:Pattern:="[a-zA-Z0-9_][a-zA-Z0-9_\\-\\.]*"
 	Name string `json:"name"`
 
-	// Version defines the version to use.
-	// +optional
-	// +default:value="latest"
-	// +kubebuilder:validation:MinLength:=1
-	// +kubebuilder:validation:MaxLength:=128
-	// +kubebuilder:validation:Pattern:="[a-zA-Z0-9_][a-zA-Z0-9_\\-\\.]*"
-	Version string `json:"version,omitempty"`
-
 	// State defines the desired state
 	// Valid values are:
 	// - "Running" (default): application is running
@@ -130,9 +152,10 @@ type WorkbenchApp struct {
 	// +default:value="Running"
 	State WorkbenchAppState `json:"state,omitempty"`
 
-	// Image overwrites the default image built using the default registry, name, and version.
-	// +optional
-	Image *Image `json:"image,omitempty"`
+	// Image specifies the container image for this app.
+	// Registry and Repository are optional and will fall back to operator defaults if not specified.
+	// Tag is required.
+	Image Image `json:"image"`
 
 	// ShmSize defines the size of the required extra /dev/shm space.
 	// +optional
@@ -176,7 +199,7 @@ type WorkbenchSpec struct {
 //
 // It matches the Job Status,
 // See https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/job-v1/#JobStatus
-// +kubebuilder:validation:Enum=Unknown;Running;Complete;Progressing;Failed
+// +kubebuilder:validation:Enum=Unknown;Running;Complete;Progressing;Failed;Stopping;Stopped;Killing;Killed
 type WorkbenchStatusAppStatus string
 
 const (
@@ -194,6 +217,18 @@ const (
 
 	// WorkbenchStatusAppStatusFailed describes a failed app.
 	WorkbenchStatusAppStatusFailed WorkbenchStatusAppStatus = "Failed"
+
+	// WorkbenchStatusAppStatusStopping describes an app that is being stopped (pod terminating).
+	WorkbenchStatusAppStatusStopping WorkbenchStatusAppStatus = "Stopping"
+
+	// WorkbenchStatusAppStatusStopped describes an app that was stopped.
+	WorkbenchStatusAppStatusStopped WorkbenchStatusAppStatus = "Stopped"
+
+	// WorkbenchStatusAppStatusKilling describes an app that is being force killed (pod terminating).
+	WorkbenchStatusAppStatusKilling WorkbenchStatusAppStatus = "Killing"
+
+	// WorkbenchStatusAppStatusKilled describes an app that was force killed.
+	WorkbenchStatusAppStatusKilled WorkbenchStatusAppStatus = "Killed"
 )
 
 // WorkbenchStatusServerStatus is identical to the App status.
@@ -277,12 +312,17 @@ type WorkbenchStatusApp struct {
 
 	// Status informs about the real state of the app.
 	Status WorkbenchStatusAppStatus `json:"status"`
+
+	// Message provides additional context about the status
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // WorkbenchStatus defines the observed state of Workbench
 type WorkbenchStatus struct {
-	ServerDeployment WorkbenchStatusServer         `json:"serverDeployment"`
-	Apps             map[string]WorkbenchStatusApp `json:"apps,omitempty"`
+	ObservedGeneration int64                         `json:"observedGeneration"`
+	ServerDeployment   WorkbenchStatusServer         `json:"serverDeployment"`
+	Apps               map[string]WorkbenchStatusApp `json:"apps,omitempty"`
 }
 
 // +kubebuilder:object:root=true

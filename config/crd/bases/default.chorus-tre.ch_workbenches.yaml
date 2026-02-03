@@ -55,8 +55,10 @@ spec:
                     workbench.
                   properties:
                     image:
-                      description: Image overwrites the default image built using
-                        the default registry, name, and version.
+                      description: |-
+                        Image specifies the container image for this app.
+                        Registry and Repository are optional and will fall back to operator defaults if not specified.
+                        Tag is required.
                       properties:
                         registry:
                           description: Registry represents the hostname of the registry.
@@ -70,13 +72,19 @@ spec:
                           description: Tag contains the version identifier.
                           pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
                           type: string
-                      required:
-                      - registry
-                      - repository
                       type: object
                     kioskConfig:
                       description: KioskConfig holds kiosk-specific configuration
                       properties:
+                        jwtToken:
+                          description: JWTToken is a short lived jwt used to authenticate
+                            to the JWTURL
+                          type: string
+                        jwtUrl:
+                          description: JWTURL is the URL to refresh the short lived
+                            JWT token
+                          pattern: ^https://.*
+                          type: string
                         url:
                           description: URL to load in the kiosk browser
                           pattern: ^https://.*
@@ -173,14 +181,8 @@ spec:
                       - Stopped
                       - Killed
                       type: string
-                    version:
-                      default: latest
-                      description: Version defines the version to use.
-                      maxLength: 128
-                      minLength: 1
-                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
-                      type: string
                   required:
+                  - image
                   - name
                   type: object
                 description: Apps represent a map of applications any their state
@@ -205,6 +207,17 @@ spec:
               server:
                 description: Server represents the configuration of the server part.
                 properties:
+                  clipboard:
+                    default: disabled
+                    description: |-
+                      Clipboard defines the clipboard direction between the workbench and local machine.
+                      Options: disabled (default), to-server, to-client, both
+                    enum:
+                    - disabled
+                    - to-server
+                    - to-client
+                    - both
+                    type: string
                   initialResolutionHeight:
                     description: InitialResolutionHeight defines the initial resolution
                       height of the Xpra server.
@@ -264,6 +277,9 @@ spec:
                   description: WorkbenchStatusappStatus informs about the state of
                     the apps.
                   properties:
+                    message:
+                      description: Message provides additional context about the status
+                      type: string
                     revision:
                       description: Revision is the values of the "deployment.kubernetes.io/revision"
                         metadata.
@@ -276,12 +292,19 @@ spec:
                       - Complete
                       - Progressing
                       - Failed
+                      - Stopping
+                      - Stopped
+                      - Killing
+                      - Killed
                       type: string
                   required:
                   - revision
                   - status
                   type: object
                 type: object
+              observedGeneration:
+                format: int64
+                type: integer
               serverDeployment:
                 description: WorkbenchStatusServer represents the server status.
                 properties:
@@ -334,6 +357,7 @@ spec:
                 - status
                 type: object
             required:
+            - observedGeneration
             - serverDeployment
             type: object
         type: object
