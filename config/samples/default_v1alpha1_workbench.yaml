@@ -4,7 +4,8 @@ metadata:
   labels:
     app.kubernetes.io/name: workbench-operator
     app.kubernetes.io/managed-by: kustomize
-  name: workbench-sample
+  name: workbench
+  namespace: workspace
 spec:
   initContainer:
     version: "0.0.2-1"
