@@ -1,10 +1,11 @@
----
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
+  name: workbenches.default.chorus-tre.ch
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: workbenches.default.chorus-tre.ch
+  labels:
+  {{- include "workbench-operator.labels" . | nindent 4 }}
 spec:
   group: default.chorus-tre.ch
   names:
@@ -51,12 +52,13 @@ spec:
             properties:
               apps:
                 additionalProperties:
-                  description: WorkbenchApp defines one application running in the
-                    workbench.
+                  description: WorkbenchApp defines one application running in the workbench.
                   properties:
                     image:
-                      description: Image overwrites the default image built using
-                        the default registry, name, and version.
+                      description: |-
+                        Image specifies the container image for this app.
+                        Registry and Repository are optional and will fall back to operator defaults if not specified.
+                        Tag is required.
                       properties:
                         registry:
                           description: Registry represents the hostname of the registry.
@@ -70,9 +72,6 @@ spec:
                           description: Tag contains the version identifier.
                           pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
                           type: string
-                      required:
-                      - registry
-                      - repository
                       type: object
                     kioskConfig:
                       description: KioskConfig holds kiosk-specific configuration
@@ -109,10 +108,10 @@ spec:
                           description: |-
                             Claims lists the names of resources, defined in spec.resourceClaims,
                             that are used by this container.
-
+  
                             This field depends on the
                             DynamicResourceAllocation feature gate.
-
+  
                             This field is immutable. It can only be set for containers.
                           items:
                             description: ResourceClaim references one entry in PodSpec.ResourceClaims.
@@ -165,8 +164,8 @@ spec:
                       anyOf:
                       - type: integer
                       - type: string
-                      description: ShmSize defines the size of the required extra
-                        /dev/shm space.
+                      description: ShmSize defines the size of the required extra /dev/shm
+                        space.
                       pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                       x-kubernetes-int-or-string: true
                     state:
@@ -182,21 +181,14 @@ spec:
                       - Stopped
                       - Killed
                       type: string
-                    version:
-                      default: latest
-                      description: Version defines the version to use.
-                      maxLength: 128
-                      minLength: 1
-                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
-                      type: string
                   required:
+                  - image
                   - name
                   type: object
                 description: Apps represent a map of applications any their state
                 type: object
               imagePullSecrets:
-                description: ImagePullSecrets is the secret(s) needed to pull the
-                  image(s).
+                description: ImagePullSecrets is the secret(s) needed to pull the image(s).
                 items:
                   minLength: 1
                   type: string
@@ -281,9 +273,12 @@ spec:
             properties:
               apps:
                 additionalProperties:
-                  description: WorkbenchStatusappStatus informs about the state of
-                    the apps.
+                  description: WorkbenchStatusappStatus informs about the state of the
+                    apps.
                   properties:
+                    message:
+                      description: Message provides additional context about the status
+                      type: string
                     revision:
                       description: Revision is the values of the "deployment.kubernetes.io/revision"
                         metadata.
@@ -296,6 +291,8 @@ spec:
                       - Complete
                       - Progressing
                       - Failed
+                      - Stopped
+                      - Killed
                       type: string
                   required:
                   - revision
@@ -317,8 +314,7 @@ spec:
                       pod
                     properties:
                       message:
-                        description: Message provides additional context about the
-                          status
+                        description: Message provides additional context about the status
                         type: string
                       ready:
                         description: Ready indicates if all containers are ready
@@ -365,3 +361,9 @@ spec:
     storage: true
     subresources:
       status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

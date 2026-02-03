@@ -31,4 +31,8 @@ type Config struct {
 	WorkbenchPriorityClassName string
 	// ApplicationPriorityClassName is the priority class name to set on Application pods
 	ApplicationPriorityClassName string
+	// WorkbenchStartupTimeout is the timeout in seconds for the xpra server deployment to become ready
+	WorkbenchStartupTimeout int
+	// ApplicationStartupTimeout is the timeout in seconds for app jobs to start (covers image pull, init, etc.)
+	ApplicationStartupTimeout int
 }

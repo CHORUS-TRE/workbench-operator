@@ -7,20 +7,39 @@ metadata:
   name: workbench-sample
 spec:
   initContainer:
-    version: "0.0.1-1"
+    version: "0.0.2-1"
   server:
-    version: "6.2.1-1"
+    version: "6.3.2-4"
     user: user_name
     userid: 1002
   storage:
     s3: true
     nfs: true
   apps:
-    jlab:
-      name: jupyterlab
-      version: "4.2.5-1"
+    benchmark:
+      name: benchmark
+      image:
+        registry: harbor.build.chorus-tre.local
+        repository: apps/benchmark
+        tag: "0.0.2-1"
+      state: Running
+      resources:
+        limits:
+          cpu: 750m
+          ephemeral-storage: 10Gi
+          memory: 768Mi
+    kiosk:
+      name: kiosk
+      image:
+        registry: harbor.build.chorus-tre.local
+        repository: apps/kiosk
+        tag: "1506976-12"
+        state: Running
+      resources:
+        limits:
+          cpu: 750m
+          ephemeral-storage: 10Gi
+          memory: 768Mi
+      kioskConfig:
+        url: https://chorus-tre.ch
       shmSize: 1Gi
-    wezterm:
-      name: wezterm
-      version: "0.0.1"
-      state: Stopped
