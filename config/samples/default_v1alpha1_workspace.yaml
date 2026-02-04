@@ -1,0 +1,12 @@
+apiVersion: default.chorus-tre.ch/v1alpha1
+kind: Workspace
+metadata:
+  labels:
+    app.kubernetes.io/name: workbench-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: workspace
+  namespace: workspace
+spec:
+  airgapped: false
+  allowedFQDNs:
+    - chorus-tre.ch
