@@ -35,7 +35,7 @@ spec:
         registry: harbor.build.chorus-tre.local
         repository: apps/kiosk
         tag: "1506976-12"
-        state: Running
+      state: Running
       resources:
         limits:
           cpu: 750m
