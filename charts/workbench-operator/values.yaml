@@ -10,6 +10,16 @@ nfs:
 
 workbench:
   priorityClassName: low-priority
+  # Default resource requirements for the xpra server container.
+  # When empty, no resources are set. Can be overridden per-workbench via spec.server.resources.
+  # serverResources:
+  #   limits:
+  #     cpu: 1000m
+  #     memory: 512Mi
+  #   requests:
+  #     cpu: 100m
+  #     memory: 256Mi
+  serverResources: {}
 
 application:
   priorityClassName: preemptible
@@ -33,7 +43,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.10
+      tag: 0.4.11
     resources:
       limits:
         cpu: 500m

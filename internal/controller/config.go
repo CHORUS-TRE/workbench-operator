@@ -1,5 +1,7 @@
 package controller
 
+import corev1 "k8s.io/api/core/v1"
+
 // Config holds the global configuration that was given to the controller.
 type Config struct {
 	// Registry contains the hostname of the server and apps OCI images.
@@ -35,4 +37,7 @@ type Config struct {
 	WorkbenchStartupTimeout int
 	// ApplicationStartupTimeout is the timeout in seconds for app jobs to start (covers image pull, init, etc.)
 	ApplicationStartupTimeout int
+	// WorkbenchDefaultResources is the default resource requirements for the xpra server container.
+	// When nil, no resources are set (current behavior).
+	WorkbenchDefaultResources *corev1.ResourceRequirements
 }

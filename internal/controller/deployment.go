@@ -237,6 +237,13 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		Value: clipboardDirection,
 	})
 
+	// Apply resource requirements: CRD spec takes precedence over operator defaults
+	if workbench.Spec.Server.Resources != nil {
+		serverContainer.Resources = *workbench.Spec.Server.Resources
+	} else if config.WorkbenchDefaultResources != nil {
+		serverContainer.Resources = *config.WorkbenchDefaultResources
+	}
+
 	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
 
