@@ -2,4 +2,4 @@
 resources:
   - default_v1alpha1_workbench.yaml
   # +kubebuilder:scaffold:manifestskustomizesamples
-  - ingress.yaml
+  #- ingress.yaml
