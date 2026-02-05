@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: workbench-operator
     app.kubernetes.io/managed-by: kustomize
   name: workbench
-  namespace: workbench
+  namespace: workspace
 spec:
   initContainer:
     version: "0.0.2-1"
@@ -35,7 +35,7 @@ spec:
         registry: harbor.build.chorus-tre.local
         repository: apps/kiosk
         tag: "1506976-12"
-        state: Running
+      state: Running
       resources:
         limits:
           cpu: 750m
