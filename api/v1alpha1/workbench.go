@@ -127,10 +127,18 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job, message st
 		}
 	}
 
+	// Determine the final message to use
+	finalMessage := message
+	// If status is Failed and new message is generic "Job failed",
+	// preserve the previous detailed message if it exists
+	if status == WorkbenchStatusAppStatusFailed && message == "Job failed" && app.Message != "" && app.Message != "Job failed" {
+		finalMessage = app.Message
+	}
+
 	// Save it back if status or message changed
-	if status != app.Status || message != app.Message {
+	if status != app.Status || finalMessage != app.Message {
 		app.Status = status
-		app.Message = message
+		app.Message = finalMessage
 
 		wb.Status.Apps[uid] = app
 		return true
