@@ -74,6 +74,11 @@ type WorkbenchServer struct {
 	// +optional
 	// +kubebuilder:default=disabled
 	Clipboard ClipboardDirection `json:"clipboard,omitempty"`
+
+	// Resources describes the compute resource requirements for the server container.
+	// When specified, overrides operator-level defaults.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // Image represents the configuration of a custom image for an app.
