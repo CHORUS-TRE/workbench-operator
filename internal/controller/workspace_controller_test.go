@@ -403,7 +403,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 })
 
 // findCondition returns the condition with the given type, or nil.
-func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition { //nolint:unparam
 	for i := range conditions {
 		if conditions[i].Type == condType {
 			return &conditions[i]
