@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"time"
 
@@ -12,11 +11,8 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -205,17 +201,6 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err != nil {
 		log.Error(err, "Error processing storage")
 		return ctrl.Result{}, err
-	}
-
-	// ---------- NETWORK POLICY ---------------
-	if err := r.reconcileNetworkPolicy(ctx, &workbench); err != nil {
-		if apimeta.IsNoMatchError(err) {
-			// Cilium CRD not installed in the cluster/test env; skip gracefully.
-			log.V(1).Info("CiliumNetworkPolicy CRD not found, skipping network policy reconciliation")
-		} else {
-			log.V(1).Error(err, "Error reconciling network policy", "workbench", workbench.Name)
-			return ctrl.Result{}, err
-		}
 	}
 
 	// ---------- APPS ---------------
@@ -820,68 +805,10 @@ func (r *WorkbenchReconciler) determineAppContainerMessage(containerStatus *core
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *WorkbenchReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	cnp := &unstructured.Unstructured{}
-	cnp.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "cilium.io",
-		Version: "v2",
-		Kind:    "CiliumNetworkPolicy",
-	})
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&defaultv1alpha1.Workbench{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.Job{}).
 		Owns(&corev1.Service{}).
-		Owns(cnp).
 		Complete(r)
-}
-
-func (r *WorkbenchReconciler) reconcileNetworkPolicy(ctx context.Context, workbench *defaultv1alpha1.Workbench) error {
-	cnp := buildNetworkPolicy(*workbench)
-
-	if err := controllerutil.SetControllerReference(workbench, cnp, r.Scheme); err != nil {
-		return err
-	}
-
-	key := types.NamespacedName{
-		Name:      cnp.GetName(),
-		Namespace: cnp.GetNamespace(),
-	}
-
-	existing := unstructured.Unstructured{}
-	existing.SetGroupVersionKind(cnp.GroupVersionKind())
-
-	if err := r.Get(ctx, key, &existing); err != nil {
-		if apierrors.IsNotFound(err) {
-			return r.Create(ctx, cnp)
-		}
-		return err
-	}
-
-	updated := false
-
-	if !reflect.DeepEqual(existing.GetLabels(), cnp.GetLabels()) {
-		existing.SetLabels(cnp.GetLabels())
-		updated = true
-	}
-
-	desiredSpec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
-	existingSpec, _, _ := unstructured.NestedFieldCopy(existing.Object, "spec")
-	if !reflect.DeepEqual(existingSpec, desiredSpec) {
-		_ = unstructured.SetNestedField(existing.Object, desiredSpec, "spec")
-		updated = true
-	}
-
-	if !controllerutil.HasControllerReference(&existing) {
-		if err := controllerutil.SetControllerReference(workbench, &existing, r.Scheme); err != nil {
-			return err
-		}
-		updated = true
-	}
-
-	if updated {
-		return r.Update(ctx, &existing)
-	}
-
-	return nil
 }

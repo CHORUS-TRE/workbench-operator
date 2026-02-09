@@ -9,28 +9,29 @@ import (
 )
 
 var _ = Describe("buildNetworkPolicy", func() {
-	baseWorkbench := func() defaultv1alpha1.Workbench {
-		return defaultv1alpha1.Workbench{
+	baseWorkspace := func() defaultv1alpha1.Workspace {
+		return defaultv1alpha1.Workspace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "wb",
-				Namespace: "default",
+				Name:      "workspace",
+				Namespace: "workspace-ns",
 			},
-			Spec: defaultv1alpha1.WorkbenchSpec{
-				Server: defaultv1alpha1.WorkbenchServer{},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				Airgapped: true,
 			},
 		}
 	}
 
-	It("builds DNS + intra-workbench egress by default", func() {
-		wb := baseWorkbench()
+	It("builds DNS + intra-namespace egress for airgapped workspace", func() {
+		ws := baseWorkspace()
 
-		cnp := buildNetworkPolicy(wb)
+		cnp := buildNetworkPolicy(ws)
 		Expect(cnp).NotTo(BeNil())
-		Expect(cnp.GetNamespace()).To(Equal("default"))
+		Expect(cnp.GetName()).To(Equal("workspace-egress"))
+		Expect(cnp.GetNamespace()).To(Equal("workspace-ns"))
 
 		spec := cnp.Object["spec"].(map[string]any)
 		es := spec["endpointSelector"].(map[string]any)
-		Expect(es["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
+		Expect(es["matchLabels"]).To(BeEmpty())
 
 		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(2))
@@ -42,16 +43,15 @@ var _ = Describe("buildNetworkPolicy", func() {
 		intraRule := egress[1]
 		toEndpoints := intraRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
-		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue(matchingLabel, "wb"))
+		Expect(toEndpoints[0]["matchLabels"]).To(BeEmpty())
 	})
 
-	It("adds FQDN allowlist rules with HTTP/HTTPS ports", func() {
-		wb := baseWorkbench()
-		wb.Spec.NetworkPolicy = &defaultv1alpha1.NetworkPolicySpec{
-			AllowedTLDs: []string{"example.com", "*.corp.internal"},
-		}
+	It("adds FQDN allowlist rules with HTTP/HTTPS ports when not airgapped", func() {
+		ws := baseWorkspace()
+		ws.Spec.Airgapped = false
+		ws.Spec.AllowedFQDNs = []string{"example.com", "*.corp.internal"}
 
-		cnp := buildNetworkPolicy(wb)
+		cnp := buildNetworkPolicy(ws)
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(3))
@@ -69,18 +69,66 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 	})
 
-	It("allows full internet when enabled", func() {
-		wb := baseWorkbench()
-		wb.Spec.NetworkPolicy = &defaultv1alpha1.NetworkPolicySpec{
-			AllowInternet: true,
-		}
+	It("allows full internet when not airgapped and no FQDNs specified", func() {
+		ws := baseWorkspace()
+		ws.Spec.Airgapped = false
 
-		cnp := buildNetworkPolicy(wb)
+		cnp := buildNetworkPolicy(ws)
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(3))
 
 		allowInternetRule := egress[2]
 		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
+	})
+
+	It("uses empty endpoint selector (all pods in namespace)", func() {
+		ws := baseWorkspace()
+		cnp := buildNetworkPolicy(ws)
+
+		spec := cnp.Object["spec"].(map[string]any)
+		es := spec["endpointSelector"].(map[string]any)
+		ml := es["matchLabels"].(map[string]any)
+		Expect(ml).To(BeEmpty())
+	})
+})
+
+var _ = Describe("validateFQDNs", func() {
+	It("accepts valid FQDNs", func() {
+		err := validateFQDNs([]string{"example.com", "sub.example.com", "a.b.c.d.com"})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("accepts valid wildcard patterns", func() {
+		err := validateFQDNs([]string{"*.example.com", "*.corp.internal"})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects empty entries", func() {
+		err := validateFQDNs([]string{"example.com", "", "other.com"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("empty FQDN"))
+	})
+
+	It("rejects entries with spaces", func() {
+		err := validateFQDNs([]string{"not a domain"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
+	})
+
+	It("rejects entries with invalid characters", func() {
+		err := validateFQDNs([]string{"exam!ple.com"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
+	})
+
+	It("accepts an empty list", func() {
+		err := validateFQDNs([]string{})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("accepts nil", func() {
+		err := validateFQDNs(nil)
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

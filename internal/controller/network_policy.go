@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -9,20 +10,37 @@ import (
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
 
-// buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
-// that enforces per-workbench egress policy (DNS + intra-workbench + optional
-// FQDN allowlist or full internet).
-func buildNetworkPolicy(workbench defaultv1alpha1.Workbench) *unstructured.Unstructured {
-	labels := map[string]string{
-		matchingLabel: workbench.Name,
-	}
+// fqdnPattern validates FQDN entries: optional leading wildcard (*.), then
+// DNS labels separated by dots. Matches "example.com", "*.corp.internal", etc.
+var fqdnPattern = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$`)
 
-	spec := workbench.Spec.NetworkPolicy
-	allowInternet := false
-	var allowedTLDs []string
-	if spec != nil {
-		allowInternet = spec.AllowInternet
-		allowedTLDs = spec.AllowedTLDs
+// validateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
+// or wildcard pattern. Returns nil on success or an error describing the first
+// invalid entry.
+func validateFQDNs(entries []string) error {
+	for _, entry := range entries {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			return fmt.Errorf("empty FQDN entry")
+		}
+		if !fqdnPattern.MatchString(trimmed) {
+			return fmt.Errorf("invalid FQDN entry: %q", trimmed)
+		}
+	}
+	return nil
+}
+
+// buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
+// that enforces workspace-level egress policy (DNS + intra-namespace + optional
+// FQDN allowlist or full internet).
+//
+// Policy mapping:
+//   - Airgapped=true            → DNS + intra-namespace only
+//   - Airgapped=false + FQDNs   → DNS + intra-namespace + FQDN allowlist
+//   - Airgapped=false + no FQDNs → DNS + intra-namespace + full internet
+func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) *unstructured.Unstructured {
+	labels := map[string]string{
+		"workspace": workspace.Name,
 	}
 
 	egressRules := []map[string]any{
@@ -49,28 +67,29 @@ func buildNetworkPolicy(workbench defaultv1alpha1.Workbench) *unstructured.Unstr
 				},
 			},
 		},
-		// Intra-workbench traffic
+		// Intra-namespace traffic (empty matchLabels selects all pods in the namespace)
 		{
 			"toEndpoints": []map[string]any{
 				{
-					"matchLabels": labels,
+					"matchLabels": map[string]any{},
 				},
 			},
 		},
 	}
 
-	fqdnSelectors := toFQDNSelectors(allowedTLDs)
-	if len(fqdnSelectors) > 0 {
-		egressRules = append(egressRules, map[string]any{
-			"toFQDNs": fqdnSelectors,
-			"toPorts": httpPortRules(),
-		})
-	}
-
-	if allowInternet {
-		egressRules = append(egressRules, map[string]any{
-			"toCIDR": []string{"0.0.0.0/0", "::/0"},
-		})
+	if !workspace.Spec.Airgapped {
+		fqdnSelectors := toFQDNSelectors(workspace.Spec.AllowedFQDNs)
+		if len(fqdnSelectors) > 0 {
+			egressRules = append(egressRules, map[string]any{
+				"toFQDNs": fqdnSelectors,
+				"toPorts": httpPortRules(),
+			})
+		} else {
+			// No FQDNs specified and not airgapped → allow all internet
+			egressRules = append(egressRules, map[string]any{
+				"toCIDR": []string{"0.0.0.0/0", "::/0"},
+			})
+		}
 	}
 
 	return &unstructured.Unstructured{
@@ -78,13 +97,14 @@ func buildNetworkPolicy(workbench defaultv1alpha1.Workbench) *unstructured.Unstr
 			"apiVersion": "cilium.io/v2",
 			"kind":       "CiliumNetworkPolicy",
 			"metadata": map[string]any{
-				"name":      fmt.Sprintf("%s-egress", workbench.Name),
-				"namespace": workbench.Namespace,
+				"name":      fmt.Sprintf("%s-egress", workspace.Name),
+				"namespace": workspace.Namespace,
 				"labels":    labels,
 			},
 			"spec": map[string]any{
+				// Empty matchLabels: policy applies to all pods in the namespace
 				"endpointSelector": map[string]any{
-					"matchLabels": labels,
+					"matchLabels": map[string]any{},
 				},
 				"egress": egressRules,
 			},
