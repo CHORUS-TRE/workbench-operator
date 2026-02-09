@@ -39,7 +39,7 @@ func validateFQDNs(entries []string) error {
 //   - Airgapped=false + FQDNs   → DNS + intra-namespace + FQDN allowlist
 //   - Airgapped=false + no FQDNs → DNS + intra-namespace + full internet
 func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) *unstructured.Unstructured {
-	labels := map[string]string{
+	labels := map[string]any{
 		"workspace": workspace.Name,
 	}
 

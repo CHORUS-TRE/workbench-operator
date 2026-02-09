@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -31,6 +32,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile ensures the CiliumNetworkPolicy for this Workspace matches the
 // desired state derived from the WorkspaceSpec.
@@ -154,15 +156,24 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 
 	updated := false
 
-	if !reflect.DeepEqual(existing.GetLabels(), cnp.GetLabels()) {
-		existing.SetLabels(cnp.GetLabels())
+	desiredJSON, err := json.Marshal(cnp.Object["spec"])
+	if err != nil {
+		return err
+	}
+	existingJSON, err := json.Marshal(existing.Object["spec"])
+	if err != nil {
+		return err
+	}
+	if string(desiredJSON) != string(existingJSON) {
+		var normalizedSpec any
+		if err := json.Unmarshal(desiredJSON, &normalizedSpec); err != nil {
+			return err
+		}
+		existing.Object["spec"] = normalizedSpec
 		updated = true
 	}
-
-	desiredSpec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
-	existingSpec, _, _ := unstructured.NestedFieldCopy(existing.Object, "spec")
-	if !reflect.DeepEqual(existingSpec, desiredSpec) {
-		_ = unstructured.SetNestedField(existing.Object, desiredSpec, "spec")
+	if !reflect.DeepEqual(existing.GetLabels(), cnp.GetLabels()) {
+		existing.SetLabels(cnp.GetLabels())
 		updated = true
 	}
 
