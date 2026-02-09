@@ -28,6 +28,24 @@ spec:
         - --nfs-secret-namespace={{ .Values.nfs.secretNamespace }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
+        {{- with .Values.workbench.serverResources }}
+        {{- if .limits }}
+        {{- if .limits.cpu }}
+        - --workbench-cpu-limit={{ .limits.cpu }}
+        {{- end }}
+        {{- if .limits.memory }}
+        - --workbench-memory-limit={{ .limits.memory }}
+        {{- end }}
+        {{- end }}
+        {{- if .requests }}
+        {{- if .requests.cpu }}
+        - --workbench-cpu-request={{ .requests.cpu }}
+        {{- end }}
+        {{- if .requests.memory }}
+        - --workbench-memory-request={{ .requests.memory }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
         command:
         - /manager
         env:

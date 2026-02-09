@@ -135,7 +135,7 @@ var _ = Describe("Workbench Controller", func() {
 		workbench.Spec.Apps = map[string]defaultv1alpha1.WorkbenchApp{
 			"uid0": {
 				Name: "wezterm",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "my-registry",
 					Repository: "applications/wezterm",
 					Tag:        "latest",
@@ -143,7 +143,7 @@ var _ = Describe("Workbench Controller", func() {
 			},
 			"uid1": {
 				Name: "kitty",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "quay.io",
 					Repository: "kitty/kitty",
 					Tag:        "1.2.0",
@@ -153,7 +153,7 @@ var _ = Describe("Workbench Controller", func() {
 			"uid2": {
 				Name:  "alacritty",
 				State: "Stopped",
-				Image: &defaultv1alpha1.Image{
+				Image: defaultv1alpha1.Image{
 					Registry:   "my-registry",
 					Repository: "applications/alacritty",
 					Tag:        "latest",
@@ -475,12 +475,26 @@ var _ = Describe("Workbench Controller", func() {
 				Expect(health.Message).To(ContainSubstring("Readiness probe failing"))
 			})
 
-			It("should return Restarting for recently restarted container", func() {
+			It("should return Ready for recently restarted but ready container", func() {
 				containerStatus := createRestartingContainerStatus()
 				health := reconciler.determineContainerHealth(&containerStatus)
 
-				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusRestarting))
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusReady))
 				Expect(health.Ready).To(BeTrue())
+				Expect(health.RestartCount).To(Equal(int32(3)))
+				Expect(health.Message).To(ContainSubstring("Container is ready"))
+			})
+
+			It("should return Restarting for recently restarted but not ready container", func() {
+				containerStatus := createMockContainerStatus("xpra-server", corev1.ContainerState{
+					Running: &corev1.ContainerStateRunning{
+						StartedAt: metav1.Time{Time: time.Now().Add(-2 * time.Minute)},
+					},
+				}, false, 3)
+				health := reconciler.determineContainerHealth(&containerStatus)
+
+				Expect(health.Status).To(Equal(defaultv1alpha1.ServerPodStatusRestarting))
+				Expect(health.Ready).To(BeFalse())
 				Expect(health.RestartCount).To(Equal(int32(3)))
 				Expect(health.Message).To(ContainSubstring("Recently restarted (3 times)"))
 			})
@@ -659,6 +673,163 @@ var _ = Describe("Workbench Controller", func() {
 		})
 	})
 
+	Describe("UpdateObservedGeneration", func() {
+		It("should update observedGeneration when generation is higher", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-generation-workbench",
+					Namespace:  "default",
+					Generation: 5,
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					ObservedGeneration: 3,
+				},
+			}
+
+			updated := workbench.UpdateObservedGeneration()
+
+			Expect(updated).To(BeTrue())
+			Expect(workbench.Status.ObservedGeneration).To(Equal(int64(5)))
+		})
+
+		It("should not update when observedGeneration equals generation", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-generation-equal-workbench",
+					Namespace:  "default",
+					Generation: 5,
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					ObservedGeneration: 5,
+				},
+			}
+
+			updated := workbench.UpdateObservedGeneration()
+
+			Expect(updated).To(BeFalse())
+			Expect(workbench.Status.ObservedGeneration).To(Equal(int64(5)))
+		})
+
+		It("should handle first generation (generation=1, observedGeneration=0)", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-first-generation-workbench",
+					Namespace:  "default",
+					Generation: 1,
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{}, // observedGeneration defaults to 0
+			}
+
+			updated := workbench.UpdateObservedGeneration()
+
+			Expect(updated).To(BeTrue())
+			Expect(workbench.Status.ObservedGeneration).To(Equal(int64(1)))
+		})
+	})
+
+	Describe("CleanOrphanedAppStatuses", func() {
+		It("should remove status entries for apps no longer in spec", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cleanup-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{
+						"uid1": {Name: "app1"},
+						// uid2 was removed from spec
+					},
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+						"uid1": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},
+						"uid2": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},  // orphaned
+						"uid3": {Status: defaultv1alpha1.WorkbenchStatusAppStatusComplete}, // orphaned
+					},
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeTrue())
+			Expect(workbench.Status.Apps).To(HaveLen(1))
+			Expect(workbench.Status.Apps).To(HaveKey("uid1"))
+			Expect(workbench.Status.Apps).NotTo(HaveKey("uid2"))
+			Expect(workbench.Status.Apps).NotTo(HaveKey("uid3"))
+		})
+
+		It("should return false when no orphans exist", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-no-orphans-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{
+						"uid1": {Name: "app1"},
+						"uid2": {Name: "app2"},
+					},
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+						"uid1": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},
+						"uid2": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning},
+					},
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeFalse())
+			Expect(workbench.Status.Apps).To(HaveLen(2))
+		})
+
+		It("should handle nil status.apps", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-nil-status-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{
+						"uid1": {Name: "app1"},
+					},
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: nil, // nil status apps
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeFalse())
+			Expect(workbench.Status.Apps).To(BeNil())
+		})
+
+		It("should handle empty spec.apps", func() {
+			workbench := &defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-empty-spec-workbench",
+					Namespace: "default",
+				},
+				Spec: defaultv1alpha1.WorkbenchSpec{
+					Apps: map[string]defaultv1alpha1.WorkbenchApp{}, // empty spec
+				},
+				Status: defaultv1alpha1.WorkbenchStatus{
+					Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+						"uid1": {Status: defaultv1alpha1.WorkbenchStatusAppStatusRunning}, // all are orphans
+						"uid2": {Status: defaultv1alpha1.WorkbenchStatusAppStatusComplete},
+					},
+				},
+			}
+
+			removed := workbench.CleanOrphanedAppStatuses()
+
+			Expect(removed).To(BeTrue())
+			Expect(workbench.Status.Apps).To(HaveLen(0))
+		})
+	})
+
 	Describe("Storage Configuration", func() {
 
 		Context("Job Volume Configuration", func() {
@@ -696,7 +867,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
-					Image: &defaultv1alpha1.Image{
+					Image: defaultv1alpha1.Image{
 						Registry:   "test.registry.io",
 						Repository: "apps/test-app",
 						Tag:        "latest",
@@ -750,7 +921,7 @@ var _ = Describe("Workbench Controller", func() {
 
 				app := defaultv1alpha1.WorkbenchApp{
 					Name: "test-app",
-					Image: &defaultv1alpha1.Image{
+					Image: defaultv1alpha1.Image{
 						Registry:   "test.registry.io",
 						Repository: "apps/test-app",
 						Tag:        "latest",

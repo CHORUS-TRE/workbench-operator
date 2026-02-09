@@ -70,7 +70,7 @@ func (wb *Workbench) UpdateStatusFromDeployment(deployment appsv1.Deployment) bo
 // UpdateStatusAppFromDeployment enriches the workbench status based on the deployment.
 //
 // It's not a *best* practice to do so, but it's very convenient.
-func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
+func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job, message string) bool {
 	if wb.Status.Apps == nil {
 		wb.Status.Apps = make(map[string]WorkbenchStatusApp)
 	}
@@ -80,6 +80,7 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
 		wb.Status.Apps[uid] = WorkbenchStatusApp{
 			Revision: -1,
 			Status:   WorkbenchStatusAppStatusUnknown,
+			Message:  message,
 		}
 	}
 
@@ -88,7 +89,28 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
 	// Default status
 	status := app.Status
 
-	if job.Status.Active == 1 {
+	// If job is suspended, the user requested stop/kill — this takes priority
+	// regardless of how the pod exited (succeeded, failed, OOMKilled, etc.)
+	if job.Spec.Suspend != nil && *job.Spec.Suspend {
+		specApp, exists := wb.Spec.Apps[uid]
+		if exists && specApp.State == WorkbenchAppStateStopped {
+			if job.Status.Active >= 1 {
+				status = WorkbenchStatusAppStatusStopping
+			} else {
+				status = WorkbenchStatusAppStatusStopped
+			}
+		} else if exists && specApp.State == WorkbenchAppStateKilled {
+			if job.Status.Active >= 1 {
+				status = WorkbenchStatusAppStatusKilling
+			} else {
+				status = WorkbenchStatusAppStatusKilled
+			}
+		} else if job.Status.Active >= 1 {
+			status = WorkbenchStatusAppStatusProgressing
+		} else {
+			status = WorkbenchStatusAppStatusComplete
+		}
+	} else if job.Status.Active == 1 {
 		if job.Status.Ready != nil && *job.Status.Ready >= 1 {
 			status = WorkbenchStatusAppStatusRunning
 		} else {
@@ -97,14 +119,18 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
 	} else {
 		if job.Status.Succeeded >= 1 {
 			status = WorkbenchStatusAppStatusComplete
-		} else {
+		} else if job.Status.Failed >= 1 {
 			status = WorkbenchStatusAppStatusFailed
+		} else {
+			// No active, succeeded, or failed pods — job is starting up
+			status = WorkbenchStatusAppStatusProgressing
 		}
 	}
 
-	// Save it back
-	if status != app.Status {
+	// Save it back if status or message changed
+	if status != app.Status || message != app.Message {
 		app.Status = status
+		app.Message = message
 
 		wb.Status.Apps[uid] = app
 		return true
@@ -115,7 +141,7 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job) bool {
 
 // SetAppStatusFailed sets an app's status to Failed when job initialization fails.
 // This is used when the job cannot be created (e.g., missing image configuration).
-func (wb *Workbench) SetAppStatusFailed(uid string) bool {
+func (wb *Workbench) SetAppStatusFailed(uid string, message string) bool {
 	if wb.Status.Apps == nil {
 		wb.Status.Apps = make(map[string]WorkbenchStatusApp)
 	}
@@ -125,11 +151,40 @@ func (wb *Workbench) SetAppStatusFailed(uid string) bool {
 		app = WorkbenchStatusApp{Revision: -1}
 	}
 
-	if app.Status != WorkbenchStatusAppStatusFailed {
+	if app.Status != WorkbenchStatusAppStatusFailed || app.Message != message {
 		app.Status = WorkbenchStatusAppStatusFailed
+		app.Message = message
 		wb.Status.Apps[uid] = app
 		return true
 	}
 
 	return false
+}
+
+// UpdateObservedGeneration
+// This is used to track if the status is up-to-date with the spec.
+func (wb *Workbench) UpdateObservedGeneration() bool {
+	generation := wb.Generation
+	if wb.Status.ObservedGeneration < generation {
+		wb.Status.ObservedGeneration = generation
+		return true
+	}
+	return false
+}
+
+// CleanOrphanedAppStatuses removes status entries for apps that no longer exist in spec.
+// Returns true if any entries were removed.
+func (wb *Workbench) CleanOrphanedAppStatuses() bool {
+	if wb.Status.Apps == nil {
+		return false
+	}
+
+	removed := false
+	for uid := range wb.Status.Apps {
+		if _, exists := wb.Spec.Apps[uid]; !exists {
+			delete(wb.Status.Apps, uid)
+			removed = true
+		}
+	}
+	return removed
 }

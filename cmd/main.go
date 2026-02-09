@@ -9,6 +9,8 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -55,6 +57,12 @@ func main() {
 	var debugModeEnabled bool
 	var workbenchPriorityClassName string
 	var applicationPriorityClassName string
+	var workbenchStartupTimeout int
+	var applicationStartupTimeout int
+	var workbenchCPULimit string
+	var workbenchMemoryLimit string
+	var workbenchCPURequest string
+	var workbenchMemoryRequest string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -79,6 +87,12 @@ func main() {
 	flag.BoolVar(&debugModeEnabled, "debug-mode-enabled", false, "Enable debug mode for all workbenches (elevated privileges for debugging). Only use for local development.")
 	flag.StringVar(&workbenchPriorityClassName, "workbench-priority-class-name", "", "Priority class name to set on Workbench pods")
 	flag.StringVar(&applicationPriorityClassName, "application-priority-class-name", "", "Priority class name to set on Application pods")
+	flag.IntVar(&workbenchStartupTimeout, "workbench-startup-timeout", 600, "Timeout in seconds for the xpra server deployment to become ready")
+	flag.IntVar(&applicationStartupTimeout, "application-startup-timeout", 600, "Timeout in seconds for app jobs to start (covers image pull, init, etc.)")
+	flag.StringVar(&workbenchCPULimit, "workbench-cpu-limit", "", "Default CPU limit for the workbench server container (e.g. 1000m)")
+	flag.StringVar(&workbenchMemoryLimit, "workbench-memory-limit", "", "Default memory limit for the workbench server container (e.g. 512Mi)")
+	flag.StringVar(&workbenchCPURequest, "workbench-cpu-request", "", "Default CPU request for the workbench server container (e.g. 100m)")
+	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -148,6 +162,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build default workbench resources from flags (nil if no flags are set)
+	var workbenchDefaultResources *corev1.ResourceRequirements
+	if workbenchCPULimit != "" || workbenchMemoryLimit != "" || workbenchCPURequest != "" || workbenchMemoryRequest != "" {
+		workbenchDefaultResources = &corev1.ResourceRequirements{}
+		if workbenchCPULimit != "" || workbenchMemoryLimit != "" {
+			workbenchDefaultResources.Limits = corev1.ResourceList{}
+			if workbenchCPULimit != "" {
+				workbenchDefaultResources.Limits[corev1.ResourceCPU] = resource.MustParse(workbenchCPULimit)
+			}
+			if workbenchMemoryLimit != "" {
+				workbenchDefaultResources.Limits[corev1.ResourceMemory] = resource.MustParse(workbenchMemoryLimit)
+			}
+		}
+		if workbenchCPURequest != "" || workbenchMemoryRequest != "" {
+			workbenchDefaultResources.Requests = corev1.ResourceList{}
+			if workbenchCPURequest != "" {
+				workbenchDefaultResources.Requests[corev1.ResourceCPU] = resource.MustParse(workbenchCPURequest)
+			}
+			if workbenchMemoryRequest != "" {
+				workbenchDefaultResources.Requests[corev1.ResourceMemory] = resource.MustParse(workbenchMemoryRequest)
+			}
+		}
+	}
+
 	if err = (&controller.WorkbenchReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
@@ -167,6 +205,9 @@ func main() {
 			DebugModeEnabled:             debugModeEnabled,
 			WorkbenchPriorityClassName:   workbenchPriorityClassName,
 			ApplicationPriorityClassName: applicationPriorityClassName,
+			WorkbenchStartupTimeout:      workbenchStartupTimeout,
+			ApplicationStartupTimeout:    applicationStartupTimeout,
+			WorkbenchDefaultResources:    workbenchDefaultResources,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")

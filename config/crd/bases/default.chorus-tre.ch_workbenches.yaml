@@ -55,8 +55,10 @@ spec:
                     workbench.
                   properties:
                     image:
-                      description: Image overwrites the default image built using
-                        the default registry, name, and version.
+                      description: |-
+                        Image specifies the container image for this app.
+                        Registry and Repository are optional and will fall back to operator defaults if not specified.
+                        Tag is required.
                       properties:
                         registry:
                           description: Registry represents the hostname of the registry.
@@ -70,9 +72,6 @@ spec:
                           description: Tag contains the version identifier.
                           pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
                           type: string
-                      required:
-                      - registry
-                      - repository
                       type: object
                     kioskConfig:
                       description: KioskConfig holds kiosk-specific configuration
@@ -182,14 +181,8 @@ spec:
                       - Stopped
                       - Killed
                       type: string
-                    version:
-                      default: latest
-                      description: Version defines the version to use.
-                      maxLength: 128
-                      minLength: 1
-                      pattern: '[a-zA-Z0-9_][a-zA-Z0-9_\-\.]*'
-                      type: string
                   required:
+                  - image
                   - name
                   type: object
                 description: Apps represent a map of applications any their state
@@ -214,6 +207,17 @@ spec:
               server:
                 description: Server represents the configuration of the server part.
                 properties:
+                  clipboard:
+                    default: disabled
+                    description: |-
+                      Clipboard defines the clipboard direction between the workbench and local machine.
+                      Options: disabled (default), to-server, to-client, both
+                    enum:
+                    - disabled
+                    - to-server
+                    - to-client
+                    - both
+                    type: string
                   initialResolutionHeight:
                     description: InitialResolutionHeight defines the initial resolution
                       height of the Xpra server.
@@ -222,6 +226,67 @@ spec:
                     description: InitialResolutionWidth defines the initial resolution
                       width of the Xpra server.
                     type: integer
+                  resources:
+                    description: |-
+                      Resources describes the compute resource requirements for the server container.
+                      When specified, overrides operator-level defaults.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
                   user:
                     default: chorus
                     description: User defines the username for the workbench server.
@@ -289,6 +354,9 @@ spec:
                   description: WorkbenchStatusappStatus informs about the state of
                     the apps.
                   properties:
+                    message:
+                      description: Message provides additional context about the status
+                      type: string
                     revision:
                       description: Revision is the values of the "deployment.kubernetes.io/revision"
                         metadata.
@@ -301,12 +369,19 @@ spec:
                       - Complete
                       - Progressing
                       - Failed
+                      - Stopping
+                      - Stopped
+                      - Killing
+                      - Killed
                       type: string
                   required:
                   - revision
                   - status
                   type: object
                 type: object
+              observedGeneration:
+                format: int64
+                type: integer
               serverDeployment:
                 description: WorkbenchStatusServer represents the server status.
                 properties:
@@ -359,6 +434,7 @@ spec:
                 - status
                 type: object
             required:
+            - observedGeneration
             - serverDeployment
             type: object
         type: object

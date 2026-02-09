@@ -65,7 +65,7 @@ func buildAppSecurityContext(debugMode bool, userID, groupID int64) *corev1.Secu
 // This is needed because app.Name in the CR may include instance suffixes (e.g., "freesurfer-159")
 // but the Dockerfile uses the base name for paths like /apps/freesurfer/config/
 func getAppName(app defaultv1alpha1.WorkbenchApp) string {
-	if app.Image == nil {
+	if app.Image.Repository == "" {
 		return ""
 	}
 	// Extract the last path component from repository (e.g., "apps/freesurfer" -> "freesurfer")
@@ -237,6 +237,12 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	oneDay := int32(24 * 3600)
 	job.Spec.TTLSecondsAfterFinished = &oneDay
 
+	// Timeout for the job to start and run (covers image pull, init container, etc.)
+	if config.ApplicationStartupTimeout > 0 {
+		activeDeadline := int64(config.ApplicationStartupTimeout)
+		job.Spec.ActiveDeadlineSeconds = &activeDeadline
+	}
+
 	// Service account is an alternative to the image Pull Secrets
 	serviceAccountName := workbench.Spec.ServiceAccount
 	if serviceAccountName != "" {
@@ -252,36 +258,34 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	var appImage string
 	imagePullPolicy := corev1.PullIfNotPresent
 
-	if app.Image == nil {
-		// Fix empty version
-		appVersion := app.Version
-		if appVersion == "" {
-			appVersion = "latest"
-			imagePullPolicy = corev1.PullAlways
-		}
-
-		// Non-empty registry requires a / to concatenate with the app one.
-		registry := config.Registry
-		if registry != "" {
-			registry = strings.TrimRight(registry, "/") + "/"
-		}
-
-		appsRepository := config.AppsRepository
-		if appsRepository != "" {
-			appsRepository = strings.Trim(appsRepository, "/") + "/"
-		}
-
-		appImage = fmt.Sprintf("%s%s%s:%s", registry, appsRepository, app.Name, appVersion)
-	} else {
-		// Fix empty version
-		appVersion := app.Image.Tag
-		if appVersion == "" {
-			appVersion = "latest"
-			imagePullPolicy = corev1.PullAlways
-		}
-
-		appImage = fmt.Sprintf("%s/%s:%s", app.Image.Registry, app.Image.Repository, appVersion)
+	// Get tag from image
+	appTag := app.Image.Tag
+	if appTag == "" {
+		appTag = "latest"
+		imagePullPolicy = corev1.PullAlways
 	}
+
+	// Use custom registry or fall back to config default
+	// Non-empty registry requires a / to concatenate with the repository
+	registry := app.Image.Registry
+	if registry == "" {
+		registry = config.Registry
+	}
+	if registry != "" {
+		registry = strings.TrimRight(registry, "/") + "/"
+	}
+
+	// Use custom repository or fall back to config default + app name
+	repository := app.Image.Repository
+	if repository == "" {
+		appsRepo := config.AppsRepository
+		if appsRepo != "" {
+			appsRepo = strings.Trim(appsRepo, "/") + "/"
+		}
+		repository = appsRepo + app.Name
+	}
+
+	appImage = fmt.Sprintf("%s%s:%s", registry, repository, appTag)
 
 	// Validate that the app image is compatible with the init container
 	if err := validateAppImage(ctx, appImage); err != nil {
@@ -363,14 +367,14 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 			Name:  "KIOSK_URL",
 			Value: app.KioskConfig.URL,
 		})
-		if app.KioskConfig.JWTURL != "" && app.KioskConfig.JWTToken != "" {
+		if app.KioskConfig.JWTURL != nil && *app.KioskConfig.JWTURL != "" && app.KioskConfig.JWTToken != nil && *app.KioskConfig.JWTToken != "" {
 			appContainer.Env = append(appContainer.Env, corev1.EnvVar{
 				Name:  "KIOSK_JWT_URL",
-				Value: app.KioskConfig.JWTURL,
+				Value: *app.KioskConfig.JWTURL,
 			})
 			appContainer.Env = append(appContainer.Env, corev1.EnvVar{
 				Name:  "KIOSK_JWT_TOKEN",
-				Value: app.KioskConfig.JWTToken,
+				Value: *app.KioskConfig.JWTToken,
 			})
 		}
 	}

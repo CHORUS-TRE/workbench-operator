@@ -12,14 +12,16 @@ nfs:
 
 workbench:
   priorityClassName: low-priority
-  # Network policy defaults applied per Workbench CR
-  networkPolicy:
-    # Allow full internet egress (defaults to false)
-    allowInternet: false
-    # Allowed TLDs when internet is closed; both exact and wildcard supported
-    allowedTLDs:
-    - deb.debian.org
-    - packages.microsoft.com
+  # Default resource requirements for the xpra server container.
+  # When empty, no resources are set. Can be overridden per-workbench via spec.server.resources.
+  # serverResources:
+  #   limits:
+  #     cpu: 1000m
+  #     memory: 512Mi
+  #   requests:
+  #     cpu: 100m
+  #     memory: 256Mi
+  serverResources: {}
 
 application:
   priorityClassName: preemptible
@@ -43,7 +45,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.5
+      tag: 0.4.11
     resources:
       limits:
         cpu: 500m

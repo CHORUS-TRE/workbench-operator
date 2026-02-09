@@ -242,7 +242,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err != nil {
 			log.Error(err, "Failed to initialize job", "app", app.Name)
 			// Set app status to Failed and continue with other apps
-			if workbench.SetAppStatusFailed(uid) {
+			errorMessage := fmt.Sprintf("Failed to initialize job: %s", err.Error())
+			if workbench.SetAppStatusFailed(uid, errorMessage) {
 				if err := r.Status().Update(ctx, &workbench); err != nil {
 					log.V(1).Error(err, "Unable to update app status to Failed", "app", app.Name)
 				}
@@ -276,14 +277,6 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			continue
 		}
 
-		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
-		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob)
-		if statusUpdated {
-			if err := r.Status().Update(ctx, &workbench); err != nil {
-				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
-			}
-		}
-
 		// TODO: move that check to an admission webhook.
 		if job.Name != foundJob.Name {
 			err := fmt.Errorf("One simply cannot change the application name: %s != %s", job.Name, foundJob.Name)
@@ -301,6 +294,17 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			if err2 != nil {
 				log.V(1).Error(err2, "Unable to update the job", "job", job.Name)
 				return ctrl.Result{}, err2
+			}
+		}
+
+		// Get pod health message for this job
+		message := r.updateAppPodHealth(ctx, &workbench, *foundJob)
+
+		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
+		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob, message)
+		if statusUpdated {
+			if err := r.Status().Update(ctx, &workbench); err != nil {
+				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
 			}
 		}
 	}
@@ -322,6 +326,34 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.V(1).Info("Extra job found, removing", "job", job.Name)
 		if err := r.deleteJob(ctx, &job); err != nil {
 			return ctrl.Result{}, err
+		}
+	}
+
+	// Clean up orphaned status entries for apps that were removed from spec
+	if workbench.CleanOrphanedAppStatuses() {
+		log.V(1).Info("Cleaned up orphaned app status entries")
+		if err := r.Status().Update(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to update WorkbenchStatus after cleanup")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// ---------- OBSERVED GENERATION ---------------
+	if workbench.UpdateObservedGeneration() {
+		log.V(1).Info("Updated observed generation", "generation", workbench.Status.ObservedGeneration)
+		if err := r.Status().Update(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to update observed generation in WorkbenchStatus")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Requeue if any app is in a transitional state to pick up pod status changes.
+	for _, appStatus := range workbench.Status.Apps {
+		switch appStatus.Status {
+		case defaultv1alpha1.WorkbenchStatusAppStatusProgressing,
+			defaultv1alpha1.WorkbenchStatusAppStatusStopping,
+			defaultv1alpha1.WorkbenchStatusAppStatusKilling:
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 		}
 	}
 
@@ -614,7 +646,14 @@ func (r *WorkbenchReconciler) determineContainerHealth(containerStatus *corev1.C
 		return health
 	}
 
-	// Check for recent restarts (last 5 minutes)
+	// Ready takes priority - if container is running and ready, it's healthy
+	if containerStatus.Ready {
+		health.Status = defaultv1alpha1.ServerPodStatusReady
+		health.Message = "Container is ready"
+		return health
+	}
+
+	// Not ready - check for recent restarts
 	if containerStatus.RestartCount > 0 {
 		startTime := containerStatus.State.Running.StartedAt.Time
 		if time.Since(startTime) < 5*time.Minute {
@@ -624,19 +663,13 @@ func (r *WorkbenchReconciler) determineContainerHealth(containerStatus *corev1.C
 		}
 	}
 
-	// Check probe results
-	if containerStatus.Ready {
-		health.Status = defaultv1alpha1.ServerPodStatusReady
-		health.Message = "Container is ready"
+	// Running but not ready
+	if containerStatus.RestartCount == 0 && time.Since(containerStatus.State.Running.StartedAt.Time) < 2*time.Minute {
+		health.Status = defaultv1alpha1.ServerPodStatusStarting
+		health.Message = "Container starting up"
 	} else {
-		// Container running but not ready - could be starting up or failing
-		if containerStatus.RestartCount == 0 && time.Since(containerStatus.State.Running.StartedAt.Time) < 2*time.Minute {
-			health.Status = defaultv1alpha1.ServerPodStatusStarting
-			health.Message = "Container starting up"
-		} else {
-			health.Status = defaultv1alpha1.ServerPodStatusFailing
-			health.Message = "Readiness probe failing"
-		}
+		health.Status = defaultv1alpha1.ServerPodStatusFailing
+		health.Message = "Readiness probe failing"
 	}
 
 	return health
@@ -660,6 +693,129 @@ func (r *WorkbenchReconciler) setServerPodHealth(workbench *defaultv1alpha1.Work
 	}
 
 	return changed
+}
+
+// updateAppPodHealth monitors the app pod and returns its status message
+func (r *WorkbenchReconciler) updateAppPodHealth(
+	ctx context.Context,
+	workbench *defaultv1alpha1.Workbench,
+	job batchv1.Job,
+) string {
+	log := log.FromContext(ctx)
+
+	// If job is suspended but still has active pods, the pod is being terminated
+	if job.Spec.Suspend != nil && *job.Spec.Suspend && job.Status.Active >= 1 {
+		return "Pod is terminating"
+	}
+
+	// If job is no longer active, derive message from job status
+	if job.Status.Active == 0 {
+		// Suspended jobs were stopped/killed by the user
+		if job.Spec.Suspend != nil && *job.Spec.Suspend {
+			return "Job completed"
+		}
+		// Job finished successfully
+		if job.Status.Succeeded >= 1 {
+			return "Job completed"
+		}
+		// Job has failed pods
+		if job.Status.Failed >= 1 {
+			return "Job failed"
+		}
+		// Job is not suspended and has no succeeded/failed pods — starting up
+		if job.Spec.Suspend == nil || !*job.Spec.Suspend {
+			return "Job starting"
+		}
+		return "Job inactive"
+	}
+
+	// Find pods for this job using the standard job-name label
+	podList := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(workbench.Namespace),
+		client.MatchingLabels{
+			"batch.kubernetes.io/job-name": job.Name,
+		},
+	}
+
+	if err := r.List(ctx, podList, listOpts...); err != nil {
+		log.V(1).Error(err, "Failed to list pods for job", "job", job.Name)
+		return "Failed to list pods"
+	}
+
+	// Find most recent pod
+	var latestPod *corev1.Pod
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if latestPod == nil || pod.CreationTimestamp.After(latestPod.CreationTimestamp.Time) {
+			latestPod = pod
+		}
+	}
+
+	if latestPod == nil {
+		return "No pods found"
+	}
+
+	// Check if pod is terminating
+	if latestPod.DeletionTimestamp != nil {
+		return "Pod is terminating"
+	}
+
+	// Find the primary app container status (not init containers)
+	if len(latestPod.Status.ContainerStatuses) == 0 {
+		return "Container status not available"
+	}
+
+	// Use the first container status (the app container)
+	containerStatus := &latestPod.Status.ContainerStatuses[0]
+
+	return r.determineAppContainerMessage(containerStatus)
+}
+
+// determineAppContainerMessage extracts a message from container status
+func (r *WorkbenchReconciler) determineAppContainerMessage(containerStatus *corev1.ContainerStatus) string {
+	// Check container state
+	if containerStatus.State.Waiting != nil {
+		message := fmt.Sprintf("Waiting: %s", containerStatus.State.Waiting.Reason)
+		if containerStatus.State.Waiting.Message != "" {
+			message = fmt.Sprintf("Waiting: %s - %s",
+				containerStatus.State.Waiting.Reason,
+				containerStatus.State.Waiting.Message)
+		}
+		return message
+	}
+
+	if containerStatus.State.Terminated != nil {
+		message := fmt.Sprintf("Terminated: %s", containerStatus.State.Terminated.Reason)
+		if containerStatus.State.Terminated.Message != "" {
+			message = fmt.Sprintf("Terminated with exit code %d: %s - %s",
+				containerStatus.State.Terminated.ExitCode,
+				containerStatus.State.Terminated.Reason,
+				containerStatus.State.Terminated.Message)
+		} else {
+			message = fmt.Sprintf("Terminated with exit code %d: %s",
+				containerStatus.State.Terminated.ExitCode,
+				containerStatus.State.Terminated.Reason)
+		}
+		return message
+	}
+
+	// Container is running
+	if containerStatus.State.Running == nil {
+		return "Container state unknown"
+	}
+
+	// Check if container is ready
+	if containerStatus.Ready {
+		return "Container is ready"
+	}
+
+	// Container running but not ready
+	if containerStatus.RestartCount == 0 && time.Since(containerStatus.State.Running.StartedAt.Time) < 2*time.Minute {
+		return "Container starting up"
+	}
+
+	return "Readiness probe failing"
 }
 
 // SetupWithManager sets up the controller with the Manager.

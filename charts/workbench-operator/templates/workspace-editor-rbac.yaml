@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "workbench-operator.fullname" . }}-workspace-editor-role
+  labels:
+  {{- include "workbench-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - default.chorus-tre.ch
+  resources:
+  - workspaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

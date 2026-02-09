@@ -227,8 +227,31 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		})
 	}
 
+	// Add clipboard configuration
+	clipboardDirection := string(workbench.Spec.Server.Clipboard)
+	if clipboardDirection == "" {
+		clipboardDirection = "disabled"
+	}
+	serverContainer.Env = append(serverContainer.Env, corev1.EnvVar{
+		Name:  "XPRA_CLIPBOARD_DIRECTION",
+		Value: clipboardDirection,
+	})
+
+	// Apply resource requirements: CRD spec takes precedence over operator defaults
+	if workbench.Spec.Server.Resources != nil {
+		serverContainer.Resources = *workbench.Spec.Server.Resources
+	} else if config.WorkbenchDefaultResources != nil {
+		serverContainer.Resources = *config.WorkbenchDefaultResources
+	}
+
 	deployment.Spec.Template.Spec.InitContainers = []corev1.Container{sidecarContainer}
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{serverContainer}
+
+	// Timeout for the deployment to become ready (covers image pull, scheduling, etc.)
+	if config.WorkbenchStartupTimeout > 0 {
+		progressDeadline := int32(config.WorkbenchStartupTimeout)
+		deployment.Spec.ProgressDeadlineSeconds = &progressDeadline
+	}
 
 	return deployment
 }
