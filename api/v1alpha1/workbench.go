@@ -130,9 +130,15 @@ func (wb *Workbench) UpdateStatusFromJob(uid string, job batchv1.Job, message st
 	// Determine the final message to use
 	finalMessage := message
 	// If status is Failed and new message is generic "Job failed",
-	// preserve the previous detailed message if it exists
+	// preserve the previous detailed message if it exists.
+	// Do NOT preserve generic transitional messages (e.g. "Job starting").
 	if status == WorkbenchStatusAppStatusFailed && message == "Job failed" && app.Message != "" && app.Message != "Job failed" {
-		finalMessage = app.Message
+		switch app.Message {
+		case "Job starting", "Job inactive", "Job completed", "No pods found", "Container status not available":
+			// These are generic/transitional — don't preserve them
+		default:
+			finalMessage = app.Message
+		}
 	}
 
 	// Save it back if status or message changed
