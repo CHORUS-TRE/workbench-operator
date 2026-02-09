@@ -748,6 +748,15 @@ func (r *WorkbenchReconciler) updateAppPodHealth(
 
 	// Find the primary app container status (not init containers)
 	if len(latestPod.Status.ContainerStatuses) == 0 {
+		// Check pod conditions for scheduling issues
+		for _, condition := range latestPod.Status.Conditions {
+			if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
+				if condition.Message != "" {
+					return fmt.Sprintf("Scheduling: %s - %s", condition.Reason, condition.Message)
+				}
+				return fmt.Sprintf("Scheduling: %s", condition.Reason)
+			}
+		}
 		return "Container status not available"
 	}
 
