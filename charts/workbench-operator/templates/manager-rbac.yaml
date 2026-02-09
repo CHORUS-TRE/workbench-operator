@@ -132,6 +132,34 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - default.chorus-tre.ch
+  resources:
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - default.chorus-tre.ch
+  resources:
+  - workspaces/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - cilium.io
+  resources:
+  - ciliumnetworkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
