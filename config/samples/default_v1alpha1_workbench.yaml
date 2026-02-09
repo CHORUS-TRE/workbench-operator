@@ -16,10 +16,6 @@ spec:
   storage:
     s3: true
     nfs: true
-  networkPolicy:
-    allowInternet: false
-    allowedTLDs:
-    - deb.debian.org
   apps:
     benchmark:
       name: benchmark
