@@ -68,6 +68,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			fmt.Sprintf("Invalid AllowedFQDNs entry: %s", err.Error()),
 		)
 
+		workspace.Status.ObservedGeneration = workspace.Generation
 		return ctrl.Result{}, r.Status().Update(ctx, &workspace)
 	}
 
@@ -90,6 +91,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				"CiliumNetworkPolicy CRD not found — network policies cannot be enforced",
 			)
 
+			workspace.Status.ObservedGeneration = workspace.Generation
 			return ctrl.Result{}, r.Status().Update(ctx, &workspace)
 		}
 
@@ -102,6 +104,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
 		})
 
+		workspace.Status.ObservedGeneration = workspace.Generation
 		if statusErr := r.Status().Update(ctx, &workspace); statusErr != nil {
 			log.Error(statusErr, "Unable to update workspace status after reconcile error")
 		}

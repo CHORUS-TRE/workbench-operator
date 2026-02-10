@@ -12,7 +12,10 @@ import (
 func workspaceManifest(namespace, name string, airgapped bool, allowedFQDNs []string) io.Reader {
 	fqdnJSON := "[]"
 	if len(allowedFQDNs) > 0 {
-		b, _ := json.Marshal(allowedFQDNs)
+		b, err := json.Marshal(allowedFQDNs)
+		if err != nil {
+			panic(fmt.Sprintf("failed to marshal allowedFQDNs: %v", err))
+		}
 		fqdnJSON = string(b)
 	}
 
