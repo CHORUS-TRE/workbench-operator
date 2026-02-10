@@ -62,6 +62,7 @@ spec:
                   type: string
                 maxItems: 64
                 type: array
+                x-kubernetes-list-type: set
             required:
             - airgapped
             type: object

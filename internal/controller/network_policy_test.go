@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,5 +132,64 @@ var _ = Describe("validateFQDNs", func() {
 	It("accepts nil", func() {
 		err := validateFQDNs(nil)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects FQDN exceeding total length limit (253 chars)", func() {
+		// Create a FQDN with 254 characters (exceeds max)
+		longFQDN := strings.Repeat("a", 240) + ".example.com" // 240 + 1 + 11 + 1 + 3 = 256 chars
+		err := validateFQDNs([]string{longFQDN})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exceeds maximum length of 253"))
+	})
+
+	It("accepts FQDN at exactly 253 chars", func() {
+		// Create a FQDN with exactly 253 characters
+		// Use labels of 63 chars each: 63 + 1 + 63 + 1 + 63 + 1 + 61 = 253
+		label63 := strings.Repeat("a", 63)
+		label61 := strings.Repeat("b", 61)
+		fqdn253 := label63 + "." + label63 + "." + label63 + "." + label61
+		Expect(len(fqdn253)).To(Equal(253))
+		err := validateFQDNs([]string{fqdn253})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects FQDN with label exceeding 63 chars", func() {
+		// Create a label with 64 characters (exceeds max)
+		longLabel := strings.Repeat("x", 64)
+		fqdn := longLabel + ".example.com"
+		err := validateFQDNs([]string{fqdn})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
+	})
+
+	It("accepts FQDN with label at exactly 63 chars", func() {
+		// Create a label with exactly 63 characters
+		label63 := strings.Repeat("a", 63)
+		fqdn := label63 + ".example.com"
+		err := validateFQDNs([]string{fqdn})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects wildcard FQDN with label exceeding 63 chars", func() {
+		// Wildcard should not count toward label length, but the domain after it should be validated
+		longLabel := strings.Repeat("y", 64)
+		fqdn := "*." + longLabel + ".example.com"
+		err := validateFQDNs([]string{fqdn})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
+	})
+
+	It("accepts wildcard FQDN with valid label lengths", func() {
+		label63 := strings.Repeat("a", 63)
+		fqdn := "*." + label63 + ".com"
+		err := validateFQDNs([]string{fqdn})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects multiple FQDNs when one exceeds label length", func() {
+		longLabel := strings.Repeat("z", 64)
+		err := validateFQDNs([]string{"valid.example.com", longLabel + ".bad.com", "another.valid.com"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
 	})
 })
