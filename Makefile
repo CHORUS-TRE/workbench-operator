@@ -3,7 +3,7 @@ IMG ?= controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # Pinned to 1.32 because cert-manager v1.16.2 (used in e2e tests) only supports Kubernetes <= 1.32.
 # See https://cert-manager.io/docs/releases/ for the compatibility matrix.
-ENVTEST_K8S_VERSION = 1.32.1
+ENVTEST_K8S_VERSION = 1.32.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
