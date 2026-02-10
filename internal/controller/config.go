@@ -35,7 +35,7 @@ type Config struct {
 	ApplicationPriorityClassName string
 	// WorkbenchStartupTimeout is the timeout in seconds for the xpra server deployment to become ready
 	WorkbenchStartupTimeout int
-	// ApplicationStartupTimeout is the timeout in seconds for app jobs to start (covers image pull, init, etc.)
+	// ApplicationStartupTimeout is the timeout in seconds for app jobs to become ready (covers image pull, init, scheduling). Once running, no timeout applies.
 	ApplicationStartupTimeout int
 	// WorkbenchDefaultResources is the default resource requirements for the xpra server container.
 	// When nil, no resources are set (current behavior).

@@ -88,7 +88,7 @@ func main() {
 	flag.StringVar(&workbenchPriorityClassName, "workbench-priority-class-name", "", "Priority class name to set on Workbench pods")
 	flag.StringVar(&applicationPriorityClassName, "application-priority-class-name", "", "Priority class name to set on Application pods")
 	flag.IntVar(&workbenchStartupTimeout, "workbench-startup-timeout", 600, "Timeout in seconds for the xpra server deployment to become ready")
-	flag.IntVar(&applicationStartupTimeout, "application-startup-timeout", 600, "Timeout in seconds for app jobs to start (covers image pull, init, etc.)")
+	flag.IntVar(&applicationStartupTimeout, "application-startup-timeout", 600, "Timeout in seconds for app jobs to become ready (covers image pull, init, scheduling). Once running, no timeout applies.")
 	flag.StringVar(&workbenchCPULimit, "workbench-cpu-limit", "", "Default CPU limit for the workbench server container (e.g. 1000m)")
 	flag.StringVar(&workbenchMemoryLimit, "workbench-memory-limit", "", "Default memory limit for the workbench server container (e.g. 512Mi)")
 	flag.StringVar(&workbenchCPURequest, "workbench-cpu-request", "", "Default CPU request for the workbench server container (e.g. 100m)")

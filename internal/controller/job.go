@@ -236,12 +236,6 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	oneDay := int32(24 * 3600)
 	job.Spec.TTLSecondsAfterFinished = &oneDay
 
-	// Timeout for the job to start and run (covers image pull, init container, etc.)
-	if config.ApplicationStartupTimeout > 0 {
-		activeDeadline := int64(config.ApplicationStartupTimeout)
-		job.Spec.ActiveDeadlineSeconds = &activeDeadline
-	}
-
 	// Service account is an alternative to the image Pull Secrets
 	serviceAccountName := workbench.Spec.ServiceAccount
 	if serviceAccountName != "" {
