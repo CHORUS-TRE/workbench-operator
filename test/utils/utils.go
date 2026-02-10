@@ -87,6 +87,19 @@ func InstallCertManager() error {
 	)
 
 	_, err := Run(cmd)
+	if err != nil {
+		// Dump diagnostic info to help debug webhook startup failures.
+		for _, args := range [][]string{
+			{"get", "pods", "-n", "cert-manager", "-o", "wide"},
+			{"describe", "deployment", "cert-manager-webhook", "-n", "cert-manager"},
+			{"get", "events", "-n", "cert-manager", "--sort-by=.lastTimestamp"},
+		} {
+			diag := exec.Command("kubectl", args...)
+			if out, diagErr := Run(diag); diagErr == nil {
+				fmt.Fprintf(GinkgoWriter, "--- kubectl %s ---\n%s\n", args[0]+" "+args[1], string(out))
+			}
+		}
+	}
 	return err
 }
 
