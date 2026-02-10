@@ -14,6 +14,9 @@ const (
 	prometheusOperatorURL     = "https://github.com/prometheus-operator/prometheus-operator/" +
 		"releases/download/%s/bundle.yaml"
 
+	// cert-manager v1.16.2 only supports Kubernetes <= 1.32.
+	// The e2e Kind cluster version must match.
+	// See https://cert-manager.io/docs/releases/ for the compatibility matrix.
 	certmanagerVersion = "v1.16.2"
 	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
 )
