@@ -320,25 +320,20 @@ colima delete -f
 
 ## Running tests
 
-### Unit tests (envtest)
+| Target | What it runs | Cluster needed? |
+|---|---|---|
+| `make test` | Controller tests via [envtest](https://book.kubebuilder.io/reference/envtest) (in-memory API server) | No |
+| `make test-e2e` | End-to-end tests against a live cluster (Colima, Kind, …) | Yes |
+| `make lint` | `golangci-lint` static analysis | No |
 
 ```bash
+# Unit / integration tests (no cluster)
 make test
-```
 
-This runs all controller tests against an in-memory API server (envtest). No cluster required.
-
-### End-to-end tests
-
-E2e tests run against a real cluster (e.g., your Colima cluster or CI Kind cluster):
-
-```bash
+# End-to-end (requires a running cluster in kubeconfig)
 make test-e2e
-```
 
-### Lint
-
-```bash
+# Lint
 make lint
 ```
 
