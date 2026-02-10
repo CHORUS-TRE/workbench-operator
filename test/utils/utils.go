@@ -13,12 +13,6 @@ const (
 	prometheusOperatorVersion = "v0.78.2"
 	prometheusOperatorURL     = "https://github.com/prometheus-operator/prometheus-operator/" +
 		"releases/download/%s/bundle.yaml"
-
-	// cert-manager v1.16.2 only supports Kubernetes <= 1.32.
-	// The e2e Kind cluster version must match.
-	// See https://cert-manager.io/docs/releases/ for the compatibility matrix.
-	certmanagerVersion = "v1.16.2"
-	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
 )
 
 func warnError(err error) {
@@ -60,47 +54,6 @@ func UninstallPrometheusOperator() {
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
-}
-
-// UninstallCertManager uninstalls the cert manager
-func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// InstallCertManager installs the cert manager bundle.
-func InstallCertManager() error {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "apply", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		return err
-	}
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
-
-	_, err := Run(cmd)
-	if err != nil {
-		// Dump diagnostic info to help debug webhook startup failures.
-		for _, args := range [][]string{
-			{"get", "pods", "-n", "cert-manager", "-o", "wide"},
-			{"describe", "deployment", "cert-manager-webhook", "-n", "cert-manager"},
-			{"get", "events", "-n", "cert-manager", "--sort-by=.lastTimestamp"},
-		} {
-			diag := exec.Command("kubectl", args...)
-			if out, diagErr := Run(diag); diagErr == nil {
-				fmt.Fprintf(GinkgoWriter, "--- kubectl %s ---\n%s\n", args[0]+" "+args[1], string(out))
-			}
-		}
-	}
-	return err
 }
 
 // LoadImageToKindCluster loads a local docker image to the kind cluster

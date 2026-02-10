@@ -30,23 +30,23 @@ func validateFQDNs(entries []string) error {
 		if trimmed == "" {
 			return fmt.Errorf("empty FQDN entry")
 		}
-		
+
 		// Check total length (RFC 1035: max 253 octets)
 		if len(trimmed) > maxFQDNLength {
 			return fmt.Errorf("FQDN entry exceeds maximum length of %d characters: %q (length: %d)", maxFQDNLength, trimmed, len(trimmed))
 		}
-		
+
 		if !fqdnPattern.MatchString(trimmed) {
 			return fmt.Errorf("invalid FQDN entry: %q", trimmed)
 		}
-		
+
 		// Check individual label lengths (RFC 1035: max 63 octets per label)
 		// Strip wildcard prefix if present for label validation
 		fqdnToCheck := trimmed
 		if strings.HasPrefix(trimmed, "*.") {
 			fqdnToCheck = trimmed[2:]
 		}
-		
+
 		labels := strings.Split(fqdnToCheck, ".")
 		for _, label := range labels {
 			if len(label) > maxDNSLabelLength {
