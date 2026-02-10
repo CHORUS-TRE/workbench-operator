@@ -93,6 +93,16 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ml := es["matchLabels"].(map[string]any)
 		Expect(ml).To(BeEmpty())
 	})
+
+	It("panics when called with invalid FQDNs (programming error)", func() {
+		ws := baseWorkspace()
+		ws.Spec.Airgapped = false
+		ws.Spec.AllowedFQDNs = []string{"invalid domain with spaces"}
+
+		Expect(func() {
+			buildNetworkPolicy(ws)
+		}).To(Panic())
+	})
 })
 
 var _ = Describe("validateFQDNs", func() {

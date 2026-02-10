@@ -14,17 +14,44 @@ import (
 // DNS labels separated by dots. Matches "example.com", "*.corp.internal", etc.
 var fqdnPattern = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$`)
 
+const (
+	// RFC 1035: DNS labels must not exceed 63 octets
+	maxDNSLabelLength = 63
+	// RFC 1035: Full domain name must not exceed 253 octets
+	maxFQDNLength = 253
+)
+
 // validateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
 // or wildcard pattern. Returns nil on success or an error describing the first
-// invalid entry.
+// invalid entry. Enforces RFC 1035 limits: max 63 chars per label, max 253 chars total.
 func validateFQDNs(entries []string) error {
 	for _, entry := range entries {
 		trimmed := strings.TrimSpace(entry)
 		if trimmed == "" {
 			return fmt.Errorf("empty FQDN entry")
 		}
+		
+		// Check total length (RFC 1035: max 253 octets)
+		if len(trimmed) > maxFQDNLength {
+			return fmt.Errorf("FQDN entry exceeds maximum length of %d characters: %q (length: %d)", maxFQDNLength, trimmed, len(trimmed))
+		}
+		
 		if !fqdnPattern.MatchString(trimmed) {
 			return fmt.Errorf("invalid FQDN entry: %q", trimmed)
+		}
+		
+		// Check individual label lengths (RFC 1035: max 63 octets per label)
+		// Strip wildcard prefix if present for label validation
+		fqdnToCheck := trimmed
+		if strings.HasPrefix(trimmed, "*.") {
+			fqdnToCheck = trimmed[2:]
+		}
+		
+		labels := strings.Split(fqdnToCheck, ".")
+		for _, label := range labels {
+			if len(label) > maxDNSLabelLength {
+				return fmt.Errorf("FQDN entry %q contains label exceeding maximum length of %d characters: %q (length: %d)", trimmed, maxDNSLabelLength, label, len(label))
+			}
 		}
 	}
 	return nil
@@ -38,7 +65,14 @@ func validateFQDNs(entries []string) error {
 //   - Airgapped=true            → DNS + intra-namespace only
 //   - Airgapped=false + FQDNs   → DNS + intra-namespace + FQDN allowlist
 //   - Airgapped=false + no FQDNs → DNS + intra-namespace + full internet
+//
+// IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
+// Panics if invalid FQDNs are detected (programming error).
 func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) *unstructured.Unstructured {
+	// Defensive check: FQDNs must be validated before calling this function
+	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
+		panic(fmt.Sprintf("buildNetworkPolicy called with invalid FQDNs (programming error): %v", err))
+	}
 	labels := map[string]any{
 		"workspace": workspace.Name,
 	}
@@ -128,33 +162,36 @@ func httpPortRules() []map[string]any {
 	}
 }
 
+// toFQDNSelectors converts validated FQDN entries into Cilium toFQDNs selectors.
+// Assumes entries have been pre-validated via validateFQDNs (no trimming needed).
+// Deduplicates entries and generates both exact match and wildcard patterns.
 func toFQDNSelectors(entries []string) []map[string]any {
 	seen := map[string]struct{}{}
 	var selectors []map[string]any
 
 	for _, entry := range entries {
-		trimmed := strings.TrimSpace(entry)
-		if trimmed == "" {
+		// No trimming - entries are expected to be pre-validated
+		if entry == "" {
 			continue
 		}
 
-		if strings.Contains(trimmed, "*") {
-			key := "pattern:" + trimmed
+		if strings.Contains(entry, "*") {
+			key := "pattern:" + entry
 			if _, exists := seen[key]; exists {
 				continue
 			}
-			selectors = append(selectors, map[string]any{"matchPattern": trimmed})
+			selectors = append(selectors, map[string]any{"matchPattern": entry})
 			seen[key] = struct{}{}
 			continue
 		}
 
-		nameKey := "name:" + trimmed
+		nameKey := "name:" + entry
 		if _, exists := seen[nameKey]; !exists {
-			selectors = append(selectors, map[string]any{"matchName": trimmed})
+			selectors = append(selectors, map[string]any{"matchName": entry})
 			seen[nameKey] = struct{}{}
 		}
 
-		pattern := fmt.Sprintf("*.%s", trimmed)
+		pattern := fmt.Sprintf("*.%s", entry)
 		patternKey := "pattern:" + pattern
 		if _, exists := seen[patternKey]; !exists {
 			selectors = append(selectors, map[string]any{"matchPattern": pattern})
