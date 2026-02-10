@@ -285,19 +285,43 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Get pod health message for this job
 		message := r.updateAppPodHealth(ctx, &workbench, *foundJob)
 
-		// Check startup timeout: if the job has been in a non-running state
-		// for longer than the configured timeout, delete it and report failure.
-		appStatus := workbench.Status.Apps[uid]
+		// Track continuous non-ready time via annotation.
+		const notReadySinceAnnotation = "chorus-tre.ch/not-ready-since"
+		isReady := foundJob.Status.Ready != nil && *foundJob.Status.Ready >= 1
 		isSuspended := foundJob.Spec.Suspend != nil && *foundJob.Spec.Suspend
-		if r.Config.ApplicationStartupTimeout > 0 &&
-			appStatus.Status != defaultv1alpha1.WorkbenchStatusAppStatusRunning &&
-			appStatus.Status != defaultv1alpha1.WorkbenchStatusAppStatusFailed &&
-			!isSuspended {
-			elapsed := time.Since(foundJob.CreationTimestamp.Time)
-			timeout := time.Duration(r.Config.ApplicationStartupTimeout) * time.Second
-			if elapsed > timeout {
-				message = fmt.Sprintf("Startup timeout: app did not become ready within %s (%s)", timeout, message)
-				r.deleteJob(ctx, foundJob)
+		annotationUpdated := false
+
+		if isReady {
+			// App is running — clear the non-ready tracker
+			if foundJob.Annotations != nil && foundJob.Annotations[notReadySinceAnnotation] != "" {
+				delete(foundJob.Annotations, notReadySinceAnnotation)
+				annotationUpdated = true
+			}
+		} else if !isSuspended {
+			// App is not ready and not suspended — ensure tracker is set
+			if foundJob.Annotations == nil || foundJob.Annotations[notReadySinceAnnotation] == "" {
+				if foundJob.Annotations == nil {
+					foundJob.Annotations = make(map[string]string)
+				}
+				foundJob.Annotations[notReadySinceAnnotation] = time.Now().UTC().Format(time.RFC3339)
+				annotationUpdated = true
+			}
+
+			// Check timeout
+			if r.Config.ApplicationStartupTimeout > 0 {
+				if notReadySince, err := time.Parse(time.RFC3339, foundJob.Annotations[notReadySinceAnnotation]); err == nil {
+					timeout := time.Duration(r.Config.ApplicationStartupTimeout) * time.Second
+					if time.Since(notReadySince) > timeout {
+						message = fmt.Sprintf("Startup timeout: app did not become ready within %s (%s)", timeout, message)
+						r.deleteJob(ctx, foundJob)
+					}
+				}
+			}
+		}
+
+		if annotationUpdated {
+			if err := r.Update(ctx, foundJob); err != nil {
+				log.V(1).Error(err, "Unable to update not-ready-since annotation", "job", foundJob.Name)
 			}
 		}
 
