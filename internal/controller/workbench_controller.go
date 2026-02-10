@@ -285,6 +285,22 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Get pod health message for this job
 		message := r.updateAppPodHealth(ctx, &workbench, *foundJob)
 
+		// Check startup timeout: if the job has been in a non-running state
+		// for longer than the configured timeout, delete it and report failure.
+		appStatus := workbench.Status.Apps[uid]
+		isSuspended := foundJob.Spec.Suspend != nil && *foundJob.Spec.Suspend
+		if r.Config.ApplicationStartupTimeout > 0 &&
+			appStatus.Status != defaultv1alpha1.WorkbenchStatusAppStatusRunning &&
+			appStatus.Status != defaultv1alpha1.WorkbenchStatusAppStatusFailed &&
+			!isSuspended {
+			elapsed := time.Since(foundJob.CreationTimestamp.Time)
+			timeout := time.Duration(r.Config.ApplicationStartupTimeout) * time.Second
+			if elapsed > timeout {
+				message = fmt.Sprintf("Startup timeout: app did not become ready within %s (%s)", timeout, message)
+				r.deleteJob(ctx, foundJob)
+			}
+		}
+
 		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
 		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob, message)
 		if statusUpdated {
