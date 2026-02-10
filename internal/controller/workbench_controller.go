@@ -703,8 +703,18 @@ func (r *WorkbenchReconciler) updateAppPodHealth(
 		if job.Status.Succeeded >= 1 {
 			return "Job completed"
 		}
-		// Job has failed pods
+		// Job has failed pods — check conditions for detail
 		if job.Status.Failed >= 1 {
+			for _, condition := range job.Status.Conditions {
+				if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
+					if condition.Message != "" {
+						return fmt.Sprintf("Job failed: %s", condition.Message)
+					}
+					if condition.Reason != "" {
+						return fmt.Sprintf("Job failed: %s", condition.Reason)
+					}
+				}
+			}
 			return "Job failed"
 		}
 		// Job is not suspended and has no succeeded/failed pods — starting up
