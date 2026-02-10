@@ -145,8 +145,10 @@ var _ = Describe("validateFQDNs", func() {
 	})
 
 	It("rejects FQDN exceeding total length limit (253 chars)", func() {
-		// Create a FQDN with 254 characters (exceeds max)
-		longFQDN := strings.Repeat("a", 240) + ".example.com" // 240 + 1 + 11 + 1 + 3 = 256 chars
+		// Build a FQDN with valid labels (each ≤63) but total length > 253
+		// 63 + 1 + 63 + 1 + 63 + 1 + 63 = 255 chars
+		longFQDN := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 63)
+		Expect(len(longFQDN)).To(Equal(255))
 		err := validateFQDNs([]string{longFQDN})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("exceeds maximum length of 253"))
