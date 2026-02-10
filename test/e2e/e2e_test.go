@@ -107,6 +107,16 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
+			By("restarting the controller-manager so it discovers the CiliumNetworkPolicy CRD")
+			cmd = exec.Command("kubectl", "rollout", "restart", "deployment",
+				"workbench-operator-controller-manager", "-n", namespace)
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+			cmd = exec.Command("kubectl", "rollout", "status", "deployment",
+				"workbench-operator-controller-manager", "-n", namespace, "--timeout=60s")
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
 			By("creating test namespace")
 			cmd = exec.Command("kubectl", "create", "ns", testNS)
 			_, _ = utils.Run(cmd)
