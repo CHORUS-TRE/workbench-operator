@@ -100,8 +100,22 @@ var _ = Describe("controller", Ordered, func() {
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
+			By("waiting for CiliumNetworkPolicy CRD to be fully established")
+			cmd = exec.Command("kubectl", "wait", "--for=condition=Established",
+				"crd/ciliumnetworkpolicies.cilium.io", "--timeout=60s")
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
 			By("deploying the controller-manager")
 			cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectimage))
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
+			By("disabling leader election for e2e (single replica, avoids ClusterIP timeout in DinD)")
+			cmd = exec.Command("kubectl", "patch", "deployment",
+				"workbench-operator-controller-manager", "-n", namespace,
+				"--type=json", "-p",
+				`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--leader-elect=false"}]`)
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
