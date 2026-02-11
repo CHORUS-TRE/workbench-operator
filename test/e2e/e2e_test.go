@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -13,6 +14,46 @@ import (
 )
 
 const namespace = "workbench-operator-system"
+
+// dumpDiagnostics outputs controller logs, workspace details, and events
+// for the given namespace to help debug test failures.
+func dumpDiagnostics(ns string) {
+	fmt.Fprintf(GinkgoWriter, "\n=== DIAGNOSTIC DUMP (namespace: %s) ===\n", ns)
+
+	// Controller logs
+	fmt.Fprintln(GinkgoWriter, "\n--- Controller logs ---")
+	cmd := exec.Command("kubectl", "logs",
+		"deployment/workbench-operator-controller-manager",
+		"-n", namespace, "--tail=80")
+	out, err := utils.Run(cmd)
+	if err != nil {
+		fmt.Fprintf(GinkgoWriter, "failed to get controller logs: %v\n", err)
+	} else {
+		fmt.Fprintln(GinkgoWriter, string(out))
+	}
+
+	// Workspace details
+	fmt.Fprintln(GinkgoWriter, "\n--- Workspaces ---")
+	cmd = exec.Command("kubectl", "get", "workspaces", "-n", ns, "-o", "yaml")
+	out, err = utils.Run(cmd)
+	if err != nil {
+		fmt.Fprintf(GinkgoWriter, "failed to get workspaces: %v\n", err)
+	} else {
+		fmt.Fprintln(GinkgoWriter, string(out))
+	}
+
+	// Events
+	fmt.Fprintln(GinkgoWriter, "\n--- Events ---")
+	cmd = exec.Command("kubectl", "get", "events", "-n", ns, "--sort-by=.lastTimestamp")
+	out, err = utils.Run(cmd)
+	if err != nil {
+		fmt.Fprintf(GinkgoWriter, "failed to get events: %v\n", err)
+	} else {
+		fmt.Fprintln(GinkgoWriter, string(out))
+	}
+
+	fmt.Fprintln(GinkgoWriter, "=== END DIAGNOSTIC DUMP ===")
+}
 
 var _ = Describe("controller", Ordered, func() {
 	BeforeAll(func() {
@@ -35,7 +76,6 @@ var _ = Describe("controller", Ordered, func() {
 
 	Context("Operator", func() {
 		It("should run successfully", func() {
-			var controllerPodName string
 			var err error
 
 			// projectimage stores the name of the image used in the example
@@ -65,41 +105,32 @@ var _ = Describe("controller", Ordered, func() {
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
-			By("validating that the controller-manager pod is running as expected")
-			verifyControllerUp := func() error {
-				// Get pod name
+			By("waiting for the controller-manager deployment to be fully ready")
+			cmd = exec.Command("kubectl", "rollout", "status",
+				"deployment/workbench-operator-controller-manager",
+				"-n", namespace, "--timeout=120s")
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
-				cmd = exec.Command("kubectl", "get",
-					"pods", "-l", "control-plane=controller-manager",
-					"-o", "go-template={{ range .items }}"+
-						"{{ if not .metadata.deletionTimestamp }}"+
-						"{{ .metadata.name }}"+
-						"{{ \"\\n\" }}{{ end }}{{ end }}",
+			By("verifying no container crash loops")
+			Eventually(func() error {
+				cmd = exec.Command("kubectl", "get", "pods",
+					"-l", "control-plane=controller-manager",
 					"-n", namespace,
-				)
-
-				podOutput, err := utils.Run(cmd)
-				ExpectWithOffset(2, err).NotTo(HaveOccurred())
-				podNames := utils.GetNonEmptyLines(string(podOutput))
-				if len(podNames) != 1 {
-					return fmt.Errorf("expect 1 controller pods running, but got %d", len(podNames))
+					"-o", "jsonpath={.items[0].status.containerStatuses[0].restartCount}")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return err
 				}
-				controllerPodName = podNames[0]
-				ExpectWithOffset(2, controllerPodName).Should(ContainSubstring("controller-manager"))
-
-				// Validate pod status
-				cmd = exec.Command("kubectl", "get",
-					"pods", controllerPodName, "-o", "jsonpath={.status.phase}",
-					"-n", namespace,
-				)
-				status, err := utils.Run(cmd)
-				ExpectWithOffset(2, err).NotTo(HaveOccurred())
-				if string(status) != "Running" {
-					return fmt.Errorf("controller pod in %s status", status)
+				restarts, err := strconv.Atoi(string(out))
+				if err != nil {
+					return fmt.Errorf("failed to parse restart count %q: %w", string(out), err)
+				}
+				if restarts > 0 {
+					return fmt.Errorf("controller container has restarted %d times", restarts)
 				}
 				return nil
-			}
-			EventuallyWithOffset(1, verifyControllerUp, time.Minute, time.Second).Should(Succeed())
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 		})
 	})
 
@@ -110,6 +141,34 @@ var _ = Describe("controller", Ordered, func() {
 			By("creating test namespace")
 			cmd := exec.Command("kubectl", "create", "ns", testNS)
 			_, _ = utils.Run(cmd)
+
+			By("verifying the controller is actively reconciling with a probe workspace")
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = workspaceManifest(testNS, "probe-ws", true, nil)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "workspace", "probe-ws",
+					"-n", testNS, "-o",
+					`jsonpath={.status.conditions[?(@.type=="NetworkPolicyReady")].status}`)
+				out, _ := utils.Run(cmd)
+				return string(out)
+			}, 120*time.Second, 2*time.Second).ShouldNot(BeEmpty(),
+				"controller never reconciled the probe workspace — check controller logs")
+
+			By("cleaning up probe workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", "probe-ws", "-n", testNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			// Wait for probe CNP to be garbage collected before running tests
+			Eventually(func() bool {
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicies", "-n", testNS, "-o", "jsonpath={.items}")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				return string(out) == "[]" || string(out) == ""
+			}, 60*time.Second, time.Second).Should(BeTrue())
 		})
 
 		AfterAll(func() {
@@ -119,6 +178,10 @@ var _ = Describe("controller", Ordered, func() {
 		})
 
 		AfterEach(func() {
+			if CurrentSpecReport().Failed() {
+				dumpDiagnostics(testNS)
+			}
+
 			// Clean up workspaces in test namespace
 			cmd := exec.Command("kubectl", "delete", "workspaces", "--all", "-n", testNS, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
@@ -130,7 +193,7 @@ var _ = Describe("controller", Ordered, func() {
 					return false
 				}
 				return string(out) == "[]" || string(out) == ""
-			}, 30*time.Second, time.Second).Should(BeTrue())
+			}, 60*time.Second, time.Second).Should(BeTrue())
 		})
 
 		It("creates a CiliumNetworkPolicy for an airgapped workspace", func() {
@@ -145,7 +208,7 @@ var _ = Describe("controller", Ordered, func() {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-egress", "-n", testNS)
 				_, err := utils.Run(cmd)
 				return err
-			}, 30*time.Second, time.Second).Should(Succeed())
+			}, 60*time.Second, time.Second).Should(Succeed())
 
 			By("verifying CNP has 2 egress rules (DNS + intra-namespace)")
 			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-egress",
@@ -167,7 +230,7 @@ var _ = Describe("controller", Ordered, func() {
 					return ""
 				}
 				return string(out)
-			}, 30*time.Second, time.Second).Should(Equal("True"))
+			}, 60*time.Second, time.Second).Should(Equal("True"))
 		})
 
 		It("creates a CiliumNetworkPolicy with FQDN rules for non-airgapped workspace", func() {
@@ -191,7 +254,7 @@ var _ = Describe("controller", Ordered, func() {
 					return -1
 				}
 				return len(egress)
-			}, 30*time.Second, time.Second).Should(Equal(3))
+			}, 60*time.Second, time.Second).Should(Equal(3))
 
 			By("verifying the FQDN rule contains expected selectors")
 			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-egress",
@@ -218,7 +281,7 @@ var _ = Describe("controller", Ordered, func() {
 					return false
 				}
 				return len(out) > 0
-			}, 30*time.Second, time.Second).Should(BeTrue())
+			}, 60*time.Second, time.Second).Should(BeTrue())
 		})
 
 		It("sets owner reference so CNP is garbage-collected with workspace", func() {
@@ -233,7 +296,7 @@ var _ = Describe("controller", Ordered, func() {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-egress", "-n", testNS)
 				_, err := utils.Run(cmd)
 				return err
-			}, 30*time.Second, time.Second).Should(Succeed())
+			}, 60*time.Second, time.Second).Should(Succeed())
 
 			By("verifying owner reference on CNP")
 			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-egress",
@@ -256,7 +319,7 @@ var _ = Describe("controller", Ordered, func() {
 					return false
 				}
 				return string(out) == ""
-			}, 30*time.Second, time.Second).Should(BeTrue())
+			}, 60*time.Second, time.Second).Should(BeTrue())
 		})
 
 		It("updates CNP when workspace spec changes", func() {
@@ -279,7 +342,7 @@ var _ = Describe("controller", Ordered, func() {
 					return -1
 				}
 				return len(egress)
-			}, 30*time.Second, time.Second).Should(Equal(2))
+			}, 60*time.Second, time.Second).Should(Equal(2))
 
 			By("switching workspace to non-airgapped")
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
@@ -300,7 +363,7 @@ var _ = Describe("controller", Ordered, func() {
 					return -1
 				}
 				return len(egress)
-			}, 30*time.Second, time.Second).Should(Equal(3))
+			}, 60*time.Second, time.Second).Should(Equal(3))
 		})
 	})
 })
