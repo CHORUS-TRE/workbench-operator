@@ -208,8 +208,21 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Kind:    "CiliumNetworkPolicy",
 	})
 
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&defaultv1alpha1.Workspace{}).
-		Owns(cnp).
-		Complete(r)
+	builder := ctrl.NewControllerManagedBy(mgr).
+		For(&defaultv1alpha1.Workspace{})
+
+	// Only add Owns watch if the CiliumNetworkPolicy CRD is installed.
+	// This allows the operator to start without Cilium; the reconciler
+	// handles the missing-CRD case gracefully at reconciliation time.
+	// After Cilium is installed, a controller restart picks up the watch.
+	if _, err := mgr.GetRESTMapper().RESTMapping(
+		schema.GroupKind{Group: "cilium.io", Kind: "CiliumNetworkPolicy"},
+		"v2",
+	); err == nil {
+		builder = builder.Owns(cnp)
+	} else {
+		log.Log.Info("CiliumNetworkPolicy CRD not found, skipping Owns watch (network policies will still be reconciled)")
+	}
+
+	return builder.Complete(r)
 }
