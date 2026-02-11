@@ -55,6 +55,11 @@ var _ = Describe("controller", Ordered, func() {
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
+			By("installing the CiliumNetworkPolicy CRD (before deploy so the controller discovers it on first start)")
+			cmd = exec.Command("kubectl", "apply", "-f", "config/crd/thirdparty/cilium.io_ciliumnetworkpolicies.yaml")
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+
 			By("deploying the controller-manager")
 			cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectimage))
 			_, err = utils.Run(cmd)
@@ -102,23 +107,8 @@ var _ = Describe("controller", Ordered, func() {
 		const testNS = "netpol-test"
 
 		BeforeAll(func() {
-			By("installing the CiliumNetworkPolicy CRD")
-			cmd := exec.Command("kubectl", "apply", "-f", "config/crd/thirdparty/cilium.io_ciliumnetworkpolicies.yaml")
-			_, err := utils.Run(cmd)
-			ExpectWithOffset(1, err).NotTo(HaveOccurred())
-
-			By("restarting the controller-manager so it discovers the CiliumNetworkPolicy CRD")
-			cmd = exec.Command("kubectl", "rollout", "restart", "deployment",
-				"workbench-operator-controller-manager", "-n", namespace)
-			_, err = utils.Run(cmd)
-			ExpectWithOffset(1, err).NotTo(HaveOccurred())
-			cmd = exec.Command("kubectl", "rollout", "status", "deployment",
-				"workbench-operator-controller-manager", "-n", namespace, "--timeout=60s")
-			_, err = utils.Run(cmd)
-			ExpectWithOffset(1, err).NotTo(HaveOccurred())
-
 			By("creating test namespace")
-			cmd = exec.Command("kubectl", "create", "ns", testNS)
+			cmd := exec.Command("kubectl", "create", "ns", testNS)
 			_, _ = utils.Run(cmd)
 		})
 
