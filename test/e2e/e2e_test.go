@@ -111,11 +111,35 @@ var _ = Describe("controller", Ordered, func() {
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
-			By("disabling leader election for e2e (single replica, avoids ClusterIP timeout in DinD)")
+			// In DinD (Docker-in-Docker) CI environments, pods cannot reach the
+			// Kubernetes API server via its ClusterIP (10.96.0.1) because kube-proxy
+			// iptables rules don't function correctly. We work around this by:
+			// 1. Disabling leader election (single replica, avoids 5s ClusterIP timeout)
+			// 2. Overriding KUBERNETES_SERVICE_HOST/PORT to point directly at the API
+			//    server's pod IP, bypassing ClusterIP entirely.
+			By("getting API server endpoint for direct connectivity (bypasses broken ClusterIP in DinD)")
+			cmd = exec.Command("kubectl", "get", "endpoints", "kubernetes", "-n", "default",
+				"-o", `jsonpath={.subsets[0].addresses[0].ip}`)
+			apiHost, err := utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+			ExpectWithOffset(1, string(apiHost)).NotTo(BeEmpty(), "could not determine API server IP")
+
+			cmd = exec.Command("kubectl", "get", "endpoints", "kubernetes", "-n", "default",
+				"-o", `jsonpath={.subsets[0].ports[0].port}`)
+			apiPort, err := utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+			ExpectWithOffset(1, string(apiPort)).NotTo(BeEmpty(), "could not determine API server port")
+
+			By("patching controller: disable leader election + direct API server endpoint (DinD workaround)")
+			patch := fmt.Sprintf(
+				`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--leader-elect=false"},`+
+					`{"op":"add","path":"/spec/template/spec/containers/0/env","value":[`+
+					`{"name":"KUBERNETES_SERVICE_HOST","value":"%s"},`+
+					`{"name":"KUBERNETES_SERVICE_PORT","value":"%s"}]}]`,
+				string(apiHost), string(apiPort))
 			cmd = exec.Command("kubectl", "patch", "deployment",
 				"workbench-operator-controller-manager", "-n", namespace,
-				"--type=json", "-p",
-				`[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--leader-elect=false"}]`)
+				"--type=json", "-p", patch)
 			_, err = utils.Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
