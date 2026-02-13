@@ -195,6 +195,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	}
 
 	job.Labels = labels
+	job.Spec.Template.Labels = labels
 
 	var shmDir *corev1.Volume
 	if app.ShmSize != nil {

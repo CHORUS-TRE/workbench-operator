@@ -46,6 +46,8 @@ As a server is a `Deployment`, stopping it from the inside will _restart_ it.
 
 ## Getting Started
 
+> **Local development?** See [CONTRIBUTING.md](CONTRIBUTING.md) for a step-by-step guide using Colima + k3s on macOS.
+
 ### Prerequisites
 
 - go version v1.22.0+
@@ -134,7 +136,7 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/workbench-operator/<tag
 
 ## Contributing
 
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, testing, and day-to-day commands.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 

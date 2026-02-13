@@ -98,6 +98,18 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - cilium.io
+  resources:
+  - ciliumnetworkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - default.chorus-tre.ch
   resources:
   - workbenches
@@ -119,10 +131,19 @@ rules:
   - default.chorus-tre.ch
   resources:
   - workbenches/status
+  - workspaces/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - default.chorus-tre.ch
+  resources:
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - storage.k8s.io
   resources:
