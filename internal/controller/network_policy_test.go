@@ -73,7 +73,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 	})
 
-	It("allows full internet when not airgapped and no FQDNs specified", func() {
+	It("allows full internet on HTTP/HTTPS when not airgapped and no FQDNs specified", func() {
 		ws := baseWorkspace()
 		ws.Spec.Airgapped = false
 
@@ -85,6 +85,12 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 		allowInternetRule := egress[2]
 		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
+
+		toPorts := allowInternetRule["toPorts"].([]map[string]any)
+		Expect(toPorts).To(HaveLen(1))
+		ports := toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "80")))
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 	})
 
 	It("uses empty endpoint selector (all pods in namespace)", func() {

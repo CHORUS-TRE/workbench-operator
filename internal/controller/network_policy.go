@@ -119,9 +119,10 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 				"toPorts": httpPortRules(),
 			})
 		} else {
-			// No FQDNs specified and not airgapped → allow all internet
+			// No FQDNs specified and not airgapped → allow all internet on HTTP/HTTPS
 			egressRules = append(egressRules, map[string]any{
-				"toCIDR": []string{"0.0.0.0/0", "::/0"},
+				"toCIDR":  []string{"0.0.0.0/0", "::/0"},
+				"toPorts": httpPortRules(),
 			})
 		}
 	}
