@@ -69,7 +69,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		)
 
 		workspace.Status.ObservedGeneration = workspace.Generation
-		return ctrl.Result{}, r.Status().Update(ctx, &workspace)
+		if statusErr := r.Status().Update(ctx, &workspace); statusErr != nil {
+			log.Error(statusErr, "Unable to update workspace status after FQDN validation error")
+		}
+		// Permanent error: user must fix the spec; requeuing won't help.
+		return ctrl.Result{}, nil
 	}
 
 	// Reconcile the CiliumNetworkPolicy.
@@ -92,7 +96,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			)
 
 			workspace.Status.ObservedGeneration = workspace.Generation
-			return ctrl.Result{}, r.Status().Update(ctx, &workspace)
+			if statusErr := r.Status().Update(ctx, &workspace); statusErr != nil {
+				log.Error(statusErr, "Unable to update workspace status after Cilium CRD not found")
+			}
+			// Permanent error: Cilium must be installed; requeuing won't help.
+			return ctrl.Result{}, nil
 		}
 
 		log.Error(err, "Error reconciling network policy", "workspace", workspace.Name)
