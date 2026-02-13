@@ -162,20 +162,31 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 
 	updated := false
 
-	desiredJSON, err := json.Marshal(cnp.Object["spec"])
-	if err != nil {
-		return err
-	}
-	existingJSON, err := json.Marshal(existing.Object["spec"])
-	if err != nil {
-		return err
-	}
-	if string(desiredJSON) != string(existingJSON) {
-		var normalizedSpec any
-		if err := json.Unmarshal(desiredJSON, &normalizedSpec); err != nil {
-			return err
+	// Normalize both specs through a JSON round-trip so that type
+	// differences introduced by the API server (e.g. port 53 as float64
+	// vs string "53") don't cause false-positive diffs every reconcile.
+	normalizeViaJSON := func(v any) (any, error) {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
 		}
-		existing.Object["spec"] = normalizedSpec
+		var out any
+		if err := json.Unmarshal(b, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+
+	normalizedDesired, err := normalizeViaJSON(cnp.Object["spec"])
+	if err != nil {
+		return err
+	}
+	normalizedExisting, err := normalizeViaJSON(existing.Object["spec"])
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(normalizedDesired, normalizedExisting) {
+		existing.Object["spec"] = normalizedDesired
 		updated = true
 	}
 	if !reflect.DeepEqual(existing.GetLabels(), cnp.GetLabels()) {
