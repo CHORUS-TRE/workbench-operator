@@ -289,6 +289,70 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
+	Describe("Reconcile – workspace deletion / CNP garbage collection", func() {
+		It("CNP owner reference UID matches workspace so GC will clean it up", func() {
+			workspace := &defaultv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workspaceName,
+					Namespace: workspaceNamespace,
+				},
+				Spec: defaultv1alpha1.WorkspaceSpec{
+					Airgapped: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			// Re-read to get server-assigned UID
+			Expect(k8sClient.Get(ctx, namespacedName, workspace)).To(Succeed())
+			workspaceUID := workspace.UID
+
+			reconciler := newReconciler()
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify CNP exists and its owner reference UID matches the workspace
+			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			Expect(err).NotTo(HaveOccurred())
+
+			ownerRefs := cnp.GetOwnerReferences()
+			Expect(ownerRefs).To(HaveLen(1))
+			Expect(ownerRefs[0].UID).To(Equal(workspaceUID))
+			Expect(ownerRefs[0].Kind).To(Equal("Workspace"))
+			Expect(ownerRefs[0].Name).To(Equal(workspaceName))
+			Expect(*ownerRefs[0].Controller).To(BeTrue())
+			Expect(*ownerRefs[0].BlockOwnerDeletion).To(BeTrue())
+		})
+
+		It("reconciles gracefully after workspace is deleted", func() {
+			workspace := &defaultv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workspaceName,
+					Namespace: workspaceNamespace,
+				},
+				Spec: defaultv1alpha1.WorkspaceSpec{
+					Airgapped: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			reconciler := newReconciler()
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			// CNP should exist
+			_, err = getCNP(workspaceName+"-egress", workspaceNamespace)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Delete the workspace
+			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
+
+			// Reconcile again — should return cleanly (workspace not found)
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+		})
+	})
+
 	Describe("Reconcile – CNP update", func() {
 		It("updates CNP when workspace spec changes from airgapped to non-airgapped", func() {
 			workspace := &defaultv1alpha1.Workspace{
