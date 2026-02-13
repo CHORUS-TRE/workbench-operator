@@ -26,7 +26,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 	It("builds DNS + intra-namespace egress for airgapped workspace", func() {
 		ws := baseWorkspace()
 
-		cnp := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp).NotTo(BeNil())
 		Expect(cnp.GetName()).To(Equal("workspace-egress"))
 		Expect(cnp.GetNamespace()).To(Equal("workspace-ns"))
@@ -53,7 +54,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws.Spec.Airgapped = false
 		ws.Spec.AllowedFQDNs = []string{"example.com", "*.corp.internal"}
 
-		cnp := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws)
+		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(3))
@@ -75,7 +77,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws := baseWorkspace()
 		ws.Spec.Airgapped = false
 
-		cnp := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws)
+		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
 		Expect(egress).To(HaveLen(3))
@@ -86,7 +89,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 	It("uses empty endpoint selector (all pods in namespace)", func() {
 		ws := baseWorkspace()
-		cnp := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws)
+		Expect(err).NotTo(HaveOccurred())
 
 		spec := cnp.Object["spec"].(map[string]any)
 		es := spec["endpointSelector"].(map[string]any)
@@ -94,14 +98,14 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(ml).To(BeEmpty())
 	})
 
-	It("panics when called with invalid FQDNs (programming error)", func() {
+	It("returns an error when called with invalid FQDNs", func() {
 		ws := baseWorkspace()
 		ws.Spec.Airgapped = false
 		ws.Spec.AllowedFQDNs = []string{"invalid domain with spaces"}
 
-		Expect(func() {
-			buildNetworkPolicy(ws)
-		}).To(Panic())
+		_, err := buildNetworkPolicy(ws)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("invalid FQDNs"))
 	})
 })
 

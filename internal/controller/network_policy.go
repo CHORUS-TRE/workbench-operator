@@ -67,11 +67,11 @@ func validateFQDNs(entries []string) error {
 //   - Airgapped=false + no FQDNs → DNS + intra-namespace + full internet
 //
 // IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
-// Panics if invalid FQDNs are detected (programming error).
-func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) *unstructured.Unstructured {
+// Returns an error if invalid FQDNs are detected.
+func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unstructured, error) {
 	// Defensive check: FQDNs must be validated before calling this function
 	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
-		panic(fmt.Sprintf("buildNetworkPolicy called with invalid FQDNs (programming error): %v", err))
+		return nil, fmt.Errorf("buildNetworkPolicy called with invalid FQDNs: %w", err)
 	}
 	labels := map[string]any{
 		"workspace": workspace.Name,
@@ -143,7 +143,7 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) *unstructured.Unstr
 				"egress": egressRules,
 			},
 		},
-	}
+	}, nil
 }
 
 func httpPortRules() []map[string]any {

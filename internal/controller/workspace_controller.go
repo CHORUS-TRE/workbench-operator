@@ -136,7 +136,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // workspace. The CNP is owned by the Workspace so garbage collection handles
 // deletion automatically.
 func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
-	cnp := buildNetworkPolicy(*workspace)
+	cnp, err := buildNetworkPolicy(*workspace)
+	if err != nil {
+		return err
+	}
 
 	if err := controllerutil.SetControllerReference(workspace, cnp, r.Scheme); err != nil {
 		return err
