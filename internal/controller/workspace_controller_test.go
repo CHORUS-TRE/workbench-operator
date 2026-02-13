@@ -6,10 +6,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
@@ -400,6 +402,43 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(cnp.GetResourceVersion()).To(Equal(firstRV))
 		})
 	})
+
+	Describe("Reconcile – Cilium CRD not installed", func() {
+		It("sets NetworkPolicyReady=False with CiliumNotInstalled when CRD is missing", func() {
+			workspace := &defaultv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workspaceName,
+					Namespace: workspaceNamespace,
+				},
+				Spec: defaultv1alpha1.WorkspaceSpec{
+					Airgapped: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			// Use a client wrapper that rejects CiliumNetworkPolicy operations
+			// with a NoKindMatchError, simulating a cluster without Cilium.
+			reconciler := &WorkspaceReconciler{
+				Client:   &noCiliumClient{Client: k8sClient},
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify condition is set
+			updated := &defaultv1alpha1.Workspace{}
+			Expect(k8sClient.Get(ctx, namespacedName, updated)).To(Succeed())
+
+			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonCiliumNotInstalled))
+			Expect(cond.Message).To(ContainSubstring("CiliumNetworkPolicy CRD not installed"))
+		})
+	})
 })
 
 // findCondition returns the condition with the given type, or nil.
@@ -410,4 +449,36 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 		}
 	}
 	return nil
+}
+
+// noCiliumClient wraps a real client.Client but returns a NoKindMatchError for
+// any Get or Create call targeting the CiliumNetworkPolicy GVK, simulating a
+// cluster where the Cilium CRD is not installed.
+type noCiliumClient struct {
+	client.Client
+}
+
+var ciliumGK = schema.GroupKind{Group: "cilium.io", Kind: "CiliumNetworkPolicy"}
+
+func isCiliumObject(obj client.Object) bool {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return false
+	}
+	gvk := u.GroupVersionKind()
+	return gvk.Group == ciliumGK.Group && gvk.Kind == ciliumGK.Kind
+}
+
+func (c *noCiliumClient) Get(ctx context.Context, key types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
+	if isCiliumObject(obj) {
+		return &apimeta.NoKindMatchError{GroupKind: ciliumGK, SearchedVersions: []string{"v2"}}
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c *noCiliumClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if isCiliumObject(obj) {
+		return &apimeta.NoKindMatchError{GroupKind: ciliumGK, SearchedVersions: []string{"v2"}}
+	}
+	return c.Client.Create(ctx, obj, opts...)
 }
