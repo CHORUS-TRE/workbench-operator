@@ -130,7 +130,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
-	Describe("Reconcile – CNP creation (happy path)", func() {
+	Describe("Reconcile - CNP creation (happy path)", func() {
 		It("creates CNP and sets NetworkPolicyReady=True for airgapped workspace", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -261,7 +261,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
-	Describe("Reconcile – CNP owner reference", func() {
+	Describe("Reconcile - CNP owner reference", func() {
 		It("sets the workspace as owner of the CNP", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -289,7 +289,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
-	Describe("Reconcile – workspace deletion / CNP garbage collection", func() {
+	Describe("Reconcile - workspace deletion / CNP garbage collection", func() {
 		It("CNP owner reference UID matches workspace so GC will clean it up", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -353,7 +353,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
-	Describe("Reconcile – CNP update", func() {
+	Describe("Reconcile - CNP update", func() {
 		It("updates CNP when workspace spec changes from airgapped to non-airgapped", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -434,7 +434,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
-	Describe("Reconcile – idempotency", func() {
+	Describe("Reconcile - idempotency", func() {
 		It("does not update CNP when reconciled twice with the same spec", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -467,7 +467,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
-	Describe("Reconcile – Cilium CRD not installed", func() {
+	Describe("Reconcile - Cilium CRD not installed", func() {
 		It("sets NetworkPolicyReady=False with CiliumNotInstalled when CRD is missing", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{

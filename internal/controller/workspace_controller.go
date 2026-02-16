@@ -53,13 +53,13 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Validate FQDNs before attempting reconciliation.
 	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		log.V(1).Info("Invalid FQDN in workspace spec", "error", err)
-		r.setCondition(&workspace, metav1.Condition{
+		condition := metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: workspace.Generation,
 			Reason:             defaultv1alpha1.ReasonInvalidFQDN,
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
-		})
+		}
 
 		r.Recorder.Event(
 			&workspace,
@@ -68,9 +68,8 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			fmt.Sprintf("Invalid AllowedFQDNs entry: %s", err.Error()),
 		)
 
-		workspace.Status.ObservedGeneration = workspace.Generation
-		if statusErr := r.Status().Update(ctx, &workspace); statusErr != nil {
-			log.Error(statusErr, "Unable to update workspace status after FQDN validation error")
+		if statusErr := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after FQDN validation error", false); statusErr != nil {
+			// Ignore status update errors for permanent user input failures.
 		}
 		// Permanent error: user must fix the spec; requeuing won't help.
 		return ctrl.Result{}, nil
@@ -80,13 +79,13 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.reconcileNetworkPolicy(ctx, &workspace); err != nil {
 		if apimeta.IsNoMatchError(err) {
 			log.V(1).Info("CiliumNetworkPolicy CRD not found in cluster")
-			r.setCondition(&workspace, metav1.Condition{
+			condition := metav1.Condition{
 				Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: workspace.Generation,
 				Reason:             defaultv1alpha1.ReasonCiliumNotInstalled,
 				Message:            "Network policy not applied: CiliumNetworkPolicy CRD not installed in the cluster",
-			})
+			}
 
 			r.Recorder.Event(
 				&workspace,
@@ -95,45 +94,39 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				"CiliumNetworkPolicy CRD not found — network policies cannot be enforced",
 			)
 
-			workspace.Status.ObservedGeneration = workspace.Generation
-			if statusErr := r.Status().Update(ctx, &workspace); statusErr != nil {
-				log.Error(statusErr, "Unable to update workspace status after Cilium CRD not found")
+			if statusErr := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after Cilium CRD not found", false); statusErr != nil {
+				// Ignore status update errors for missing CRD.
 			}
 			// Permanent error: Cilium must be installed; requeuing won't help.
 			return ctrl.Result{}, nil
 		}
 
 		log.Error(err, "Error reconciling network policy", "workspace", workspace.Name)
-		r.setCondition(&workspace, metav1.Condition{
+		condition := metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: workspace.Generation,
 			Reason:             defaultv1alpha1.ReasonReconcileError,
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
-		})
+		}
 
-		workspace.Status.ObservedGeneration = workspace.Generation
-		if statusErr := r.Status().Update(ctx, &workspace); statusErr != nil {
-			log.Error(statusErr, "Unable to update workspace status after reconcile error")
+		if statusErr := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after reconcile error", false); statusErr != nil {
+			// Ignore status update errors; keep the original reconciliation error.
 		}
 
 		return ctrl.Result{}, err
 	}
 
 	// Success.
-	r.setCondition(&workspace, metav1.Condition{
+	condition := metav1.Condition{
 		Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 		Status:             metav1.ConditionTrue,
 		ObservedGeneration: workspace.Generation,
 		Reason:             defaultv1alpha1.ReasonReconciled,
 		Message:            "Network policy applied successfully",
-	})
+	}
 
-	// Update observed generation.
-	workspace.Status.ObservedGeneration = workspace.Generation
-
-	if err := r.Status().Update(ctx, &workspace); err != nil {
-		log.V(1).Error(err, "Unable to update WorkspaceStatus")
+	if err := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update WorkspaceStatus", true); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -219,6 +212,25 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 // setCondition sets or updates a condition on the workspace status.
 func (r *WorkspaceReconciler) setCondition(workspace *defaultv1alpha1.Workspace, condition metav1.Condition) {
 	apimeta.SetStatusCondition(&workspace.Status.Conditions, condition)
+}
+
+func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, workspace *defaultv1alpha1.Workspace, condition metav1.Condition, logMsg string, logAtV1 bool) error {
+	r.setCondition(workspace, condition)
+	workspace.Status.ObservedGeneration = workspace.Generation
+
+	if err := r.Status().Update(ctx, workspace); err != nil {
+		if logMsg != "" {
+			logger := log.FromContext(ctx)
+			if logAtV1 {
+				logger.V(1).Error(err, logMsg)
+			} else {
+				logger.Error(err, logMsg)
+			}
+		}
+		return err
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

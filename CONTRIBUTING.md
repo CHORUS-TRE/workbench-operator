@@ -341,7 +341,7 @@ make lint
 
 ## Appendix A: Cilium enforcement testing
 
-The main guide (§7–§8) uses a **stub CRD** so the workspace controller can create `CiliumNetworkPolicy` objects without installing Cilium. The policies are stored but not enforced. This appendix shows how to set up a cluster with real Cilium so you can verify that traffic is actually blocked.
+The main guide (§7-§8) uses a **stub CRD** so the workspace controller can create `CiliumNetworkPolicy` objects without installing Cilium. The policies are stored but not enforced. This appendix shows how to set up a cluster with real Cilium so you can verify that traffic is actually blocked.
 
 ### A.1) Create a Cilium-ready cluster
 
@@ -405,7 +405,7 @@ Cilium installs the real `CiliumNetworkPolicy` CRD — no stub needed.
 
 ### A.3) Build, load, and deploy the operator
 
-Same as §6–§7, but note the image needs `--provenance=false` to produce a plain Docker manifest (BuildKit attestation creates an OCI index that `crictl` can't resolve):
+Same as §6-§7, but note the image needs `--provenance=false` to produce a plain Docker manifest (BuildKit attestation creates an OCI index that `crictl` can't resolve):
 
 ```bash
 export IMG=localhost/workbench-operator:dev
