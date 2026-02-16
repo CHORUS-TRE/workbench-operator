@@ -31,7 +31,7 @@ type WorkspaceReconciler struct {
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile ensures the CiliumNetworkPolicy for this Workspace matches the
