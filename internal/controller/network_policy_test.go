@@ -63,7 +63,6 @@ var _ = Describe("buildNetworkPolicy", func() {
 		fqdnRule := egress[2]
 		toFQDNs := fqdnRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
-		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
 
 		toPorts := fqdnRule["toPorts"].([]map[string]any)
@@ -219,5 +218,33 @@ var _ = Describe("validateFQDNs", func() {
 		err := validateFQDNs([]string{"valid.example.com", longLabel + ".bad.com", "another.valid.com"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
+	})
+})
+
+var _ = Describe("toFQDNSelectors", func() {
+	It("generates matchName only for exact domains (no implicit wildcard)", func() {
+		selectors := toFQDNSelectors([]string{"example.com"})
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
+		Expect(selectors).NotTo(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
+	})
+
+	It("generates matchPattern only for explicit wildcard domains", func() {
+		selectors := toFQDNSelectors([]string{"*.example.com"})
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
+		Expect(selectors).NotTo(ContainElement(HaveKey("matchName")))
+	})
+
+	It("includes both when user explicitly opts into wildcard", func() {
+		selectors := toFQDNSelectors([]string{"example.com", "*.example.com"})
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
+	})
+
+	It("deduplicates entries", func() {
+		selectors := toFQDNSelectors([]string{"example.com", "example.com", "*.example.com", "*.example.com"})
+		// One matchName + one matchPattern
+		Expect(selectors).To(HaveLen(2))
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
 	})
 })

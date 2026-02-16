@@ -176,7 +176,9 @@ func httpPortRules() []map[string]any {
 
 // toFQDNSelectors converts validated FQDN entries into Cilium toFQDNs selectors.
 // Assumes entries have been pre-validated via validateFQDNs (no trimming needed).
-// Deduplicates entries and generates both exact match and wildcard patterns.
+// Deduplicates entries and generates:
+//   - matchName for exact domains (e.g. "example.com")
+//   - matchPattern for explicit wildcard domains only (e.g. "*.example.com")
 func toFQDNSelectors(entries []string) []map[string]any {
 	seen := map[string]struct{}{}
 	var selectors []map[string]any
@@ -201,13 +203,6 @@ func toFQDNSelectors(entries []string) []map[string]any {
 		if _, exists := seen[nameKey]; !exists {
 			selectors = append(selectors, map[string]any{"matchName": entry})
 			seen[nameKey] = struct{}{}
-		}
-
-		pattern := fmt.Sprintf("*.%s", entry)
-		patternKey := "pattern:" + pattern
-		if _, exists := seen[patternKey]; !exists {
-			selectors = append(selectors, map[string]any{"matchPattern": pattern})
-			seen[patternKey] = struct{}{}
 		}
 	}
 

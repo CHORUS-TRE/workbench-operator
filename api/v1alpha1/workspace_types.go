@@ -36,6 +36,8 @@ type WorkspaceSpec struct {
 	// AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
 	// Only used when Airgapped is false. Each entry can be an exact domain (e.g. example.com)
 	// or a wildcard pattern (e.g. *.corp.internal).
+	//
+	// Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:Items:MaxLength=253
