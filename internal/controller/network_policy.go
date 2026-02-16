@@ -23,29 +23,34 @@ const (
 	maxFQDNLength = 253
 )
 
+func normalizeFQDNEntry(entry string) string {
+	// Canonicalize user input for policy generation and duplicate detection.
+	// DNS names are case-insensitive; leading/trailing whitespace is unintentional.
+	return strings.ToLower(strings.TrimSpace(entry))
+}
+
 // validateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
 // or wildcard pattern. Returns nil on success or an error describing the first
 // invalid entry. Enforces RFC 1035 limits: max 63 chars per label, max 253 chars total.
 func validateFQDNs(entries []string) error {
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
-		trimmed := strings.TrimSpace(entry)
-		if trimmed == "" {
+		normalized := normalizeFQDNEntry(entry)
+		if normalized == "" {
 			return fmt.Errorf("empty FQDN entry")
 		}
-		normalized := strings.ToLower(trimmed)
 		if _, exists := seen[normalized]; exists {
-			return fmt.Errorf("duplicate FQDN entry (case-insensitive): %q", trimmed)
+			return fmt.Errorf("duplicate FQDN entry (case-insensitive): %q", strings.TrimSpace(entry))
 		}
 		seen[normalized] = struct{}{}
 
 		// Check total length (RFC 1035: max 253 octets)
 		if len(normalized) > maxFQDNLength {
-			return fmt.Errorf("FQDN entry exceeds maximum length of %d characters: %q (length: %d)", maxFQDNLength, trimmed, len(normalized))
+			return fmt.Errorf("FQDN entry exceeds maximum length of %d characters: %q (length: %d)", maxFQDNLength, strings.TrimSpace(entry), len(normalized))
 		}
 
 		if !fqdnPattern.MatchString(normalized) {
-			return fmt.Errorf("invalid FQDN entry: %q", trimmed)
+			return fmt.Errorf("invalid FQDN entry: %q", strings.TrimSpace(entry))
 		}
 
 		// Check individual label lengths (RFC 1035: max 63 octets per label)
@@ -58,7 +63,7 @@ func validateFQDNs(entries []string) error {
 		labels := strings.Split(fqdnToCheck, ".")
 		for _, label := range labels {
 			if len(label) > maxDNSLabelLength {
-				return fmt.Errorf("FQDN entry %q contains label exceeding maximum length of %d characters: %q (length: %d)", trimmed, maxDNSLabelLength, label, len(label))
+				return fmt.Errorf("FQDN entry %q contains label exceeding maximum length of %d characters: %q (length: %d)", strings.TrimSpace(entry), maxDNSLabelLength, label, len(label))
 			}
 		}
 	}
@@ -186,7 +191,9 @@ func toFQDNSelectors(entries []string) []map[string]any {
 	var selectors []map[string]any
 
 	for _, entry := range entries {
-		// No trimming - entries are expected to be pre-validated
+		// Canonicalize output. validateFQDNs() also normalizes for checking, but
+		// does not mutate the original slice.
+		entry = normalizeFQDNEntry(entry)
 		if entry == "" {
 			continue
 		}

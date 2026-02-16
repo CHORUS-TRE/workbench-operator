@@ -234,6 +234,12 @@ var _ = Describe("toFQDNSelectors", func() {
 		Expect(selectors).NotTo(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
 	})
 
+	It("normalizes domains to lowercase and trims whitespace", func() {
+		selectors := toFQDNSelectors([]string{" ExAmPlE.CoM ", " *.CoRp.InTeRnAl "})
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
+	})
+
 	It("generates matchPattern only for explicit wildcard domains", func() {
 		selectors := toFQDNSelectors([]string{"*.example.com"})
 		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
