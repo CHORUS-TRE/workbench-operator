@@ -60,6 +60,8 @@ spec:
                   or a wildcard pattern (e.g. *.corp.internal).
                   Wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
                   Entries must contain at least one dot (two labels), e.g. "example.com".
+                  Each entry produces one Cilium FQDN selector. To allow both apex and subdomains, add both
+                  "example.com" and "*.example.com" as separate entries (counts toward maxItems).
                 items:
                   maxLength: 253
                   type: string

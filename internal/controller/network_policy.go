@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,12 +23,49 @@ const (
 	maxDNSLabelLength = 63
 	// RFC 1035: Full domain name must not exceed 253 octets
 	maxFQDNLength = 253
+	// Kubernetes object names are DNS subdomains (max 253 chars).
+	maxK8sNameLength = 253
+	// Truncated names use "-egress-" + hash as a stable suffix.
+	cnpLongNameSuffix = "-egress-"
+	cnpNameSuffix     = "-egress"
+	cnpNameHashLen    = 10
 )
 
 func normalizeFQDNEntry(entry string) string {
 	// Canonicalize user input for policy generation and duplicate detection.
 	// DNS names are case-insensitive; leading/trailing whitespace is unintentional.
 	return strings.ToLower(strings.TrimSpace(entry))
+}
+
+func cnpNameForWorkspace(workspaceName string) string {
+	name := workspaceName + cnpNameSuffix
+	if len(name) <= maxK8sNameLength {
+		return name
+	}
+
+	// Ensure name stays within DNS subdomain length. Use a stable hash of the workspace name
+	// so the truncated name is deterministic and collision-resistant.
+	sum := sha256.Sum256([]byte(workspaceName))
+	hash := hex.EncodeToString(sum[:])[:cnpNameHashLen]
+	suffix := cnpLongNameSuffix + hash
+
+	maxPrefixLen := maxK8sNameLength - len(suffix)
+	if maxPrefixLen < 1 {
+		// Extremely defensive: fallback to something valid and stable.
+		return "egress-" + hash
+	}
+
+	prefix := workspaceName
+	if len(prefix) > maxPrefixLen {
+		prefix = prefix[:maxPrefixLen]
+	}
+	// DNS subdomains must end with an alphanumeric char; truncation may leave '-' or '.'.
+	prefix = strings.TrimRight(prefix, "-.")
+	if prefix == "" {
+		prefix = "ws"
+	}
+
+	return prefix + suffix
 }
 
 // validateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
@@ -150,7 +189,7 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 			"apiVersion": "cilium.io/v2",
 			"kind":       "CiliumNetworkPolicy",
 			"metadata": map[string]any{
-				"name":      fmt.Sprintf("%s-egress", workspace.Name),
+				"name":      cnpNameForWorkspace(workspace.Name),
 				"namespace": workspace.Namespace,
 				"labels":    labels,
 			},

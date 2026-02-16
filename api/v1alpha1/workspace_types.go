@@ -39,6 +39,8 @@ type WorkspaceSpec struct {
 	//
 	// Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
 	// Note: entries must contain at least one dot (two labels), e.g. "example.com".
+	// Note: each entry produces one Cilium FQDN selector. To allow both apex and subdomains,
+	// add both "example.com" and "*.example.com" as separate entries (counts toward MaxItems).
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:Items:MaxLength=253

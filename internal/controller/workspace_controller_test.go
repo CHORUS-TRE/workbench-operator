@@ -6,8 +6,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -128,6 +128,41 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonInvalidFQDN))
+		})
+
+		It("returns an error if existing CNP is controlled by a different object", func() {
+			workspace := &defaultv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workspaceName,
+					Namespace: workspaceNamespace,
+				},
+				Spec: defaultv1alpha1.WorkspaceSpec{
+					Airgapped: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			// Pre-create a CNP with the expected name but a different controller owner reference.
+			cnp, err := buildNetworkPolicy(*workspace)
+			Expect(err).NotTo(HaveOccurred())
+
+			t := true
+			cnp.SetOwnerReferences([]metav1.OwnerReference{
+				{
+					APIVersion:         "v1",
+					Kind:               "ConfigMap",
+					Name:               "not-a-workspace",
+					UID:                types.UID("00000000-0000-0000-0000-000000000000"),
+					Controller:         &t,
+					BlockOwnerDeletion: &t,
+				},
+			})
+			Expect(k8sClient.Create(ctx, cnp)).To(Succeed())
+
+			reconciler := newReconciler()
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("controlled by"))
 		})
 	})
 

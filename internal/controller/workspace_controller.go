@@ -199,10 +199,11 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 		updated = true
 	}
 
-	if !controllerutil.HasControllerReference(&existing) {
-		if err := controllerutil.SetControllerReference(workspace, &existing, r.Scheme); err != nil {
-			return err
-		}
+	ownerUpdated, err := r.ensureWorkspaceControllerRef(workspace, &existing)
+	if err != nil {
+		return err
+	}
+	if ownerUpdated {
 		updated = true
 	}
 
@@ -211,6 +212,45 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 	}
 
 	return nil
+}
+
+func (r *WorkspaceReconciler) ensureWorkspaceControllerRef(workspace *defaultv1alpha1.Workspace, obj metav1.Object) (bool, error) {
+	// Ensure the CNP is controlled by this Workspace. If another controller owns it,
+	// treat it as an error rather than silently skipping.
+	owner := metav1.GetControllerOf(obj)
+	if owner == nil {
+		if err := controllerutil.SetControllerReference(workspace, obj, r.Scheme); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	expectedAPIVersion := defaultv1alpha1.GroupVersion.String()
+	if owner.APIVersion != expectedAPIVersion || owner.Kind != "Workspace" || owner.Name != workspace.Name {
+		return false, fmt.Errorf("existing CiliumNetworkPolicy %s/%s is controlled by %s %s/%s, expected Workspace %s/%s",
+			obj.GetNamespace(), obj.GetName(),
+			owner.Kind, owner.APIVersion, owner.Name,
+			expectedAPIVersion, workspace.Name,
+		)
+	}
+
+	// Same workspace name/kind: if UID changed (workspace recreated), update the owner ref.
+	if owner.UID != workspace.UID && workspace.UID != "" {
+		refs := obj.GetOwnerReferences()
+		for i := range refs {
+			if refs[i].Controller != nil && *refs[i].Controller &&
+				refs[i].APIVersion == expectedAPIVersion &&
+				refs[i].Kind == "Workspace" &&
+				refs[i].Name == workspace.Name {
+				refs[i].UID = workspace.UID
+				obj.SetOwnerReferences(refs)
+				return true, nil
+			}
+		}
+		return false, fmt.Errorf("controller owner reference exists but could not be updated for %s/%s", obj.GetNamespace(), obj.GetName())
+	}
+
+	return false, nil
 }
 
 // setCondition sets or updates a condition on the workspace status.

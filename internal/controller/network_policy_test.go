@@ -112,6 +112,17 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid FQDNs"))
 	})
+
+	It("truncates CNP name when workspace name is near Kubernetes length limit", func() {
+		ws := baseWorkspace()
+		ws.Name = strings.Repeat("a", 253)
+
+		cnp, err := buildNetworkPolicy(ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cnp.GetName()).To(Equal(cnpNameForWorkspace(ws.Name)))
+		Expect(len(cnp.GetName())).To(BeNumerically("<=", 253))
+		Expect(cnp.GetName()).To(ContainSubstring("-egress-"))
+	})
 })
 
 var _ = Describe("validateFQDNs", func() {
@@ -258,5 +269,11 @@ var _ = Describe("toFQDNSelectors", func() {
 		Expect(selectors).To(HaveLen(2))
 		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchPattern", "*.example.com")))
+	})
+
+	It("deduplicates exact domains even without validation", func() {
+		selectors := toFQDNSelectors([]string{"example.com", "example.com"})
+		Expect(selectors).To(HaveLen(1))
+		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 	})
 })
