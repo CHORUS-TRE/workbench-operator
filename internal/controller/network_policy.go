@@ -25,26 +25,32 @@ const (
 // or wildcard pattern. Returns nil on success or an error describing the first
 // invalid entry. Enforces RFC 1035 limits: max 63 chars per label, max 253 chars total.
 func validateFQDNs(entries []string) error {
+	seen := map[string]struct{}{}
 	for _, entry := range entries {
 		trimmed := strings.TrimSpace(entry)
 		if trimmed == "" {
 			return fmt.Errorf("empty FQDN entry")
 		}
+		normalized := strings.ToLower(trimmed)
+		if _, exists := seen[normalized]; exists {
+			return fmt.Errorf("duplicate FQDN entry (case-insensitive): %q", trimmed)
+		}
+		seen[normalized] = struct{}{}
 
 		// Check total length (RFC 1035: max 253 octets)
-		if len(trimmed) > maxFQDNLength {
-			return fmt.Errorf("FQDN entry exceeds maximum length of %d characters: %q (length: %d)", maxFQDNLength, trimmed, len(trimmed))
+		if len(normalized) > maxFQDNLength {
+			return fmt.Errorf("FQDN entry exceeds maximum length of %d characters: %q (length: %d)", maxFQDNLength, trimmed, len(normalized))
 		}
 
-		if !fqdnPattern.MatchString(trimmed) {
+		if !fqdnPattern.MatchString(normalized) {
 			return fmt.Errorf("invalid FQDN entry: %q", trimmed)
 		}
 
 		// Check individual label lengths (RFC 1035: max 63 octets per label)
 		// Strip wildcard prefix if present for label validation
-		fqdnToCheck := trimmed
-		if strings.HasPrefix(trimmed, "*.") {
-			fqdnToCheck = trimmed[2:]
+		fqdnToCheck := normalized
+		if strings.HasPrefix(normalized, "*.") {
+			fqdnToCheck = normalized[2:]
 		}
 
 		labels := strings.Split(fqdnToCheck, ".")

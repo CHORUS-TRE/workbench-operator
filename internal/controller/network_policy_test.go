@@ -208,6 +208,12 @@ var _ = Describe("validateFQDNs", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("rejects case-insensitive duplicate FQDNs", func() {
+		err := validateFQDNs([]string{"example.com", "EXAMPLE.COM"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("duplicate FQDN entry"))
+	})
+
 	It("rejects multiple FQDNs when one exceeds label length", func() {
 		longLabel := strings.Repeat("z", 64)
 		err := validateFQDNs([]string{"valid.example.com", longLabel + ".bad.com", "another.valid.com"})
