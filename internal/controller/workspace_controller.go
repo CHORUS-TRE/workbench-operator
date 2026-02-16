@@ -129,7 +129,8 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Message:            "Network policy applied successfully",
 	}
 
-	if err := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update WorkspaceStatus", true); err != nil {
+	// Status update failures should be visible in production logs; treat as transient and requeue.
+	if err := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update WorkspaceStatus", false); err != nil {
 		return ctrl.Result{}, err
 	}
 

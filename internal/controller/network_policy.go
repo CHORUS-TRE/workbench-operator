@@ -194,9 +194,6 @@ func toFQDNSelectors(entries []string) []map[string]any {
 		// Canonicalize output. validateFQDNs() also normalizes for checking, but
 		// does not mutate the original slice.
 		entry = normalizeFQDNEntry(entry)
-		if entry == "" {
-			continue
-		}
 
 		if strings.Contains(entry, "*") {
 			key := "pattern:" + entry
