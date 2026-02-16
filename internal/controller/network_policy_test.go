@@ -46,7 +46,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		intraRule := egress[1]
 		toEndpoints := intraRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
-		Expect(toEndpoints[0]["matchLabels"]).To(BeEmpty())
+		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
 	})
 
 	It("adds FQDN allowlist rules with HTTP/HTTPS ports when not airgapped", func() {

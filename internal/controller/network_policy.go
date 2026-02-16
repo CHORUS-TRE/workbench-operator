@@ -111,7 +111,12 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		{
 			"toEndpoints": []map[string]any{
 				{
-					"matchLabels": map[string]any{},
+					// Explicitly scope to the workspace namespace. For namespaced CiliumNetworkPolicy,
+					// omitting this label would still default to same-namespace, but being explicit
+					// avoids confusion and makes intent clear to readers.
+					"matchLabels": map[string]any{
+						"k8s:io.kubernetes.pod.namespace": workspace.Namespace,
+					},
 				},
 			},
 		},
