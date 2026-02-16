@@ -68,9 +68,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			fmt.Sprintf("Invalid AllowedFQDNs entry: %s", err.Error()),
 		)
 
-		if statusErr := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after FQDN validation error", false); statusErr != nil {
-			// Ignore status update errors for permanent user input failures.
-		}
+		_ = r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after FQDN validation error", false)
 		// Permanent error: user must fix the spec; requeuing won't help.
 		return ctrl.Result{}, nil
 	}
@@ -103,9 +101,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				"CiliumNetworkPolicy CRD not found — network policies cannot be enforced",
 			)
 
-			if statusErr := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after Cilium CRD not found", false); statusErr != nil {
-				// Ignore status update errors for missing CRD.
-			}
+			_ = r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after Cilium CRD not found", false)
 			// Permanent error: Cilium must be installed; requeuing won't help.
 			return ctrl.Result{}, nil
 		}
@@ -119,9 +115,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
 		}
 
-		if statusErr := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after reconcile error", false); statusErr != nil {
-			// Ignore status update errors; keep the original reconciliation error.
-		}
+		_ = r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after reconcile error", false)
 
 		return ctrl.Result{}, err
 	}
