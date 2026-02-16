@@ -36,6 +36,10 @@ To expose a Workbench on the Internet, an Ingress will be needed. It should poin
 
 As a server is a `Deployment`, stopping it from the inside will _restart_ it.
 
+If the operator starts before the CiliumNetworkPolicy CRD exists, it will skip
+the CNP watch until the controller is restarted. Install Cilium (or the CRD)
+before deploying the operator, or restart the operator after Cilium is installed.
+
 ### TODO
 
 - Handling the whole life cycle when the user stops the Server from within;
