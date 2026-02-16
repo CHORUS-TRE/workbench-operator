@@ -75,6 +75,15 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
+	if workspace.Spec.Airgapped && len(workspace.Spec.AllowedFQDNs) > 0 {
+		r.Recorder.Event(
+			&workspace,
+			"Warning",
+			"FQDNsIgnored",
+			"AllowedFQDNs provided but Airgapped=true; FQDNs will be ignored",
+		)
+	}
+
 	// Reconcile the CiliumNetworkPolicy.
 	if err := r.reconcileNetworkPolicy(ctx, &workspace); err != nil {
 		if apimeta.IsNoMatchError(err) {

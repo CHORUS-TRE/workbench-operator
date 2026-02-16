@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -166,6 +167,32 @@ var _ = Describe("WorkspaceReconciler", func() {
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
 			Expect(egress).To(HaveLen(2))
+		})
+
+		It("emits a warning when AllowedFQDNs is set for an airgapped workspace", func() {
+			workspace := &defaultv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workspaceName,
+					Namespace: workspaceNamespace,
+				},
+				Spec: defaultv1alpha1.WorkspaceSpec{
+					Airgapped:    true,
+					AllowedFQDNs: []string{"example.com"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			recorder := record.NewFakeRecorder(10)
+			reconciler := &WorkspaceReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: recorder,
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(recorder.Events, time.Second).Should(Receive(ContainSubstring("FQDNsIgnored")))
 		})
 
 		It("creates CNP with FQDN allowlist for non-airgapped workspace", func() {
