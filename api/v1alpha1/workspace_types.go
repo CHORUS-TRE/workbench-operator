@@ -38,6 +38,7 @@ type WorkspaceSpec struct {
 	// or a wildcard pattern (e.g. *.corp.internal).
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:MaxLength=253
 	// +listType=set
 	AllowedFQDNs []string `json:"allowedFQDNs,omitempty"`
 }

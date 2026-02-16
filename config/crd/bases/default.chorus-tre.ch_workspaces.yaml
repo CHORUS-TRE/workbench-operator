@@ -59,6 +59,7 @@ spec:
                   Only used when Airgapped is false. Each entry can be an exact domain (e.g. example.com)
                   or a wildcard pattern (e.g. *.corp.internal).
                 items:
+                  maxLength: 253
                   type: string
                 maxItems: 64
                 type: array
