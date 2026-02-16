@@ -10,3 +10,4 @@ spec:
   airgapped: false
   allowedFQDNs:
     - chorus-tre.ch
+    - "*.chorus-tre.ch"

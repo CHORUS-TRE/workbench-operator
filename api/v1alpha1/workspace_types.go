@@ -38,6 +38,7 @@ type WorkspaceSpec struct {
 	// or a wildcard pattern (e.g. *.corp.internal).
 	//
 	// Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
+	// Note: entries must contain at least one dot (two labels), e.g. "example.com".
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:Items:MaxLength=253

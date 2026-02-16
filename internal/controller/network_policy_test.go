@@ -143,6 +143,12 @@ var _ = Describe("validateFQDNs", func() {
 		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
 	})
 
+	It("rejects single-label names (must contain at least one dot)", func() {
+		err := validateFQDNs([]string{"localhost"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
+	})
+
 	It("accepts an empty list", func() {
 		err := validateFQDNs([]string{})
 		Expect(err).NotTo(HaveOccurred())

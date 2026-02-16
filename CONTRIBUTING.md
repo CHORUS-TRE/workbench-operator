@@ -221,11 +221,11 @@ Inspect the generated `CiliumNetworkPolicy` to confirm the egress rules match th
 kubectl get ciliumnetworkpolicy workspace-egress -n workspace -o jsonpath='{.spec}' | jq .
 ```
 
-The sample workspace has `airgapped: false` with `allowedFQDNs: ["chorus-tre.ch"]`, so you should see **three egress rules**:
+The sample workspace has `airgapped: false` with `allowedFQDNs: ["chorus-tre.ch", "*.chorus-tre.ch"]`, so you should see **three egress rules**:
 
 1. **DNS** — allows UDP/TCP 53 to `kube-system` (kube-dns)
 2. **Intra-namespace** — allows all pod-to-pod traffic within the workspace namespace
-3. **FQDN allowlist** — allows HTTP/HTTPS to `chorus-tre.ch` and `*.chorus-tre.ch`
+3. **FQDN allowlist** — allows HTTP/HTTPS to `chorus-tre.ch` and `*.chorus-tre.ch` (wildcards are opt-in)
 
 ```json
 {
@@ -233,7 +233,7 @@ The sample workspace has `airgapped: false` with `allowedFQDNs: ["chorus-tre.ch"
     { "toEndpoints": [{"matchLabels": {"k8s:io.kubernetes.pod.namespace": "kube-system"}}],
       "toPorts": [{"ports": [{"port": "53", "protocol": "UDP"}, {"port": "53", "protocol": "TCP"}],
                    "rules": {"dns": [{"matchPattern": "*"}]}}] },
-    { "toEndpoints": [{"matchLabels": {}}] },
+    { "toEndpoints": [{"matchLabels": {"k8s:io.kubernetes.pod.namespace": "workspace"}}] },
     { "toFQDNs": [{"matchName": "chorus-tre.ch"}, {"matchPattern": "*.chorus-tre.ch"}],
       "toPorts": [{"ports": [{"port": "80", "protocol": "TCP"}, {"port": "443", "protocol": "TCP"}],
                    "rules": {"http": [{}]}}] }
@@ -459,7 +459,7 @@ kubectl exec -n workspace test-curl -- \
 # 301  ← connection succeeded (HTTP redirect to HTTPS)
 ```
 
-**Allowed** — wildcard subdomain `*.chorus-tre.ch`:
+**Allowed** — wildcard subdomain `*.chorus-tre.ch` (explicitly listed in `allowedFQDNs`):
 
 ```bash
 kubectl exec -n workspace test-curl -- \

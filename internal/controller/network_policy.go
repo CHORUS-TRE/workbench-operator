@@ -11,8 +11,10 @@ import (
 )
 
 // fqdnPattern validates FQDN entries: optional leading wildcard (*.), then
-// DNS labels separated by dots. Matches "example.com", "*.corp.internal", etc.
-var fqdnPattern = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$`)
+// DNS labels separated by dots. Requires at least one dot (two labels).
+// Matches "example.com", "*.corp.internal", etc. Does not match single-label
+// names like "localhost".
+var fqdnPattern = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 
 const (
 	// RFC 1035: DNS labels must not exceed 63 octets
