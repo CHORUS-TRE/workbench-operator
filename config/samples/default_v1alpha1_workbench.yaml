@@ -13,6 +13,7 @@ spec:
     version: "6.3.2-4"
     user: user_name
     userid: 1002
+    # keyboardLayout: "ch(fr)"  # optional: set keyboard layout (e.g. us, de, ch(fr)). Defaults to browser auto-detect.
   storage:
     s3: true
     nfs: true
