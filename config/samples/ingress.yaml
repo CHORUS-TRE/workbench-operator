@@ -2,9 +2,13 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: workbench
-  namespace: workbench
+  namespace: workspace
 spec:
   ingressClassName: nginx
+  #tls:
+  #  - hosts:
+  #      - workbench.chorus-tre.local
+  #    secretName: workbench-tls
   rules:
     - host: workbench.chorus-tre.local
       http:
