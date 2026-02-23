@@ -25,3 +25,13 @@ go.work
 *.swp
 *.swo
 *~
+
+#Essentials
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+ehthumbs.db
+Thumbs.db
+
