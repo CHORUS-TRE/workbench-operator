@@ -8,27 +8,27 @@ metadata:
   namespace: workspace
 spec:
   initContainer:
-    version: "0.0.2-1"
+    version: "0.0.2-4"
   server:
-    version: "6.3.2-1"
-    user: nathalie
+    version: "6.4.3-1"
+    user: user_name
     userid: 1002
   storage:
     s3: true
     nfs: true
   apps:
-    benchmark:
-      name: benchmark
+    vscode:
+      name: vscode
       image:
         registry: harbor.build.chorus-tre.local
-        repository: apps/benchmark
-        tag: "0.0.2-1"
+        repository: apps/vscode
+        tag: "1.106.1-8"
       state: Running
       resources:
         limits:
-          cpu: 750m
+          cpu: 1.0
           ephemeral-storage: 10Gi
-          memory: 768Mi
+          memory: 2048Mi
     kiosk:
       name: kiosk
       image:
