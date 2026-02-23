@@ -285,6 +285,46 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Get pod health message for this job
 		message := r.updateAppPodHealth(ctx, &workbench, *foundJob)
 
+		// Track continuous non-ready time via annotation.
+		const notReadySinceAnnotation = "chorus-tre.ch/not-ready-since"
+		isReady := foundJob.Status.Ready != nil && *foundJob.Status.Ready >= 1
+		isSuspended := foundJob.Spec.Suspend != nil && *foundJob.Spec.Suspend
+		annotationUpdated := false
+
+		if isReady {
+			// App is running — clear the non-ready tracker
+			if foundJob.Annotations != nil && foundJob.Annotations[notReadySinceAnnotation] != "" {
+				delete(foundJob.Annotations, notReadySinceAnnotation)
+				annotationUpdated = true
+			}
+		} else if !isSuspended {
+			// App is not ready and not suspended — ensure tracker is set
+			if foundJob.Annotations == nil || foundJob.Annotations[notReadySinceAnnotation] == "" {
+				if foundJob.Annotations == nil {
+					foundJob.Annotations = make(map[string]string)
+				}
+				foundJob.Annotations[notReadySinceAnnotation] = time.Now().UTC().Format(time.RFC3339)
+				annotationUpdated = true
+			}
+
+			// Check timeout
+			if r.Config.ApplicationStartupTimeout > 0 {
+				if notReadySince, err := time.Parse(time.RFC3339, foundJob.Annotations[notReadySinceAnnotation]); err == nil {
+					timeout := time.Duration(r.Config.ApplicationStartupTimeout) * time.Second
+					if time.Since(notReadySince) > timeout {
+						message = fmt.Sprintf("Startup timeout: app did not become ready within %s (%s)", timeout, message)
+						r.deleteJob(ctx, foundJob)
+					}
+				}
+			}
+		}
+
+		if annotationUpdated {
+			if err := r.Update(ctx, foundJob); err != nil {
+				log.V(1).Error(err, "Unable to update not-ready-since annotation", "job", foundJob.Name)
+			}
+		}
+
 		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
 		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob, message)
 		if statusUpdated {
@@ -703,8 +743,18 @@ func (r *WorkbenchReconciler) updateAppPodHealth(
 		if job.Status.Succeeded >= 1 {
 			return "Job completed"
 		}
-		// Job has failed pods
+		// Job has failed pods — check conditions for detail
 		if job.Status.Failed >= 1 {
+			for _, condition := range job.Status.Conditions {
+				if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
+					if condition.Message != "" {
+						return fmt.Sprintf("Job failed: %s", condition.Message)
+					}
+					if condition.Reason != "" {
+						return fmt.Sprintf("Job failed: %s", condition.Reason)
+					}
+				}
+			}
 			return "Job failed"
 		}
 		// Job is not suspended and has no succeeded/failed pods — starting up
@@ -748,6 +798,15 @@ func (r *WorkbenchReconciler) updateAppPodHealth(
 
 	// Find the primary app container status (not init containers)
 	if len(latestPod.Status.ContainerStatuses) == 0 {
+		// Check pod conditions for scheduling issues
+		for _, condition := range latestPod.Status.Conditions {
+			if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
+				if condition.Message != "" {
+					return fmt.Sprintf("Scheduling: %s - %s", condition.Reason, condition.Message)
+				}
+				return fmt.Sprintf("Scheduling: %s", condition.Reason)
+			}
+		}
 		return "Container status not available"
 	}
 
