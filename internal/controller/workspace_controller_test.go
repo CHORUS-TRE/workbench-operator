@@ -95,7 +95,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Ready).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonInvalidFQDN))
 			Expect(cond.Message).To(ContainSubstring("invalid FQDN"))
 
@@ -126,7 +126,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Ready).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonInvalidFQDN))
 		})
 
@@ -189,8 +189,9 @@ var _ = Describe("WorkspaceReconciler", func() {
 
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonReconciled))
+			Expect(cond.Ready).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonApplied))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyAirgapped))
 
 			// Verify CNP was created
 			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
@@ -261,7 +262,8 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(k8sClient.Get(ctx, namespacedName, updated)).To(Succeed())
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Ready).To(Equal(metav1.ConditionTrue))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyFQDNAllowlist))
 		})
 
 		It("creates CNP with full internet access when non-airgapped and no FQDNs", func() {
@@ -298,7 +300,8 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(k8sClient.Get(ctx, namespacedName, updated)).To(Succeed())
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Ready).To(Equal(metav1.ConditionTrue))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyOpen))
 		})
 
 		It("updates ObservedGeneration on successful reconcile", func() {
@@ -560,15 +563,16 @@ var _ = Describe("WorkspaceReconciler", func() {
 
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Ready).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonCiliumNotInstalled))
 			Expect(cond.Message).To(ContainSubstring("CiliumNetworkPolicy CRD not installed"))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyError))
 		})
 	})
 })
 
 // findCondition returns the condition with the given type, or nil.
-func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition { //nolint:unparam
+func findCondition(conditions []defaultv1alpha1.NetworkPolicyCondition, condType string) *defaultv1alpha1.NetworkPolicyCondition { //nolint:unparam
 	for i := range conditions {
 		if conditions[i].Type == condType {
 			return &conditions[i]

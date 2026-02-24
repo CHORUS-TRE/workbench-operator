@@ -189,7 +189,7 @@ var _ = Describe("controller", Ordered, func() {
 			Eventually(func() string {
 				cmd := exec.Command("kubectl", "get", "workspace", "probe-ws",
 					"-n", testNS, "-o",
-					`jsonpath={.status.conditions[?(@.type=="NetworkPolicyReady")].status}`)
+					`jsonpath={.status.conditions[?(@.type=="NetworkPolicyReady")].ready}`)
 				out, _ := utils.Run(cmd)
 				return string(out)
 			}, 120*time.Second, 2*time.Second).ShouldNot(BeEmpty(),
@@ -262,7 +262,7 @@ var _ = Describe("controller", Ordered, func() {
 			Eventually(func() string {
 				cmd := exec.Command("kubectl", "get", "workspace", "airgapped-ws",
 					"-n", testNS, "-o",
-					`jsonpath={.status.conditions[?(@.type=="NetworkPolicyReady")].status}`)
+					`jsonpath={.status.conditions[?(@.type=="NetworkPolicyReady")].ready}`)
 				out, err := utils.Run(cmd)
 				if err != nil {
 					return ""
