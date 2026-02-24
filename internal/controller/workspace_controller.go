@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -73,12 +74,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	if workspace.Spec.Airgapped && len(workspace.Spec.AllowedFQDNs) > 0 {
+	if !workspace.Spec.Airgapped && len(workspace.Spec.AllowedFQDNs) > 0 {
 		r.Recorder.Event(
 			&workspace,
 			"Warning",
 			"FQDNsIgnored",
-			"AllowedFQDNs provided but Airgapped=true; FQDNs will be ignored",
+			"AllowedFQDNs provided but Airgapped=false; FQDNs will be ignored, all internet traffic is allowed",
 		)
 	}
 
@@ -126,7 +127,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Status:             metav1.ConditionTrue,
 		ObservedGeneration: workspace.Generation,
 		Reason:             defaultv1alpha1.ReasonReconciled,
-		Message:            "Network policy applied successfully",
+		Message:            networkPolicyStatusMessage(workspace.Spec),
 	}
 
 	// Status update failures should be visible in production logs; treat as transient and requeue.
@@ -254,6 +255,16 @@ func (r *WorkspaceReconciler) ensureWorkspaceControllerRef(workspace *defaultv1a
 }
 
 // setCondition sets or updates a condition on the workspace status.
+func networkPolicyStatusMessage(spec defaultv1alpha1.WorkspaceSpec) string {
+	if !spec.Airgapped {
+		return "Network policy applied: all external internet traffic allowed (ports 80/443)"
+	}
+	if len(spec.AllowedFQDNs) == 0 {
+		return "Network policy applied: airgapped, all external traffic blocked"
+	}
+	return fmt.Sprintf("Network policy applied: airgapped, allowed FQDNs: %s", strings.Join(spec.AllowedFQDNs, ", "))
+}
+
 func (r *WorkspaceReconciler) setCondition(workspace *defaultv1alpha1.Workspace, condition metav1.Condition) {
 	apimeta.SetStatusCondition(&workspace.Status.Conditions, condition)
 }
