@@ -114,9 +114,9 @@ func validateFQDNs(entries []string) error {
 // FQDN allowlist or full internet).
 //
 // Policy mapping:
-//   - Airgapped=true            → DNS + intra-namespace only
-//   - Airgapped=false + FQDNs   → DNS + intra-namespace + FQDN allowlist
-//   - Airgapped=false + no FQDNs → DNS + intra-namespace + full internet
+//   - Airgapped=false            → DNS + intra-namespace + full internet (FQDNs ignored)
+//   - Airgapped=true + FQDNs    → DNS + intra-namespace + FQDN allowlist
+//   - Airgapped=true + no FQDNs → DNS + intra-namespace only
 //
 // IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
 // Returns an error if invalid FQDNs are detected.
@@ -168,20 +168,21 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		},
 	}
 
-	if !workspace.Spec.Airgapped {
+	if workspace.Spec.Airgapped {
+		// Airgapped: only allow FQDNs if specified, otherwise block all external traffic.
 		fqdnSelectors := toFQDNSelectors(workspace.Spec.AllowedFQDNs)
 		if len(fqdnSelectors) > 0 {
 			egressRules = append(egressRules, map[string]any{
 				"toFQDNs": fqdnSelectors,
 				"toPorts": httpPortRules(),
 			})
-		} else {
-			// No FQDNs specified and not airgapped → allow all internet on HTTP/HTTPS
-			egressRules = append(egressRules, map[string]any{
-				"toCIDR":  []string{"0.0.0.0/0", "::/0"},
-				"toPorts": httpPortRules(),
-			})
 		}
+	} else {
+		// Not airgapped: allow all internet on HTTP/HTTPS regardless of AllowedFQDNs.
+		egressRules = append(egressRules, map[string]any{
+			"toCIDR":  []string{"0.0.0.0/0", "::/0"},
+			"toPorts": httpPortRules(),
+		})
 	}
 
 	return &unstructured.Unstructured{

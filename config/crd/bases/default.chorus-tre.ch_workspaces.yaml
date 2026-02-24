@@ -58,10 +58,11 @@ spec:
                   AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
                   Only used when Airgapped is false. Each entry can be an exact domain (e.g. example.com)
                   or a wildcard pattern (e.g. *.corp.internal).
-                  Wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
-                  Entries must contain at least one dot (two labels), e.g. "example.com".
-                  Each entry produces one Cilium FQDN selector. To allow both apex and subdomains, add both
-                  "example.com" and "*.example.com" as separate entries (counts toward maxItems).
+
+                  Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
+                  Note: entries must contain at least one dot (two labels), e.g. "example.com".
+                  Note: each entry produces one Cilium FQDN selector. To allow both apex and subdomains,
+                  add both "example.com" and "*.example.com" as separate entries (counts toward MaxItems).
                 items:
                   maxLength: 253
                   type: string

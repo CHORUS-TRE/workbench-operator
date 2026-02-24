@@ -43,7 +43,7 @@ type WorkspaceSpec struct {
 	// add both "example.com" and "*.example.com" as separate entries (counts toward MaxItems).
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
-	// +kubebuilder:validation:Items:MaxLength=253
+	// +kubebuilder:validation:items:MaxLength=253
 	// +listType=set
 	AllowedFQDNs []string `json:"allowedFQDNs,omitempty"`
 }

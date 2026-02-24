@@ -271,11 +271,11 @@ var _ = Describe("controller", Ordered, func() {
 			}, 60*time.Second, time.Second).Should(Equal("True"))
 		})
 
-		It("creates a CiliumNetworkPolicy with FQDN rules for non-airgapped workspace", func() {
-			By("creating a non-airgapped Workspace with FQDNs")
+		It("creates a CiliumNetworkPolicy with FQDN rules for airgapped workspace", func() {
+			By("creating an airgapped Workspace with FQDNs")
 			fqdns := []string{"example.com", "*.corp.internal"}
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "fqdn-ws", false, fqdns)
+			cmd.Stdin = workspaceManifest(testNS, "fqdn-ws", true, fqdns)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 

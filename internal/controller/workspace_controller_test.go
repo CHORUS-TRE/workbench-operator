@@ -204,14 +204,14 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(egress).To(HaveLen(2))
 		})
 
-		It("emits a warning when AllowedFQDNs is set for an airgapped workspace", func() {
+		It("emits a warning when AllowedFQDNs is set for a non-airgapped workspace", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workspaceName,
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    true,
+					Airgapped:    false,
 					AllowedFQDNs: []string{"example.com"},
 				},
 			}
@@ -230,14 +230,14 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Eventually(recorder.Events, time.Second).Should(Receive(ContainSubstring("FQDNsIgnored")))
 		})
 
-		It("creates CNP with FQDN allowlist for non-airgapped workspace", func() {
+		It("creates CNP with FQDN allowlist for airgapped workspace", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workspaceName,
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    false,
+					Airgapped:    true,
 					AllowedFQDNs: []string{"example.com", "*.corp.internal"},
 				},
 			}
@@ -464,7 +464,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    false,
+					Airgapped:    true,
 					AllowedFQDNs: []string{"example.com"},
 				},
 			}
