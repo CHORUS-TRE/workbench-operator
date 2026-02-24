@@ -211,11 +211,6 @@ func httpPortRules() []map[string]any {
 				{"port": "80", "protocol": "TCP"},
 				{"port": "443", "protocol": "TCP"},
 			},
-			"rules": map[string]any{
-				"http": []map[string]any{
-					{},
-				},
-			},
 		},
 	}
 }
