@@ -52,36 +52,6 @@ const (
 	ReasonReconcileError = "ReconcileError"
 )
 
-// NetworkPolicyCondition represents the observed state of the network policy
-// for a workspace. It uses a custom "ready" field instead of the standard
-// metav1.Condition "status" field so that kubectl table columns and YAML field
-// names are consistent.
-type NetworkPolicyCondition struct {
-	// Type is the condition type, e.g. "NetworkPolicyReady".
-	Type string `json:"type"`
-
-	// Ready indicates whether the network policy has been successfully applied.
-	// Values: "True", "False", "Unknown".
-	// +optional
-	Ready metav1.ConditionStatus `json:"ready,omitempty"`
-
-	// ObservedGeneration is the generation this condition was computed from.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// LastTransitionTime is the last time the ready field changed.
-	// +optional
-	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
-
-	// Reason is a brief machine-readable explanation for the condition's state.
-	// +optional
-	Reason string `json:"reason,omitempty"`
-
-	// Message is a human-readable description of the condition.
-	// +optional
-	Message string `json:"message,omitempty"`
-}
-
 // WorkspaceSpec defines the desired state of Workspace
 type WorkspaceSpec struct {
 	// Airgapped indicates whether this workspace operates in an airgapped environment
@@ -113,19 +83,20 @@ type WorkspaceStatus struct {
 	// "Airgapped" (all external traffic blocked), "FQDNAllowlist" (FQDN allowlist active),
 	// "Error" (policy could not be applied, see conditions for reason).
 	// +optional
+	// +kubebuilder:validation:Enum=Progressing;Open;Airgapped;FQDNAllowlist;Error
 	NetworkPolicy string `json:"networkPolicy,omitempty"`
 
-	// Conditions holds the network policy condition for this workspace.
+	// Conditions represent the latest available observations of a Workspace's state.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
-	Conditions []NetworkPolicyCondition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Network-Policy",type=string,JSONPath=`.status.networkPolicy`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].ready`
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

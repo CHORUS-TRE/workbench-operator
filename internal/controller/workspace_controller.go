@@ -55,22 +55,25 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// before the reconcile completes.
 	if workspace.Status.NetworkPolicy == "" {
 		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyProgressing
-		setNetworkPolicyCondition(&workspace, defaultv1alpha1.NetworkPolicyCondition{
+		apimeta.SetStatusCondition(&workspace.Status.Conditions, metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
-			Ready:              metav1.ConditionFalse,
+			Status:             metav1.ConditionFalse,
 			ObservedGeneration: workspace.Generation,
 			Reason:             defaultv1alpha1.ReasonProgressing,
 			Message:            "Network policy reconciliation in progress",
 		})
+		// Best-effort: write Progressing so the user sees immediate feedback.
+		// If this update fails (e.g. conflict), the reconciler is requeued and
+		// the final status update will set the correct state.
 		_ = r.Status().Update(ctx, &workspace)
 	}
 
 	// Validate FQDNs before attempting reconciliation.
 	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		log.V(1).Info("Invalid FQDN in workspace spec", "error", err)
-		condition := defaultv1alpha1.NetworkPolicyCondition{
+		condition := metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
-			Ready:              metav1.ConditionFalse,
+			Status:             metav1.ConditionFalse,
 			ObservedGeneration: workspace.Generation,
 			Reason:             defaultv1alpha1.ReasonInvalidFQDN,
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
@@ -102,9 +105,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.reconcileNetworkPolicy(ctx, &workspace); err != nil {
 		if apimeta.IsNoMatchError(err) {
 			log.V(1).Info("CiliumNetworkPolicy CRD not found in cluster")
-			condition := defaultv1alpha1.NetworkPolicyCondition{
+			condition := metav1.Condition{
 				Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
-				Ready:              metav1.ConditionFalse,
+				Status:             metav1.ConditionFalse,
 				ObservedGeneration: workspace.Generation,
 				Reason:             defaultv1alpha1.ReasonCiliumNotInstalled,
 				Message:            "Network policy not applied: CiliumNetworkPolicy CRD not installed in the cluster",
@@ -124,9 +127,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		log.Error(err, "Error reconciling network policy", "workspace", workspace.Name)
-		condition := defaultv1alpha1.NetworkPolicyCondition{
+		condition := metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
-			Ready:              metav1.ConditionFalse,
+			Status:             metav1.ConditionFalse,
 			ObservedGeneration: workspace.Generation,
 			Reason:             defaultv1alpha1.ReasonReconcileError,
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
@@ -150,9 +153,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	workspace.Status.NetworkPolicy = mode
-	condition := defaultv1alpha1.NetworkPolicyCondition{
+	condition := metav1.Condition{
 		Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
-		Ready:              metav1.ConditionTrue,
+		Status:             metav1.ConditionTrue,
 		ObservedGeneration: workspace.Generation,
 		Reason:             defaultv1alpha1.ReasonApplied,
 		Message:            networkPolicyStatusMessage(workspace.Spec),
@@ -292,26 +295,8 @@ func networkPolicyStatusMessage(spec defaultv1alpha1.WorkspaceSpec) string {
 	return fmt.Sprintf("Network policy applied: airgapped, allowed FQDNs: %s", strings.Join(spec.AllowedFQDNs, ", "))
 }
 
-// setNetworkPolicyCondition sets or updates the NetworkPolicyReady condition on the workspace.
-// It preserves LastTransitionTime when the ready state has not changed.
-func setNetworkPolicyCondition(ws *defaultv1alpha1.Workspace, cond defaultv1alpha1.NetworkPolicyCondition) {
-	for i, c := range ws.Status.Conditions {
-		if c.Type == cond.Type {
-			if c.Ready != cond.Ready {
-				cond.LastTransitionTime = metav1.Now()
-			} else {
-				cond.LastTransitionTime = c.LastTransitionTime
-			}
-			ws.Status.Conditions[i] = cond
-			return
-		}
-	}
-	cond.LastTransitionTime = metav1.Now()
-	ws.Status.Conditions = append(ws.Status.Conditions, cond)
-}
-
-func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, workspace *defaultv1alpha1.Workspace, condition defaultv1alpha1.NetworkPolicyCondition, logMsg string, logAtV1 bool) error {
-	setNetworkPolicyCondition(workspace, condition)
+func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, workspace *defaultv1alpha1.Workspace, condition metav1.Condition, logMsg string, logAtV1 bool) error {
+	apimeta.SetStatusCondition(&workspace.Status.Conditions, condition)
 	workspace.Status.ObservedGeneration = workspace.Generation
 
 	if err := r.Status().Update(ctx, workspace); err != nil {
