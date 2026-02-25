@@ -15,11 +15,14 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.airgapped
-      name: Airgapped
-      type: boolean
-    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].status
+    - jsonPath: .status.networkPolicy
       name: Network-Policy
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].status
+      name: Status
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].reason
+      name: Reason
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -56,7 +59,7 @@ spec:
               allowedFQDNs:
                 description: |-
                   AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
-                  Only used when Airgapped is false. Each entry can be an exact domain (e.g. example.com)
+                  Only used when Airgapped is true. Each entry can be an exact domain (e.g. example.com)
                   or a wildcard pattern (e.g. *.corp.internal).
 
                   Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
@@ -136,6 +139,19 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              networkPolicy:
+                description: |-
+                  NetworkPolicy is the network policy mode currently active for this workspace.
+                  Values: "Progressing" (reconcile in progress), "Open" (full internet allowed),
+                  "Airgapped" (all external traffic blocked), "FQDNAllowlist" (FQDN allowlist active),
+                  "Error" (policy could not be applied, see conditions for reason).
+                enum:
+                - Progressing
+                - Open
+                - Airgapped
+                - FQDNAllowlist
+                - Error
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.

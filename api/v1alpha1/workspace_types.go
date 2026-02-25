@@ -11,10 +11,34 @@ const (
 	ConditionNetworkPolicyReady = "NetworkPolicyReady"
 )
 
+// NetworkPolicy status values for WorkspaceStatus.NetworkPolicy.
+const (
+	// NetworkPolicyProgressing means the workspace was just created and the
+	// network policy reconciliation has not completed yet.
+	NetworkPolicyProgressing = "Progressing"
+
+	// NetworkPolicyOpen means the policy is applied with full internet access.
+	NetworkPolicyOpen = "Open"
+
+	// NetworkPolicyAirgapped means the policy is applied with all external traffic blocked.
+	NetworkPolicyAirgapped = "Airgapped"
+
+	// NetworkPolicyFQDNAllowlist means the policy is applied with an FQDN allowlist.
+	NetworkPolicyFQDNAllowlist = "FQDNAllowlist"
+
+	// NetworkPolicyError means the policy could not be applied. See conditions for reason.
+	NetworkPolicyError = "Error"
+)
+
 // Condition reason constants for Workspace status.
 const (
-	// ReasonReconciled means the network policy was successfully applied.
-	ReasonReconciled = "Reconciled"
+	// ReasonProgressing means the workspace was just created and the network
+	// policy reconciliation has not completed yet.
+	ReasonProgressing = "Progressing"
+
+	// ReasonApplied means the network policy was successfully applied.
+	// The active mode is reflected in status.networkPolicy.
+	ReasonApplied = "Applied"
 
 	// ReasonCiliumNotInstalled means the CiliumNetworkPolicy CRD is not
 	// present in the cluster, so network policies cannot be enforced.
@@ -34,7 +58,7 @@ type WorkspaceSpec struct {
 	Airgapped bool `json:"airgapped"`
 
 	// AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
-	// Only used when Airgapped is false. Each entry can be an exact domain (e.g. example.com)
+	// Only used when Airgapped is true. Each entry can be an exact domain (e.g. example.com)
 	// or a wildcard pattern (e.g. *.corp.internal).
 	//
 	// Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
@@ -54,6 +78,14 @@ type WorkspaceStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// NetworkPolicy is the network policy mode currently active for this workspace.
+	// Values: "Progressing" (reconcile in progress), "Open" (full internet allowed),
+	// "Airgapped" (all external traffic blocked), "FQDNAllowlist" (FQDN allowlist active),
+	// "Error" (policy could not be applied, see conditions for reason).
+	// +optional
+	// +kubebuilder:validation:Enum=Progressing;Open;Airgapped;FQDNAllowlist;Error
+	NetworkPolicy string `json:"networkPolicy,omitempty"`
+
 	// Conditions represent the latest available observations of a Workspace's state.
 	// +optional
 	// +listType=map
@@ -63,8 +95,9 @@ type WorkspaceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Airgapped",type=boolean,JSONPath=`.spec.airgapped`
-// +kubebuilder:printcolumn:name="Network-Policy",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].status`
+// +kubebuilder:printcolumn:name="Network-Policy",type=string,JSONPath=`.status.networkPolicy`
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workspace is the Schema for the workspaces API

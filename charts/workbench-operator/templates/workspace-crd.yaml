@@ -16,11 +16,14 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.airgapped
-      name: Airgapped
-      type: boolean
-    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].status
+    - jsonPath: .status.networkPolicy
       name: Network-Policy
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].status
+      name: Status
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].reason
+      name: Reason
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -57,17 +60,19 @@ spec:
               allowedFQDNs:
                 description: |-
                   AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
-                  Only used when Airgapped is false. Each entry can be an exact domain (e.g. example.com)
+                  Only used when Airgapped is true. Each entry can be an exact domain (e.g. example.com)
                   or a wildcard pattern (e.g. *.corp.internal).
-                  Wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
-                  Entries must contain at least one dot (two labels), e.g. "example.com".
-                  Each entry produces one Cilium FQDN selector. To allow both apex and subdomains, add both
-                  "example.com" and "*.example.com" as separate entries (counts toward maxItems).
+
+                  Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
+                  Note: entries must contain at least one dot (two labels), e.g. "example.com".
+                  Note: each entry produces one Cilium FQDN selector. To allow both apex and subdomains,
+                  add both "example.com" and "*.example.com" as separate entries (counts toward MaxItems).
                 items:
                   maxLength: 253
                   type: string
                 maxItems: 64
                 type: array
+                x-kubernetes-list-type: set
             required:
             - airgapped
             type: object
@@ -104,7 +109,10 @@ spec:
                     reason:
                       description: |-
                         reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                        Consumers of the API should prefer shorter reasons.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
                       maxLength: 1024
                       minLength: 1
                       pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
@@ -132,6 +140,19 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              networkPolicy:
+                description: |-
+                  NetworkPolicy is the network policy mode currently active for this workspace.
+                  Values: "Progressing" (reconcile in progress), "Open" (full internet allowed),
+                  "Airgapped" (all external traffic blocked), "FQDNAllowlist" (FQDN allowlist active),
+                  "Error" (policy could not be applied, see conditions for reason).
+                enum:
+                - Progressing
+                - Open
+                - Airgapped
+                - FQDNAllowlist
+                - Error
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
