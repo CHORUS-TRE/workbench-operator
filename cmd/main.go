@@ -213,6 +213,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
 		os.Exit(1)
 	}
+	if err = (&controller.WorkspaceReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("workspace-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

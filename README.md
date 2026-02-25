@@ -36,6 +36,10 @@ To expose a Workbench on the Internet, an Ingress will be needed. It should poin
 
 As a server is a `Deployment`, stopping it from the inside will _restart_ it.
 
+If the operator starts before the CiliumNetworkPolicy CRD exists, it will skip
+the CNP watch until the controller is restarted. Install Cilium (or the CRD)
+before deploying the operator, or restart the operator after Cilium is installed.
+
 ### TODO
 
 - Handling the whole life cycle when the user stops the Server from within;
@@ -45,6 +49,8 @@ As a server is a `Deployment`, stopping it from the inside will _restart_ it.
 - etc.
 
 ## Getting Started
+
+> **Local development?** See [CONTRIBUTING.md](CONTRIBUTING.md) for a step-by-step guide using Colima + k3s on macOS.
 
 ### Prerequisites
 
@@ -134,7 +140,7 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/workbench-operator/<tag
 
 ## Contributing
 
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, testing, and day-to-day commands.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
