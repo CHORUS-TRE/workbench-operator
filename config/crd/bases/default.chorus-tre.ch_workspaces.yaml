@@ -18,9 +18,6 @@ spec:
     - jsonPath: .status.networkPolicy
       name: Network-Policy
       type: string
-    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].status
-      name: Status
-      type: string
     - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].reason
       name: Reason
       type: string
@@ -52,14 +49,10 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace
             properties:
-              airgapped:
-                description: Airgapped indicates whether this workspace operates in
-                  an airgapped environment
-                type: boolean
               allowedFQDNs:
                 description: |-
                   AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
-                  Only used when Airgapped is true. Each entry can be an exact domain (e.g. example.com)
+                  Only used when NetworkPolicy is FQDNAllowlist. Each entry can be an exact domain (e.g. example.com)
                   or a wildcard pattern (e.g. *.corp.internal).
 
                   Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
@@ -72,8 +65,19 @@ spec:
                 maxItems: 64
                 type: array
                 x-kubernetes-list-type: set
+              networkPolicy:
+                description: |-
+                  NetworkPolicy defines the desired network policy mode for this workspace.
+                  - Open: all external internet traffic is allowed.
+                  - Airgapped: all external traffic is blocked.
+                  - FQDNAllowlist: only the FQDNs listed in AllowedFQDNs are allowed.
+                enum:
+                - Open
+                - Airgapped
+                - FQDNAllowlist
+                type: string
             required:
-            - airgapped
+            - networkPolicy
             type: object
           status:
             description: WorkspaceStatus defines the observed state of Workspace

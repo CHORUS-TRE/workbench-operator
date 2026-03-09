@@ -182,7 +182,7 @@ var _ = Describe("controller", Ordered, func() {
 
 			By("verifying the controller is actively reconciling with a probe workspace")
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "probe-ws", true, nil)
+			cmd.Stdin = workspaceManifest(testNS, "probe-ws", "Airgapped", nil)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -237,7 +237,7 @@ var _ = Describe("controller", Ordered, func() {
 		It("creates a CiliumNetworkPolicy for an airgapped workspace", func() {
 			By("creating an airgapped Workspace")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "airgapped-ws", true, nil)
+			cmd.Stdin = workspaceManifest(testNS, "airgapped-ws", "Airgapped", nil)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -248,7 +248,7 @@ var _ = Describe("controller", Ordered, func() {
 				return err
 			}, 60*time.Second, time.Second).Should(Succeed())
 
-			By("verifying CNP has 2 egress rules (DNS + intra-namespace)")
+			By("verifying CNP has 2 egress rules (kube-dns + intra-namespace)")
 			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-egress",
 				"-n", testNS, "-o", "jsonpath={.spec.egress}")
 			out, err := utils.Run(cmd)
@@ -271,11 +271,11 @@ var _ = Describe("controller", Ordered, func() {
 			}, 60*time.Second, time.Second).Should(Equal("True"))
 		})
 
-		It("creates a CiliumNetworkPolicy with FQDN rules for airgapped workspace", func() {
-			By("creating an airgapped Workspace with FQDNs")
+		It("creates a CiliumNetworkPolicy restricting egress to specified FQDNs", func() {
+			By("creating a FQDNAllowlist Workspace")
 			fqdns := []string{"example.com", "*.corp.internal"}
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "fqdn-ws", true, fqdns)
+			cmd.Stdin = workspaceManifest(testNS, "fqdn-ws", "FQDNAllowlist", fqdns)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -303,10 +303,10 @@ var _ = Describe("controller", Ordered, func() {
 			Expect(string(out)).To(ContainSubstring("*.corp.internal"))
 		})
 
-		It("creates a CiliumNetworkPolicy with full internet for non-airgapped workspace without FQDNs", func() {
-			By("creating a non-airgapped Workspace without FQDNs")
+		It("creates a CiliumNetworkPolicy allowing full internet for Open workspace", func() {
+			By("creating an Open Workspace")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "open-ws", false, nil)
+			cmd.Stdin = workspaceManifest(testNS, "open-ws", "Open", nil)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -325,7 +325,7 @@ var _ = Describe("controller", Ordered, func() {
 		It("sets owner reference so CNP is garbage-collected with workspace", func() {
 			By("creating a Workspace")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "owner-ws", true, nil)
+			cmd.Stdin = workspaceManifest(testNS, "owner-ws", "Airgapped", nil)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -363,7 +363,7 @@ var _ = Describe("controller", Ordered, func() {
 		It("updates CNP when workspace spec changes", func() {
 			By("creating an airgapped Workspace")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "update-ws", true, nil)
+			cmd.Stdin = workspaceManifest(testNS, "update-ws", "Airgapped", nil)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -382,9 +382,9 @@ var _ = Describe("controller", Ordered, func() {
 				return len(egress)
 			}, 60*time.Second, time.Second).Should(Equal(2))
 
-			By("switching workspace to non-airgapped")
+			By("switching workspace to Open")
 			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "update-ws", false, nil)
+			cmd.Stdin = workspaceManifest(testNS, "update-ws", "Open", nil)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 

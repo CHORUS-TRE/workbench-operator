@@ -18,12 +18,12 @@ var _ = Describe("buildNetworkPolicy", func() {
 				Namespace: "workspace-ns",
 			},
 			Spec: defaultv1alpha1.WorkspaceSpec{
-				Airgapped: true,
+				NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 			},
 		}
 	}
 
-	It("builds DNS + intra-namespace egress for airgapped workspace", func() {
+	It("builds kube-dns + intra-namespace egress for Airgapped workspace", func() {
 		ws := baseWorkspace()
 
 		cnp, err := buildNetworkPolicy(ws)
@@ -49,9 +49,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
 	})
 
-	It("adds FQDN allowlist rules with HTTP/HTTPS ports when airgapped", func() {
+	It("adds FQDN allowlist rules with HTTP/HTTPS ports when FQDNAllowlist", func() {
 		ws := baseWorkspace()
-		ws.Spec.Airgapped = true
+		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyFQDNAllowlist
 		ws.Spec.AllowedFQDNs = []string{"example.com", "*.corp.internal"}
 
 		cnp, err := buildNetworkPolicy(ws)
@@ -72,9 +72,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 	})
 
-	It("allows full internet on HTTP/HTTPS when not airgapped and no FQDNs specified", func() {
+	It("allows full internet on HTTP/HTTPS when Open and no FQDNs specified", func() {
 		ws := baseWorkspace()
-		ws.Spec.Airgapped = false
+		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyOpen
 
 		cnp, err := buildNetworkPolicy(ws)
 		Expect(err).NotTo(HaveOccurred())
@@ -105,7 +105,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 	It("returns an error when called with invalid FQDNs", func() {
 		ws := baseWorkspace()
-		ws.Spec.Airgapped = false
+		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyFQDNAllowlist
 		ws.Spec.AllowedFQDNs = []string{"invalid domain with spaces"}
 
 		_, err := buildNetworkPolicy(ws)

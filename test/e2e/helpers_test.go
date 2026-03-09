@@ -9,7 +9,7 @@ import (
 
 // workspaceManifest returns a reader producing a Workspace YAML manifest for
 // use with kubectl apply -f -.
-func workspaceManifest(namespace, name string, airgapped bool, allowedFQDNs []string) io.Reader {
+func workspaceManifest(namespace, name, networkPolicy string, allowedFQDNs []string) io.Reader {
 	fqdnJSON := "[]"
 	if len(allowedFQDNs) > 0 {
 		b, err := json.Marshal(allowedFQDNs)
@@ -25,9 +25,9 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  airgapped: %t
+  networkPolicy: %s
   allowedFQDNs: %s
-`, name, namespace, airgapped, fqdnJSON)
+`, name, namespace, networkPolicy, fqdnJSON)
 
 	return strings.NewReader(manifest)
 }
