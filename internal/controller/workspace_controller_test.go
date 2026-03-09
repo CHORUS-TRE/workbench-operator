@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -80,8 +79,8 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    false,
-					AllowedFQDNs: []string{"valid.com", "not a domain!"},
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyOpen,
+					AllowedFQDNs:  []string{"valid.com", "not a domain!"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -104,15 +103,15 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("sets NetworkPolicyReady=False for non-airgapped workspace with empty FQDN entry", func() {
+		It("sets NetworkPolicyReady=False for workspace with empty FQDN entry", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workspaceName,
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    false,
-					AllowedFQDNs: []string{""},
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyFQDNAllowlist,
+					AllowedFQDNs:  []string{""},
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -137,7 +136,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -174,7 +173,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -198,48 +197,22 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cnp.GetLabels()).To(HaveKeyWithValue("workspace", workspaceName))
 
-			// Verify egress rules: airgapped → 2 rules (DNS + intra-namespace)
+			// Verify egress rules: Airgapped → 2 rules (kube-dns + intra-namespace)
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(2))
+			Expect(egress).To(HaveLen(2)) // kube-dns + intra-namespace
 		})
 
-		It("emits a warning when AllowedFQDNs is set for a non-airgapped workspace", func() {
+		It("creates CNP restricting egress to specified FQDNs", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workspaceName,
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    false,
-					AllowedFQDNs: []string{"example.com"},
-				},
-			}
-			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
-
-			recorder := record.NewFakeRecorder(10)
-			reconciler := &WorkspaceReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: recorder,
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
-			Expect(err).NotTo(HaveOccurred())
-
-			Eventually(recorder.Events, time.Second).Should(Receive(ContainSubstring("FQDNsIgnored")))
-		})
-
-		It("creates CNP with FQDN allowlist for airgapped workspace", func() {
-			workspace := &defaultv1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      workspaceName,
-					Namespace: workspaceNamespace,
-				},
-				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    true,
-					AllowedFQDNs: []string{"example.com", "*.corp.internal"},
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyFQDNAllowlist,
+					AllowedFQDNs:  []string{"example.com", "*.corp.internal"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -255,7 +228,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(3)) // DNS + intra-ns + FQDN
+			Expect(egress).To(HaveLen(3)) // kube-dns + intra-ns + FQDN
 
 			// Verify condition
 			updated := &defaultv1alpha1.Workspace{}
@@ -266,14 +239,14 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyFQDNAllowlist))
 		})
 
-		It("creates CNP with full internet access when non-airgapped and no FQDNs", func() {
+		It("creates CNP with full internet access when open and no FQDNs", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workspaceName,
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: false,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyOpen,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -289,7 +262,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(3)) // DNS + intra-ns + CIDR
+			Expect(egress).To(HaveLen(3)) // kube-dns + intra-ns + CIDR
 
 			// Verify the toCIDR rule is present
 			lastRule := egress[2].(map[string]any)
@@ -311,7 +284,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -334,7 +307,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -362,7 +335,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -395,7 +368,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -419,14 +392,14 @@ var _ = Describe("WorkspaceReconciler", func() {
 	})
 
 	Describe("Reconcile - CNP update", func() {
-		It("updates CNP when workspace spec changes from airgapped to non-airgapped", func() {
+		It("updates CNP when workspace spec changes from airgapped to open", func() {
 			workspace := &defaultv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workspaceName,
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -435,24 +408,24 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify airgapped: 2 egress rules
+			// Verify Airgapped: 2 egress rules
 			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			egress := spec.(map[string]any)["egress"].([]any)
 			Expect(egress).To(HaveLen(2))
 
-			// Update workspace to non-airgapped
+			// Update workspace to Open (full internet)
 			fresh := &defaultv1alpha1.Workspace{}
 			Expect(k8sClient.Get(ctx, namespacedName, fresh)).To(Succeed())
-			fresh.Spec.Airgapped = false
+			fresh.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyOpen
 			Expect(k8sClient.Update(ctx, fresh)).To(Succeed())
 
 			// Reconcile again
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify non-airgapped: 3 egress rules (DNS + intra-ns + CIDR)
+			// Verify Open: 3 egress rules (kube-dns + intra-ns + CIDR)
 			cnp, err = getCNP(workspaceName+"-egress", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			spec, _, _ = unstructured.NestedFieldCopy(cnp.Object, "spec")
@@ -467,8 +440,8 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped:    true,
-					AllowedFQDNs: []string{"example.com"},
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyFQDNAllowlist,
+					AllowedFQDNs:  []string{"example.com"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -507,7 +480,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
@@ -540,7 +513,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 					Namespace: workspaceNamespace,
 				},
 				Spec: defaultv1alpha1.WorkspaceSpec{
-					Airgapped: true,
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
 				},
 			}
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())

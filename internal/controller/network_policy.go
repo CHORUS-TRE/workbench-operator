@@ -110,13 +110,13 @@ func validateFQDNs(entries []string) error {
 }
 
 // buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
-// that enforces workspace-level egress policy (DNS + intra-namespace + optional
+// that enforces workspace-level egress policy (kube-dns + intra-namespace + optional
 // FQDN allowlist or full internet).
 //
 // Policy mapping:
-//   - Airgapped=false            → DNS + intra-namespace + full internet (FQDNs ignored)
-//   - Airgapped=true + FQDNs    → DNS + intra-namespace + FQDN allowlist
-//   - Airgapped=true + no FQDNs → DNS + intra-namespace only
+//   - Open          → kube-dns + intra-namespace + full internet
+//   - FQDNAllowlist → kube-dns + intra-namespace + FQDN allowlist
+//   - Airgapped     → kube-dns + intra-namespace only
 //
 // IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
 // Returns an error if invalid FQDNs are detected.
@@ -168,21 +168,21 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		},
 	}
 
-	if workspace.Spec.Airgapped {
-		// Airgapped: only allow FQDNs if specified, otherwise block all external traffic.
-		fqdnSelectors := toFQDNSelectors(workspace.Spec.AllowedFQDNs)
-		if len(fqdnSelectors) > 0 {
-			egressRules = append(egressRules, map[string]any{
-				"toFQDNs": fqdnSelectors,
-				"toPorts": httpPortRules(),
-			})
-		}
-	} else {
-		// Not airgapped: allow all internet on HTTP/HTTPS regardless of AllowedFQDNs.
+	switch workspace.Spec.NetworkPolicy {
+	case defaultv1alpha1.NetworkPolicyOpen:
+		// Allow all internet on HTTP/HTTPS.
 		egressRules = append(egressRules, map[string]any{
 			"toCIDR":  []string{"0.0.0.0/0", "::/0"},
 			"toPorts": httpPortRules(),
 		})
+	case defaultv1alpha1.NetworkPolicyFQDNAllowlist:
+		// Allow only the specified FQDNs on HTTP/HTTPS.
+		egressRules = append(egressRules, map[string]any{
+			"toFQDNs": toFQDNSelectors(workspace.Spec.AllowedFQDNs),
+			"toPorts": httpPortRules(),
+		})
+	default:
+		// Airgapped: no external traffic beyond kube-dns and intra-namespace.
 	}
 
 	return &unstructured.Unstructured{

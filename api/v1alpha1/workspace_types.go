@@ -54,11 +54,15 @@ const (
 
 // WorkspaceSpec defines the desired state of Workspace
 type WorkspaceSpec struct {
-	// Airgapped indicates whether this workspace operates in an airgapped environment
-	Airgapped bool `json:"airgapped"`
+	// NetworkPolicy defines the desired network policy mode for this workspace.
+	// - Open: all external internet traffic is allowed.
+	// - Airgapped: all external traffic is blocked.
+	// - FQDNAllowlist: only the FQDNs listed in AllowedFQDNs are allowed.
+	// +kubebuilder:validation:Enum=Open;Airgapped;FQDNAllowlist
+	NetworkPolicy string `json:"networkPolicy"`
 
 	// AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
-	// Only used when Airgapped is true. Each entry can be an exact domain (e.g. example.com)
+	// Only used when NetworkPolicy is FQDNAllowlist. Each entry can be an exact domain (e.g. example.com)
 	// or a wildcard pattern (e.g. *.corp.internal).
 	//
 	// Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
@@ -96,7 +100,6 @@ type WorkspaceStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Network-Policy",type=string,JSONPath=`.status.networkPolicy`
-// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

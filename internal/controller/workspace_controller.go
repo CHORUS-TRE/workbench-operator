@@ -92,15 +92,6 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	if !workspace.Spec.Airgapped && len(workspace.Spec.AllowedFQDNs) > 0 {
-		r.Recorder.Event(
-			&workspace,
-			"Warning",
-			"FQDNsIgnored",
-			"AllowedFQDNs provided but Airgapped=false; FQDNs will be ignored, all internet traffic is allowed",
-		)
-	}
-
 	// Reconcile the CiliumNetworkPolicy.
 	if err := r.reconcileNetworkPolicy(ctx, &workspace); err != nil {
 		if apimeta.IsNoMatchError(err) {
@@ -141,18 +132,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Success: determine the active network policy mode.
-	var mode string
-	switch {
-	case !workspace.Spec.Airgapped:
-		mode = defaultv1alpha1.NetworkPolicyOpen
-	case len(workspace.Spec.AllowedFQDNs) > 0:
-		mode = defaultv1alpha1.NetworkPolicyFQDNAllowlist
-	default:
-		mode = defaultv1alpha1.NetworkPolicyAirgapped
-	}
-
-	workspace.Status.NetworkPolicy = mode
+	// Success: mirror spec mode to status. Error and Progressing states are set
+	// in the error paths above; reaching here guarantees a valid applied mode.
+	workspace.Status.NetworkPolicy = workspace.Spec.NetworkPolicy
 	condition := metav1.Condition{
 		Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 		Status:             metav1.ConditionTrue,
@@ -286,13 +268,14 @@ func (r *WorkspaceReconciler) ensureWorkspaceControllerRef(workspace *defaultv1a
 }
 
 func networkPolicyStatusMessage(spec defaultv1alpha1.WorkspaceSpec) string {
-	if !spec.Airgapped {
+	switch spec.NetworkPolicy {
+	case defaultv1alpha1.NetworkPolicyOpen:
 		return "Network policy applied: all external internet traffic allowed (ports 80/443)"
-	}
-	if len(spec.AllowedFQDNs) == 0 {
+	case defaultv1alpha1.NetworkPolicyFQDNAllowlist:
+		return fmt.Sprintf("Network policy applied: airgapped, allowed FQDNs: %s", strings.Join(spec.AllowedFQDNs, ", "))
+	default:
 		return "Network policy applied: airgapped, all external traffic blocked"
 	}
-	return fmt.Sprintf("Network policy applied: airgapped, allowed FQDNs: %s", strings.Join(spec.AllowedFQDNs, ", "))
 }
 
 func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, workspace *defaultv1alpha1.Workspace, condition metav1.Condition, logMsg string, logAtV1 bool) error {
