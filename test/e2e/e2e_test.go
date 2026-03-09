@@ -404,4 +404,163 @@ var _ = Describe("controller", Ordered, func() {
 			}, 60*time.Second, time.Second).Should(Equal(3))
 		})
 	})
+
+	Context("Workspace services", Ordered, func() {
+		const testNS = "services-test"
+		const wsName = "svc-test-ws"
+		const releaseName = wsName + "--postgres"
+
+		BeforeAll(func() {
+			By("creating test namespace")
+			cmd := exec.Command("kubectl", "create", "ns", testNS)
+			_, _ = utils.Run(cmd)
+
+			By("verifying the controller is actively reconciling with a probe workspace")
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = workspaceManifest(testNS, "probe-ws", "Airgapped", nil)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "workspace", "probe-ws",
+					"-n", testNS, "-o",
+					`jsonpath={.status.conditions[?(@.type=="NetworkPolicyReady")].status}`)
+				out, _ := utils.Run(cmd)
+				return string(out)
+			}, 120*time.Second, 2*time.Second).ShouldNot(BeEmpty())
+
+			By("cleaning up probe workspace")
+			cmd = exec.Command("kubectl", "delete", "workspace", "probe-ws", "-n", testNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		AfterAll(func() {
+			By("removing test namespace")
+			cmd := exec.Command("kubectl", "delete", "ns", testNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		AfterEach(func() {
+			if CurrentSpecReport().Failed() {
+				dumpDiagnostics(testNS)
+			}
+		})
+
+		It("deploys postgres and reports Running status", func() {
+			By("creating a workspace with a postgres service in state Running")
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = workspaceWithServiceManifest(testNS, wsName, "Airgapped", "Running")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for status.services.postgres.status == Running")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "workspace", wsName,
+					"-n", testNS, "-o",
+					`jsonpath={.status.services.postgres.status}`)
+				out, _ := utils.Run(cmd)
+				return string(out)
+			}, 120*time.Second, 2*time.Second).Should(Equal("Running"))
+
+			By("verifying credential secret was created")
+			cmd = exec.Command("kubectl", "get", "secret", "postgres-creds", "-n", testNS)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying connectionInfo is populated")
+			cmd = exec.Command("kubectl", "get", "workspace", wsName,
+				"-n", testNS, "-o",
+				`jsonpath={.status.services.postgres.connectionInfo}`)
+			out, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(out)).To(ContainSubstring(releaseName))
+		})
+
+		It("stops the postgres service while retaining the PVC", func() {
+			By("patching the service state to Stopped")
+			cmd := exec.Command("kubectl", "patch", "workspace", wsName,
+				"-n", testNS, "--type=merge",
+				`--patch={"spec":{"services":{"postgres":{"state":"Stopped"}}}}`)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for status.services.postgres.status == Stopped")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "workspace", wsName,
+					"-n", testNS, "-o",
+					`jsonpath={.status.services.postgres.status}`)
+				out, _ := utils.Run(cmd)
+				return string(out)
+			}, 60*time.Second, 2*time.Second).Should(Equal("Stopped"))
+
+			By("verifying no pods remain for the release")
+			cmd = exec.Command("kubectl", "get", "pods",
+				"-l", "app.kubernetes.io/instance="+releaseName,
+				"-n", testNS, "-o", "jsonpath={.items}")
+			out, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			var items []any
+			_ = json.Unmarshal(out, &items)
+			Expect(items).To(BeEmpty())
+
+			By("verifying PVC is still present")
+			Eventually(func() error {
+				cmd := exec.Command("kubectl", "get", "pvc",
+					"-l", "app.kubernetes.io/instance="+releaseName,
+					"-n", testNS)
+				_, err := utils.Run(cmd)
+				return err
+			}, 10*time.Second, time.Second).Should(Succeed())
+		})
+
+		It("restarts the postgres service reusing the existing PVC", func() {
+			By("patching the service state back to Running")
+			cmd := exec.Command("kubectl", "patch", "workspace", wsName,
+				"-n", testNS, "--type=merge",
+				`--patch={"spec":{"services":{"postgres":{"state":"Running"}}}}`)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for status.services.postgres.status == Running")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "workspace", wsName,
+					"-n", testNS, "-o",
+					`jsonpath={.status.services.postgres.status}`)
+				out, _ := utils.Run(cmd)
+				return string(out)
+			}, 120*time.Second, 2*time.Second).Should(Equal("Running"))
+		})
+
+		It("deletes the postgres service and its PVC", func() {
+			By("patching the service state to Deleted")
+			cmd := exec.Command("kubectl", "patch", "workspace", wsName,
+				"-n", testNS, "--type=merge",
+				`--patch={"spec":{"services":{"postgres":{"state":"Deleted"}}}}`)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for status.services.postgres.status == Deleted")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "get", "workspace", wsName,
+					"-n", testNS, "-o",
+					`jsonpath={.status.services.postgres.status}`)
+				out, _ := utils.Run(cmd)
+				return string(out)
+			}, 60*time.Second, 2*time.Second).Should(Equal("Deleted"))
+
+			By("verifying PVC is deleted")
+			Eventually(func() bool {
+				cmd := exec.Command("kubectl", "get", "pvc",
+					"-l", "app.kubernetes.io/instance="+releaseName,
+					"-n", testNS, "-o", "jsonpath={.items}")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				var items []any
+				_ = json.Unmarshal(out, &items)
+				return len(items) == 0
+			}, 60*time.Second, 2*time.Second).Should(BeTrue())
+		})
+	})
 })

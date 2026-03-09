@@ -45,6 +45,7 @@ func main() {
 	var enableHTTP2 bool
 	var registry string
 	var appsRepository string
+	var servicesRepository string
 	var xpraServerImage string
 	var initContainerImage string
 	var socatImage string
@@ -75,6 +76,7 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&registry, "registry", "harbor.build.chorus-tre.local", "The hostname of the OCI registry")
 	flag.StringVar(&appsRepository, "apps-repository", "apps", "The repository holding the apps")
+	flag.StringVar(&servicesRepository, "services-repository", "services", "The OCI project holding the Helm charts for workspace services")
 	flag.StringVar(&xpraServerImage, "xpra-server-image", "", "Xpra server OCI image name (version is part of the CRD)")
 	flag.StringVar(&initContainerImage, "init-container-image", "", "Init container OCI image name (no version)")
 	flag.StringVar(&socatImage, "socat-image", "", "socat OCI image (please specify the version)")
@@ -214,9 +216,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controller.WorkspaceReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("workspace-controller"),
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		Recorder:           mgr.GetEventRecorderFor("workspace-controller"),
+		RestConfig:         mgr.GetConfig(),
+		Registry:           registry,
+		ServicesRepository: servicesRepository,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)

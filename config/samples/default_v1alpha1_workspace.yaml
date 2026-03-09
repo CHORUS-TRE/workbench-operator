@@ -13,3 +13,20 @@ spec:
   # allowedFQDNs:                # only used when networkPolicy: FQDNAllowlist
   #   - chorus-tre.ch
   #   - "*.chorus-tre.ch"
+  services:
+    postgres:
+      state: Running
+      chart:
+        repository: services/postgres
+        tag: "1.6.1"
+      credentials:
+        secretName: postgres-creds
+        paths:
+          - settings.superuserPassword
+      values:
+        settings:
+          superuser: postgres
+          superuserDatabase: workspacedb
+        storage:
+          requestedSize: 1Gi
+      connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/workspacedb (secret: {{.SecretName}})"

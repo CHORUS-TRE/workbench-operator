@@ -76,6 +76,75 @@ spec:
                 - Airgapped
                 - FQDNAllowlist
                 type: string
+              services:
+                additionalProperties:
+                  description: WorkspaceService defines a Helm-chart-based service
+                    running in the workspace namespace.
+                  properties:
+                    chart:
+                      description: |-
+                        Chart identifies the Helm chart to deploy.
+                        Registry and Repository are optional and fall back to operator defaults.
+                      properties:
+                        registry:
+                          description: Registry represents the hostname of the OCI
+                            registry. E.g. harbor.build.chorus-tre.local
+                          type: string
+                        repository:
+                          description: Repository contains the project and chart name.
+                            E.g. services/postgres
+                          type: string
+                        tag:
+                          description: Tag contains the chart version (semver). E.g.
+                            1.6.1
+                          type: string
+                      required:
+                      - tag
+                      type: object
+                    connectionInfoTemplate:
+                      description: |-
+                        ConnectionInfoTemplate is a Go template rendered into status.services[*].connectionInfo.
+                        Available variables: .Namespace, .ReleaseName, .SecretName
+                      type: string
+                    credentials:
+                      description: |-
+                        Credentials configures auto-generated password injection.
+                        Passwords are never written to the CRD — only to the named Secret.
+                      properties:
+                        paths:
+                          description: |-
+                            Paths is a list of dot-notation Helm value paths for which the operator auto-generates passwords.
+                            One 24-char random password is generated per entry, stored in SecretName, and injected into Helm.
+                          items:
+                            type: string
+                          type: array
+                        secretName:
+                          description: |-
+                            SecretName is the name of the Kubernetes Secret the operator creates in the workspace namespace.
+                            Passwords are stored here and never written to the CRD.
+                          type: string
+                      required:
+                      - secretName
+                      type: object
+                    state:
+                      default: Running
+                      description: State controls the service lifecycle.
+                      enum:
+                      - Running
+                      - Stopped
+                      - Deleted
+                      type: string
+                    values:
+                      description: |-
+                        Values contains free-form Helm values merged at install/upgrade time.
+                        Use to override chart defaults (e.g. storage.requestedSize).
+                        Credential values take precedence over anything set here.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - chart
+                  type: object
+                description: Services represent a map of services and their state
+                type: object
             required:
             - networkPolicy
             type: object
@@ -161,6 +230,34 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              services:
+                additionalProperties:
+                  description: WorkspaceStatusService is the observed status of a
+                    workspace service.
+                  properties:
+                    connectionInfo:
+                      description: ConnectionInfo is the rendered connection string
+                        from connectionInfoTemplate.
+                      type: string
+                    message:
+                      description: Message provides additional context (e.g. error
+                        details).
+                      type: string
+                    status:
+                      description: Status is the observed lifecycle state of the service.
+                      enum:
+                      - Progressing
+                      - Running
+                      - Stopped
+                      - Deleted
+                      - Failed
+                      type: string
+                  required:
+                  - status
+                  type: object
+                description: Services represent the observed state of each workspace
+                  service.
+                type: object
             type: object
         type: object
     served: true

@@ -34,6 +34,7 @@ controllerManager:
     - --health-probe-bind-address=:8081
     - --registry=harbor.build.chorus-tre.local
     - --apps-repository=apps
+    - --services-repository=services
     - --xpra-server-image=harbor.build.chorus-tre.local/apps/xpra-server
     - --init-container-image=harbor.build.chorus-tre.local/apps/app-init
     - --socat-image=alpine/socat:1.8.0.0
@@ -44,7 +45,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.23
+      tag: 0.5.0
     resources:
       limits:
         cpu: 500m
