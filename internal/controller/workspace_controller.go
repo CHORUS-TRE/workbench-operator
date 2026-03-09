@@ -270,9 +270,9 @@ func (r *WorkspaceReconciler) ensureWorkspaceControllerRef(workspace *defaultv1a
 func networkPolicyStatusMessage(spec defaultv1alpha1.WorkspaceSpec) string {
 	switch spec.NetworkPolicy {
 	case defaultv1alpha1.NetworkPolicyOpen:
-		return "Network policy applied: all external internet traffic allowed (ports 80/443)"
+		return "Network policy applied: open, all external internet traffic allowed (ports 80/443)"
 	case defaultv1alpha1.NetworkPolicyFQDNAllowlist:
-		return fmt.Sprintf("Network policy applied: airgapped, allowed FQDNs: %s", strings.Join(spec.AllowedFQDNs, ", "))
+		return fmt.Sprintf("Network policy applied: FQDN allowlist active, allowed FQDNs: %s", strings.Join(spec.AllowedFQDNs, ", "))
 	default:
 		return "Network policy applied: airgapped, all external traffic blocked"
 	}
