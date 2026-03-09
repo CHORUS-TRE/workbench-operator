@@ -237,14 +237,6 @@ func initDeployment(workbench defaultv1alpha1.Workbench, config Config) appsv1.D
 		Value: clipboardDirection,
 	})
 
-	// Add keyboard layout configuration (only if explicitly set; empty = browser auto-detect)
-	if keyboardLayout := string(workbench.Spec.Server.KeyboardLayout); keyboardLayout != "" {
-		serverContainer.Env = append(serverContainer.Env, corev1.EnvVar{
-			Name:  "XPRA_KEYBOARD_LAYOUT",
-			Value: keyboardLayout,
-		})
-	}
-
 	// Apply resource requirements: CRD spec takes precedence over operator defaults
 	if workbench.Spec.Server.Resources != nil {
 		serverContainer.Resources = *workbench.Spec.Server.Resources
