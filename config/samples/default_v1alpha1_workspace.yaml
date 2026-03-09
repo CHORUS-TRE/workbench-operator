@@ -10,3 +10,6 @@ spec:
   # networkPolicy: Open          # all external internet traffic allowed (ports 80/443)
   # networkPolicy: FQDNAllowlist # only the FQDNs listed in allowedFQDNs are reachable
   networkPolicy: Airgapped       # all external traffic blocked
+  # allowedFQDNs:                # only used when networkPolicy: FQDNAllowlist
+  #   - chorus-tre.ch
+  #   - "*.chorus-tre.ch"
