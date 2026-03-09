@@ -33,13 +33,6 @@ const (
 // +kubebuilder:validation:Enum=disabled;to-server;to-client;both
 type ClipboardDirection string
 
-// KeyboardLayout defines the workbench keyboard layout.
-// When omitted, the workbench auto-detects the layout from the browser language.
-// Base codes sourced from xpra-html5/html5/connect.html and xpra/keyboard/layouts.py.
-// Common European variants using layout(variant) syntax are also supported.
-// +kubebuilder:validation:Enum=us;gb;fr;de;es;ad;af;al;ar;ara;am;az;bd;by;be;bt;ba;br;bg;kh;ca;cn;cd;hr;cz;dk;epo;ee;et;ir;iq;fo;fi;ge;gh;gr;gn;hu;is;in;ie;il;it;jp;kz;kr;kg;latam;lv;la;lt;mao;mk;mv;ml;mt;mn;me;ma;mm;np;nl;ng;no;pk;pl;pt;ro;ru;sn;rs;sk;si;za;lk;se;ch;sy;tw;tj;tz;th;tr;tm;ua;uz;vn;at;en;`ch(fr)`;`ch(fr_nodeadkeys)`;`ch(fr_mac)`;`ch(de_nodeadkeys)`;`fr(bepo)`;`fr(oss)`;`fr(nodeadkeys)`;`de(nodeadkeys)`;`de(dvorak)`;`de(neo)`;`at(nodeadkeys)`;`at(mac)`;`gb(dvorak)`;`gb(colemak)`;`gb(intl)`;`us(dvorak)`;`us(colemak)`;`us(intl)`;`be(oss)`;`be(nodeadkeys)`;`it(nodeadkeys)`;`it(mac)`;`es(nodeadkeys)`;`es(dvorak)`;`es(mac)`;`pt(nodeadkeys)`;`pt(mac)`;`br(nodeadkeys)`;`br(dvorak)`;`nl(std)`;`nl(mac)`;`no(nodeadkeys)`;`no(dvorak)`;`no(mac)`;`se(nodeadkeys)`;`se(dvorak)`;`se(mac)`;`dk(nodeadkeys)`;`dk(dvorak)`;`dk(mac)`;`fi(nodeadkeys)`;`fi(classic)`;`fi(mac)`;`pl(dvorak)`;`pl(qwertz)`;`cz(qwerty)`;`sk(qwerty)`;`hu(qwerty)`;`ro(std)`;`ro(cedilla)`;`bg(phonetic)`;`rs(latin)`;`rs(latinunicode)`;`hr(unicode)`;`ua(phonetic)`;`ua(typewriter)`;`ru(phonetic)`;`ru(phonetic_winkeys)`;`ru(typewriter)`;`gr(polytonic)`;`gr(nodeadkeys)`;`tr(f)`;`tr(intl)`;`is(nodeadkeys)`;`is(mac)`;`ca(fr-legacy)`;`ca(multix)`
-type KeyboardLayout string
-
 const (
 	// ClipboardDisabled disables clipboard (default)
 	ClipboardDisabled ClipboardDirection = "disabled"
@@ -81,11 +74,6 @@ type WorkbenchServer struct {
 	// +optional
 	// +kubebuilder:default=disabled
 	Clipboard ClipboardDirection `json:"clipboard,omitempty"`
-
-	// KeyboardLayout defines the keyboard layout for the workbench.
-	// When omitted, the workbench auto-detects the layout from the browser language.
-	// +optional
-	KeyboardLayout KeyboardLayout `json:"keyboardLayout,omitempty"`
 
 	// Resources describes the compute resource requirements for the server container.
 	// When specified, overrides operator-level defaults.
