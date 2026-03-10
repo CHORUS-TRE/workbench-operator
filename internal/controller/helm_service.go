@@ -1,14 +1,12 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -164,7 +162,24 @@ func deleteReleasePVCs(ctx context.Context, k8sClient client.Client, namespace, 
 	return nil
 }
 
+// deleteCredentialSecret deletes the credential Secret for a service. If the Secret does not exist, it is a no-op.
+func deleteCredentialSecret(ctx context.Context, k8sClient client.Client, namespace, secretName string) error {
+	secret := &corev1.Secret{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("getting credential secret %s: %w", secretName, err)
+	}
+	if err := k8sClient.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting credential secret %s: %w", secretName, err)
+	}
+	return nil
+}
+
 // generatePassword returns a random URL-safe password of the given length.
+// length random bytes are base64url-encoded (~1.33× output), then truncated to length chars.
+// Effective entropy is length × 6 bits (64-char alphabet), e.g. 24 chars → 144 bits.
 func generatePassword(length int) (string, error) {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {
@@ -280,17 +295,11 @@ func buildServiceStatus(helmStatus string, svc defaultv1alpha1.WorkspaceService,
 
 	connectionInfo := ""
 	if svc.ConnectionInfoTemplate != "" && state == defaultv1alpha1.WorkspaceStatusServiceStatusRunning {
-		tmpl, err := template.New("conn").Parse(svc.ConnectionInfoTemplate)
-		if err == nil {
-			var buf bytes.Buffer
-			if err := tmpl.Execute(&buf, map[string]string{
-				"Namespace":   workspace.Namespace,
-				"ReleaseName": releaseName,
-				"SecretName":  secretName,
-			}); err == nil {
-				connectionInfo = buf.String()
-			}
-		}
+		connectionInfo = strings.NewReplacer(
+			"{{.Namespace}}", workspace.Namespace,
+			"{{.ReleaseName}}", releaseName,
+			"{{.SecretName}}", secretName,
+		).Replace(svc.ConnectionInfoTemplate)
 	}
 
 	return defaultv1alpha1.WorkspaceStatusService{

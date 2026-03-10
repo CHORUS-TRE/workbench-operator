@@ -49,6 +49,36 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
+# Mapping: generated CRD filename -> Helm chart template filename
+HELM_CRD_MAP = \
+  default.chorus-tre.ch_workbenches.yaml:workbench-crd.yaml \
+  default.chorus-tre.ch_workspaces.yaml:workspace-crd.yaml
+
+.PHONY: sync-helm-crds
+sync-helm-crds: manifests ## Copy generated CRDs into the Helm chart, preserving Helm template headers.
+	@# For each CRD pair, keep everything before "^spec:" from the Helm template
+	@# (comments + Helm-specific metadata/labels) and replace spec onwards with the generated output.
+	@for pair in $(HELM_CRD_MAP); do \
+	  src=config/crd/bases/$${pair%%:*}; \
+	  dst=charts/workbench-operator/templates/$${pair##*:}; \
+	  awk '/^spec:/{exit} {print}' $$dst > $$dst.tmp; \
+	  awk '/^spec:/{found=1} found{print}' $$src >> $$dst.tmp; \
+	  mv $$dst.tmp $$dst; \
+	  echo "Updated $$dst"; \
+	done
+
+.PHONY: sync-helm-rbac
+sync-helm-rbac: manifests ## Sync generated RBAC rules into the Helm chart, preserving Helm metadata and ClusterRoleBinding.
+	@# Keep header (before "^rules:") and footer (from "^---") from the Helm template;
+	@# replace the rules section with the generated config/rbac/role.yaml output.
+	@src=config/rbac/role.yaml; \
+	dst=charts/workbench-operator/templates/manager-rbac.yaml; \
+	awk '/^rules:/{exit} {print}' $$dst > $$dst.tmp; \
+	awk '/^rules:/{found=1} found && /^---/{exit} found{print}' $$src >> $$dst.tmp; \
+	awk '/^---/{found=1} found{print}' $$dst >> $$dst.tmp; \
+	mv $$dst.tmp $$dst; \
+	echo "Updated $$dst"
+
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."

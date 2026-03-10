@@ -656,9 +656,9 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
 		}
-		status := buildServiceStatus("deployed", svc, "ws--pg", "pg-creds", workspace)
+		status := buildServiceStatus("deployed", svc, "ws-pg", "pg-creds", workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
-		Expect(status.ConnectionInfo).To(Equal("postgresql://ws--pg.default:5432"))
+		Expect(status.ConnectionInfo).To(Equal("postgresql://ws-pg.default:5432"))
 	})
 
 	It("renders SecretName in connectionInfoTemplate", func() {
@@ -674,7 +674,7 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateStopped,
 			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
 		}
-		Expect(buildServiceStatus("not-found", svc, "ws--pg", "", workspace).ConnectionInfo).To(BeEmpty())
+		Expect(buildServiceStatus("not-found", svc, "ws-pg", "", workspace).ConnectionInfo).To(BeEmpty())
 	})
 })
 

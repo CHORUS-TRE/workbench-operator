@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -155,6 +156,13 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Status update failures should be visible in production logs; treat as transient and requeue.
 	if err := r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update WorkspaceStatus", false); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Requeue if any service is in a transitional state to pick up Helm release changes.
+	for _, svcStatus := range workspace.Status.Services {
+		if svcStatus.Status == defaultv1alpha1.WorkspaceStatusServiceStatusProgressing {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -320,8 +328,20 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		workspace.Status.Services = make(map[string]defaultv1alpha1.WorkspaceStatusService)
 	}
 
+	cfg, err := newHelmConfig(namespace, r.RestConfig)
+	if err != nil {
+		logger.Error(err, "Failed to create Helm config")
+		for key := range workspace.Spec.Services {
+			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+				Message: fmt.Sprintf("Failed to initialize Helm: %s", err.Error()),
+			}
+		}
+		return
+	}
+
 	for key, svc := range workspace.Spec.Services {
-		releaseName := workspace.Name + "--" + key
+		releaseName := workspace.Name + "-" + key
 
 		registry := svc.Chart.Registry
 		if registry == "" {
@@ -338,19 +358,19 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 
 		chartRef := fmt.Sprintf("oci://%s/%s", registry, repository)
 
-		cfg, err := newHelmConfig(namespace, r.RestConfig)
-		if err != nil {
-			logger.Error(err, "Failed to create Helm config", "service", key)
-			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-				Message: fmt.Sprintf("Failed to initialize Helm: %s", err.Error()),
-			}
-			continue
-		}
-
 		secretName := ""
 		if svc.Credentials != nil {
 			secretName = svc.Credentials.SecretName
+		}
+
+		helmStatus, err := helmReleaseStatus(cfg, releaseName)
+		if err != nil {
+			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
+			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+				Message: err.Error(),
+			}
+			continue
 		}
 
 		desiredState := svc.State
@@ -373,6 +393,11 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			userValues, err := parseServiceValues(&svc)
 			if err != nil {
 				logger.Error(err, "Failed to parse service values", "service", key)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: fmt.Sprintf("Failed to parse service values: %s", err.Error()),
+				}
+				continue
 			}
 
 			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, chartRef, svc.Chart.Tag, mergeMaps(userValues, credValues)); err != nil {
@@ -385,23 +410,27 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 
 		case defaultv1alpha1.WorkspaceServiceStateStopped:
-			if err := helmUninstall(cfg, releaseName); err != nil {
-				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
+			if helmStatus != "not-found" {
+				if err := helmUninstall(cfg, releaseName); err != nil {
+					logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
+					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+						Message: err.Error(),
+					}
+					continue
 				}
-				continue
 			}
 
 		case defaultv1alpha1.WorkspaceServiceStateDeleted:
-			if err := helmUninstall(cfg, releaseName); err != nil {
-				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
+			if helmStatus != "not-found" {
+				if err := helmUninstall(cfg, releaseName); err != nil {
+					logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
+					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+						Message: err.Error(),
+					}
+					continue
 				}
-				continue
 			}
 			if err := deleteReleasePVCs(ctx, r.Client, namespace, releaseName); err != nil {
 				logger.Error(err, "Failed to delete PVCs", "service", key, "release", releaseName)
@@ -411,16 +440,16 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				}
 				continue
 			}
-		}
-
-		helmStatus, err := helmReleaseStatus(cfg, releaseName)
-		if err != nil {
-			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
-			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-				Message: err.Error(),
+			if svc.Credentials != nil {
+				if err := deleteCredentialSecret(ctx, r.Client, namespace, svc.Credentials.SecretName); err != nil {
+					logger.Error(err, "Failed to delete credential secret", "service", key, "secret", svc.Credentials.SecretName)
+					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+						Message: err.Error(),
+					}
+					continue
+				}
 			}
-			continue
 		}
 
 		workspace.Status.Services[key] = buildServiceStatus(helmStatus, svc, releaseName, secretName, workspace)

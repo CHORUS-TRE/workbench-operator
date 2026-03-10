@@ -1,8 +1,12 @@
----
+# DO NOT replace this file with config/rbac/role.yaml — it uses Helm template syntax
+# and includes the ClusterRoleBinding below. After `make manifests`, run
+# `make sync-helm-rbac` to update only the rules section safely.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  name: {{ include "workbench-operator.fullname" . }}-manager-role
+  labels:
+  {{- include "workbench-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
   - ""
@@ -15,8 +19,6 @@ rules:
   - ""
   resources:
   - persistentvolumeclaims
-  - secrets
-  - services
   verbs:
   - create
   - delete
@@ -33,8 +35,6 @@ rules:
   - create
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - ""
@@ -45,6 +45,30 @@ rules:
   - delete
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""
@@ -91,17 +115,6 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - cilium.io
-  resources:
-  - ciliumnetworkpolicies
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - update
-  - watch
-- apiGroups:
   - default.chorus-tre.ch
   resources:
   - workbenches
@@ -123,11 +136,18 @@ rules:
   - default.chorus-tre.ch
   resources:
   - workbenches/status
-  - workspaces/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - csidrivers
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - default.chorus-tre.ch
   resources:
@@ -137,10 +157,36 @@ rules:
   - list
   - watch
 - apiGroups:
-  - storage.k8s.io
+  - default.chorus-tre.ch
   resources:
-  - csidrivers
+  - workspaces/status
   verbs:
   - get
+  - patch
+  - update
+- apiGroups:
+  - cilium.io
+  resources:
+  - ciliumnetworkpolicies
+  verbs:
+  - create
+  - delete
+  - get
   - list
+  - update
   - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "workbench-operator.fullname" . }}-manager-rolebinding
+  labels:
+  {{- include "workbench-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "workbench-operator.fullname" . }}-manager-role'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "workbench-operator.fullname" . }}-controller-manager'
+  namespace: '{{ .Release.Namespace }}'

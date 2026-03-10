@@ -408,7 +408,7 @@ var _ = Describe("controller", Ordered, func() {
 	Context("Workspace services", Ordered, func() {
 		const testNS = "services-test"
 		const wsName = "svc-test-ws"
-		const releaseName = wsName + "--postgres"
+		const releaseName = wsName + "-postgres"
 
 		BeforeAll(func() {
 			By("creating test namespace")
