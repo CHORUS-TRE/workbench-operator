@@ -116,8 +116,9 @@ type WorkspaceService struct {
 	// +optional
 	Credentials *WorkspaceServiceCredentials `json:"credentials,omitempty"`
 
-	// ConnectionInfoTemplate is a Go template rendered into status.services[*].connectionInfo.
-	// Available variables: .Namespace, .ReleaseName, .SecretName
+	// ConnectionInfoTemplate is a string with placeholder substitution rendered into status.services[*].connectionInfo.
+	// Supported placeholders (exact syntax, no spaces): {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}}.
+	// This is not a full Go template — conditionals and pipelines are not supported.
 	// +optional
 	ConnectionInfoTemplate string `json:"connectionInfoTemplate,omitempty"`
 }

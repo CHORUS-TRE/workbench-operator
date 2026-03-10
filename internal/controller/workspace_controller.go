@@ -140,7 +140,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Reconcile workspace services (Helm releases).
-	r.reconcileServices(ctx, &workspace)
+	if err := r.reconcileServices(ctx, &workspace); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	// Success: mirror spec mode to status. Error and Progressing states are set
 	// in the error paths above; reaching here guarantees a valid applied mode.
@@ -158,14 +160,16 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Requeue if any service is in a transitional state to pick up Helm release changes.
+	// Poll at a short interval while any service is still transitioning.
 	for _, svcStatus := range workspace.Status.Services {
 		if svcStatus.Status == defaultv1alpha1.WorkspaceStatusServiceStatusProgressing {
 			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 		}
 	}
 
-	return ctrl.Result{}, nil
+	// Periodic resync so external Helm release changes (manual deletes, drift) are detected
+	// without waiting for a spec change.
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
 // reconcileNetworkPolicy creates or updates the CiliumNetworkPolicy for the
@@ -315,10 +319,11 @@ func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, w
 }
 
 // reconcileServices reconciles all workspace services defined in spec.services.
-// Errors for individual services are recorded in status and do not abort other services.
-func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *defaultv1alpha1.Workspace) {
+// Returns an error only for fatal infrastructure failures (e.g. Helm config init) that
+// should cause an immediate requeue. Per-service errors are recorded in status instead.
+func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
 	if len(workspace.Spec.Services) == 0 {
-		return
+		return nil
 	}
 
 	logger := log.FromContext(ctx)
@@ -328,16 +333,9 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		workspace.Status.Services = make(map[string]defaultv1alpha1.WorkspaceStatusService)
 	}
 
-	cfg, err := newHelmConfig(namespace, r.RestConfig)
+	cfg, err := newHelmConfig(namespace, r.RestConfig, logger)
 	if err != nil {
-		logger.Error(err, "Failed to create Helm config")
-		for key := range workspace.Spec.Services {
-			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-				Message: fmt.Sprintf("Failed to initialize Helm: %s", err.Error()),
-			}
-		}
-		return
+		return fmt.Errorf("initializing Helm config: %w", err)
 	}
 
 	for key, svc := range workspace.Spec.Services {
@@ -361,16 +359,6 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		secretName := ""
 		if svc.Credentials != nil {
 			secretName = svc.Credentials.SecretName
-		}
-
-		helmStatus, err := helmReleaseStatus(cfg, releaseName)
-		if err != nil {
-			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
-			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-				Message: err.Error(),
-			}
-			continue
 		}
 
 		desiredState := svc.State
@@ -410,27 +398,25 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 
 		case defaultv1alpha1.WorkspaceServiceStateStopped:
-			if helmStatus != "not-found" {
-				if err := helmUninstall(cfg, releaseName); err != nil {
-					logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
-					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-						Message: err.Error(),
-					}
-					continue
+			// helmUninstall is a no-op if the release is already absent.
+			if err := helmUninstall(cfg, releaseName); err != nil {
+				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
 				}
+				continue
 			}
 
 		case defaultv1alpha1.WorkspaceServiceStateDeleted:
-			if helmStatus != "not-found" {
-				if err := helmUninstall(cfg, releaseName); err != nil {
-					logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
-					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-						Message: err.Error(),
-					}
-					continue
+			// helmUninstall is a no-op if the release is already absent.
+			if err := helmUninstall(cfg, releaseName); err != nil {
+				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
 				}
+				continue
 			}
 			if err := deleteReleasePVCs(ctx, r.Client, namespace, releaseName); err != nil {
 				logger.Error(err, "Failed to delete PVCs", "service", key, "release", releaseName)
@@ -452,8 +438,20 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 		}
 
+		// Fetch status after the action so buildServiceStatus reflects the current state.
+		helmStatus, err := helmReleaseStatus(cfg, releaseName)
+		if err != nil {
+			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
+			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+				Message: err.Error(),
+			}
+			continue
+		}
+
 		workspace.Status.Services[key] = buildServiceStatus(helmStatus, svc, releaseName, secretName, workspace)
 	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

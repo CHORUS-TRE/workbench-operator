@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -65,7 +66,8 @@ func (r *restClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 }
 
 // newHelmConfig returns an action.Configuration scoped to the given namespace.
-func newHelmConfig(namespace string, restConfig *rest.Config) (*action.Configuration, error) {
+// Helm internal logs are forwarded to logger at V(1) to aid troubleshooting (e.g. OCI pull failures).
+func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger) (*action.Configuration, error) {
 	getter := &restClientGetter{namespace: namespace, restConfig: restConfig}
 
 	registryClient, err := registry.NewClient()
@@ -76,7 +78,10 @@ func newHelmConfig(namespace string, restConfig *rest.Config) (*action.Configura
 	cfg := new(action.Configuration)
 	cfg.RegistryClient = registryClient
 
-	if err := cfg.Init(getter, namespace, "secret", func(format string, v ...interface{}) {}); err != nil {
+	helmLog := func(format string, v ...interface{}) {
+		logger.V(1).Info(fmt.Sprintf(format, v...))
+	}
+	if err := cfg.Init(getter, namespace, "secret", helmLog); err != nil {
 		return nil, fmt.Errorf("initializing Helm action config: %w", err)
 	}
 
@@ -177,11 +182,11 @@ func deleteCredentialSecret(ctx context.Context, k8sClient client.Client, namesp
 	return nil
 }
 
-// generatePassword returns a random URL-safe password of the given length.
-// length random bytes are base64url-encoded (~1.33× output), then truncated to length chars.
-// Effective entropy is length × 6 bits (64-char alphabet), e.g. 24 chars → 144 bits.
+// generatePassword returns a random URL-safe base64 password of the given length.
+// Reads exactly ceil(length*3/4) random bytes — the minimum needed to produce `length`
+// base64url characters — giving length×6 bits of entropy (e.g. 24 chars → 144 bits).
 func generatePassword(length int) (string, error) {
-	b := make([]byte, length)
+	b := make([]byte, (length*3+3)/4)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
@@ -223,6 +228,19 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 		}
 	} else if err != nil {
 		return nil, fmt.Errorf("getting credential secret %s: %w", creds.SecretName, err)
+	} else {
+		// Secret already exists — verify it belongs to this Workspace to prevent
+		// cross-workspace credential leakage when two Workspaces share a secretName.
+		owned := false
+		for _, ref := range secret.OwnerReferences {
+			if ref.UID == workspace.UID {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			return nil, fmt.Errorf("credential secret %s already exists and is not owned by this Workspace", creds.SecretName)
+		}
 	}
 
 	helmValues := make(map[string]interface{})

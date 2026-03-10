@@ -1,6 +1,7 @@
-# DO NOT replace this file with config/rbac/role.yaml — it uses Helm template syntax
-# and includes the ClusterRoleBinding below. After `make manifests`, run
-# `make sync-helm-rbac` to update only the rules section safely.
+# DO NOT replace this file with config/rbac/role.yaml — it uses Helm template syntax,
+# keeps resources in separate rules (controller-gen groups them), and includes the
+# ClusterRoleBinding below. After `make manifests`, manually diff config/rbac/role.yaml
+# against the rules here and apply only the verb changes needed.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
