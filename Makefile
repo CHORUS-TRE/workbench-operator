@@ -45,9 +45,29 @@ help: ## Display this help.
 
 ##@ Development
 
+# Mapping: generated CRD filename -> Helm chart template filename
+HELM_CRD_MAP = \
+  default.chorus-tre.ch_workbenches.yaml:workbench-crd.yaml \
+  default.chorus-tre.ch_workspaces.yaml:workspace-crd.yaml
+
+.PHONY: sync-helm-crds
+sync-helm-crds: ## Copy generated CRDs into the Helm chart, preserving Helm template headers.
+	@# For each CRD pair, keep everything before "^spec:" from the Helm template
+	@# (comments + Helm-specific metadata/labels) and replace spec onwards with the generated output.
+	@for pair in $(HELM_CRD_MAP); do \
+	  src=config/crd/bases/$${pair%%:*}; \
+	  dst=charts/workbench-operator/templates/$${pair##*:}; \
+	  awk '/^spec:/{exit} {print}' $$dst > $$dst.tmp; \
+	  awk '/^spec:/{found=1} found{print}' $$src >> $$dst.tmp; \
+	  mv $$dst.tmp $$dst; \
+	  echo "Updated $$dst"; \
+	done
+
 .PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects, then sync Helm CRD templates.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(MAKE) sync-helm-crds
+
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

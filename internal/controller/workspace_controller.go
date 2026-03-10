@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -26,14 +28,19 @@ import (
 // WorkspaceReconciler reconciles a Workspace object
 type WorkspaceReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme             *runtime.Scheme
+	Recorder           record.EventRecorder
+	RestConfig         *rest.Config
+	Registry           string
+	ServicesRepository string
 }
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;delete
 
 // Reconcile ensures the CiliumNetworkPolicy for this Workspace matches the
 // desired state derived from the WorkspaceSpec.
@@ -132,6 +139,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	// Reconcile workspace services (Helm releases).
+	if err := r.reconcileServices(ctx, &workspace); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Success: mirror spec mode to status. Error and Progressing states are set
 	// in the error paths above; reaching here guarantees a valid applied mode.
 	workspace.Status.NetworkPolicy = workspace.Spec.NetworkPolicy
@@ -148,6 +160,18 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	// Poll at a short interval while any service is still transitioning.
+	for _, svcStatus := range workspace.Status.Services {
+		if svcStatus.Status == defaultv1alpha1.WorkspaceStatusServiceStatusProgressing {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+	}
+
+	// Periodic resync so external Helm release changes (manual deletes, drift) are detected
+	// without waiting for a spec change. Skip for service-less workspaces.
+	if len(workspace.Spec.Services) > 0 {
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -294,6 +318,142 @@ func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, w
 		return err
 	}
 
+	return nil
+}
+
+// reconcileServices reconciles all workspace services defined in spec.services.
+// Returns an error only for fatal infrastructure failures (e.g. Helm config init) that
+// should cause an immediate requeue. Per-service errors are recorded in status instead.
+func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
+	if len(workspace.Spec.Services) == 0 {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+	namespace := workspace.Namespace
+
+	if workspace.Status.Services == nil {
+		workspace.Status.Services = make(map[string]defaultv1alpha1.WorkspaceStatusService)
+	}
+
+	cfg, err := newHelmConfig(namespace, r.RestConfig, logger)
+	if err != nil {
+		return fmt.Errorf("initializing Helm config: %w", err)
+	}
+
+	for key, svc := range workspace.Spec.Services {
+		releaseName := workspace.Name + "-" + key
+
+		registry := svc.Chart.Registry
+		if registry == "" {
+			registry = r.Registry
+		}
+		registry = strings.TrimRight(registry, "/")
+
+		repository := svc.Chart.Repository
+		if repository == "" {
+			servicesRepo := strings.Trim(r.ServicesRepository, "/")
+			repository = servicesRepo + "/" + key
+		}
+		repository = strings.Trim(repository, "/")
+
+		chartRef := fmt.Sprintf("oci://%s/%s", registry, repository)
+
+		secretName := ""
+		if svc.Credentials != nil {
+			secretName = svc.Credentials.SecretName
+		}
+
+		desiredState := svc.State
+		if desiredState == "" {
+			desiredState = defaultv1alpha1.WorkspaceServiceStateRunning
+		}
+
+		switch desiredState {
+		case defaultv1alpha1.WorkspaceServiceStateRunning:
+			credValues, err := reconcileCredentialSecret(ctx, r.Client, namespace, workspace, svc.Credentials)
+			if err != nil {
+				logger.Error(err, "Failed to reconcile credential secret", "service", key)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: fmt.Sprintf("Failed to reconcile credentials: %s", err.Error()),
+				}
+				continue
+			}
+
+			userValues, err := parseServiceValues(&svc)
+			if err != nil {
+				logger.Error(err, "Failed to parse service values", "service", key)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: fmt.Sprintf("Failed to parse service values: %s", err.Error()),
+				}
+				continue
+			}
+
+			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, chartRef, svc.Chart.Tag, mergeMaps(userValues, credValues)); err != nil {
+				logger.Error(err, "Failed to install/upgrade Helm release", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
+				}
+				continue
+			}
+
+		case defaultv1alpha1.WorkspaceServiceStateStopped:
+			// helmUninstall is a no-op if the release is already absent.
+			if err := helmUninstall(cfg, releaseName); err != nil {
+				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
+				}
+				continue
+			}
+
+		case defaultv1alpha1.WorkspaceServiceStateDeleted:
+			// helmUninstall is a no-op if the release is already absent.
+			if err := helmUninstall(cfg, releaseName); err != nil {
+				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
+				}
+				continue
+			}
+			if err := deleteReleasePVCs(ctx, r.Client, namespace, releaseName); err != nil {
+				logger.Error(err, "Failed to delete PVCs", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
+				}
+				continue
+			}
+			if svc.Credentials != nil {
+				if err := deleteCredentialSecret(ctx, r.Client, namespace, svc.Credentials.SecretName); err != nil {
+					logger.Error(err, "Failed to delete credential secret", "service", key, "secret", svc.Credentials.SecretName)
+					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+						Message: err.Error(),
+					}
+					continue
+				}
+			}
+		}
+
+		// Fetch status after the action so buildServiceStatus reflects the current state.
+		helmStatus, err := helmReleaseStatus(cfg, releaseName)
+		if err != nil {
+			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
+			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+				Message: err.Error(),
+			}
+			continue
+		}
+
+		workspace.Status.Services[key] = buildServiceStatus(helmStatus, svc, releaseName, secretName, workspace)
+	}
 	return nil
 }
 

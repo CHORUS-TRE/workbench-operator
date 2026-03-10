@@ -52,7 +52,8 @@ spec:
             properties:
               apps:
                 additionalProperties:
-                  description: WorkbenchApp defines one application running in the workbench.
+                  description: WorkbenchApp defines one application running in the
+                    workbench.
                   properties:
                     image:
                       description: |-
@@ -108,10 +109,10 @@ spec:
                           description: |-
                             Claims lists the names of resources, defined in spec.resourceClaims,
                             that are used by this container.
-  
+
                             This field depends on the
                             DynamicResourceAllocation feature gate.
-  
+
                             This field is immutable. It can only be set for containers.
                           items:
                             description: ResourceClaim references one entry in PodSpec.ResourceClaims.
@@ -164,8 +165,8 @@ spec:
                       anyOf:
                       - type: integer
                       - type: string
-                      description: ShmSize defines the size of the required extra /dev/shm
-                        space.
+                      description: ShmSize defines the size of the required extra
+                        /dev/shm space.
                       pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                       x-kubernetes-int-or-string: true
                     state:
@@ -188,7 +189,8 @@ spec:
                 description: Apps represent a map of applications any their state
                 type: object
               imagePullSecrets:
-                description: ImagePullSecrets is the secret(s) needed to pull the image(s).
+                description: ImagePullSecrets is the secret(s) needed to pull the
+                  image(s).
                 items:
                   minLength: 1
                   type: string
@@ -334,8 +336,8 @@ spec:
             properties:
               apps:
                 additionalProperties:
-                  description: WorkbenchStatusappStatus informs about the state of the
-                    apps.
+                  description: WorkbenchStatusappStatus informs about the state of
+                    the apps.
                   properties:
                     message:
                       description: Message provides additional context about the status
@@ -352,7 +354,9 @@ spec:
                       - Complete
                       - Progressing
                       - Failed
+                      - Stopping
                       - Stopped
+                      - Killing
                       - Killed
                       type: string
                   required:
@@ -375,7 +379,8 @@ spec:
                       pod
                     properties:
                       message:
-                        description: Message provides additional context about the status
+                        description: Message provides additional context about the
+                          status
                         type: string
                       ready:
                         description: Ready indicates if all containers are ready
@@ -422,9 +427,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: []
-  storedVersions: []

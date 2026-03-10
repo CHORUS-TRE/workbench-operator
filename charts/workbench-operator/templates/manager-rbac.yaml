@@ -1,3 +1,7 @@
+# DO NOT replace this file with config/rbac/role.yaml — it uses Helm template syntax,
+# keeps resources in separate rules (controller-gen groups them), and includes the
+# ClusterRoleBinding below. After `make manifests`, manually diff config/rbac/role.yaml
+# against the rules here and apply only the verb changes needed.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -16,13 +20,22 @@ rules:
   - ""
   resources:
   - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumes
   verbs:
   - create
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - ""
@@ -39,8 +52,12 @@ rules:
   resources:
   - secrets
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - ""

@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -541,6 +542,210 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(cond.Message).To(ContainSubstring("CiliumNetworkPolicy CRD not installed"))
 			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyError))
 		})
+	})
+})
+
+var _ = Describe("dotNotationToNestedMap", func() {
+	It("converts a simple key", func() {
+		Expect(dotNotationToNestedMap("password", "secret")).To(Equal(map[string]interface{}{"password": "secret"}))
+	})
+
+	It("converts a two-level key", func() {
+		Expect(dotNotationToNestedMap("auth.password", "secret")).To(Equal(map[string]interface{}{
+			"auth": map[string]interface{}{"password": "secret"},
+		}))
+	})
+
+	It("converts a three-level key", func() {
+		Expect(dotNotationToNestedMap("settings.auth.password", "secret")).To(Equal(map[string]interface{}{
+			"settings": map[string]interface{}{
+				"auth": map[string]interface{}{"password": "secret"},
+			},
+		}))
+	})
+})
+
+var _ = Describe("mergeMaps", func() {
+	It("merges non-overlapping keys", func() {
+		result := mergeMaps(map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"})
+		Expect(result).To(HaveKeyWithValue("a", "1"))
+		Expect(result).To(HaveKeyWithValue("b", "2"))
+	})
+
+	It("override takes precedence for flat keys", func() {
+		result := mergeMaps(map[string]interface{}{"a": "1"}, map[string]interface{}{"a": "2"})
+		Expect(result).To(HaveKeyWithValue("a", "2"))
+	})
+
+	It("deep merges nested maps preserving non-overridden keys", func() {
+		base := map[string]interface{}{"auth": map[string]interface{}{"user": "admin", "password": "old"}}
+		override := map[string]interface{}{"auth": map[string]interface{}{"password": "new"}}
+		result := mergeMaps(base, override)
+		auth := result["auth"].(map[string]interface{})
+		Expect(auth).To(HaveKeyWithValue("user", "admin"))
+		Expect(auth).To(HaveKeyWithValue("password", "new"))
+	})
+
+	It("handles nil override", func() {
+		result := mergeMaps(map[string]interface{}{"a": "1"}, nil)
+		Expect(result).To(HaveKeyWithValue("a", "1"))
+	})
+
+	It("handles nil base", func() {
+		result := mergeMaps(nil, map[string]interface{}{"a": "1"})
+		Expect(result).To(HaveKeyWithValue("a", "1"))
+	})
+})
+
+var _ = Describe("generatePassword", func() {
+	It("generates a password of the requested length", func() {
+		pw, err := generatePassword(24)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pw).To(HaveLen(24))
+	})
+
+	It("generates unique passwords on each call", func() {
+		pw1, _ := generatePassword(24)
+		pw2, _ := generatePassword(24)
+		Expect(pw1).NotTo(Equal(pw2))
+	})
+})
+
+var _ = Describe("buildServiceStatus", func() {
+	workspace := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ws", Namespace: "default"},
+	}
+
+	It("returns Running when Helm is deployed and spec state is Running", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
+		Expect(buildServiceStatus("deployed", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
+	})
+
+	It("returns Progressing for pending-install", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
+		Expect(buildServiceStatus("pending-install", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+	})
+
+	It("returns Progressing for pending-upgrade", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
+		Expect(buildServiceStatus("pending-upgrade", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+	})
+
+	It("returns Failed for failed Helm release", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
+		Expect(buildServiceStatus("failed", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+	})
+
+	It("returns Stopped when release not found and spec is Stopped", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
+		Expect(buildServiceStatus("not-found", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
+	})
+
+	It("returns Deleted when release not found and spec is Deleted", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
+		Expect(buildServiceStatus("not-found", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
+	})
+
+	It("returns Progressing for unknown Helm state", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
+		Expect(buildServiceStatus("superseded", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+	})
+
+	It("renders connectionInfoTemplate when Running", func() {
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
+			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
+		}
+		status := buildServiceStatus("deployed", svc, "ws-pg", "pg-creds", workspace)
+		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
+		Expect(status.ConnectionInfo).To(Equal("postgresql://ws-pg.default:5432"))
+	})
+
+	It("renders SecretName in connectionInfoTemplate", func() {
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
+			ConnectionInfoTemplate: "secret: {{.SecretName}}",
+		}
+		Expect(buildServiceStatus("deployed", svc, "rel", "my-creds", workspace).ConnectionInfo).To(Equal("secret: my-creds"))
+	})
+
+	It("does not render connectionInfoTemplate when not Running", func() {
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateStopped,
+			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
+		}
+		Expect(buildServiceStatus("not-found", svc, "ws-pg", "", workspace).ConnectionInfo).To(BeEmpty())
+	})
+})
+
+var _ = Describe("reconcileCredentialSecret", func() {
+	ctx := context.Background()
+	const namespace = "default"
+	const secretName = "helm-test-creds"
+
+	workspace := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "cred-test-ws", Namespace: namespace, UID: "test-uid-1234"},
+	}
+
+	AfterEach(func() {
+		secret := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
+			_ = k8sClient.Delete(ctx, secret)
+		}
+	})
+
+	It("returns nil when credentials is nil", func() {
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, workspace, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+
+	It("creates a secret with generated passwords for each value key", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"userPassword", "superuserPassword"},
+		}
+
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, workspace, creds)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).NotTo(BeNil())
+
+		secret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret)).To(Succeed())
+		Expect(secret.Data["userPassword"]).To(HaveLen(24))
+		Expect(secret.Data["superuserPassword"]).To(HaveLen(24))
+
+		Expect(result).To(HaveKey("userPassword"))
+		Expect(result).To(HaveKey("superuserPassword"))
+	})
+
+	It("converts dot-notation keys to nested Helm values", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"settings.superuserPassword"},
+		}
+
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, workspace, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		settings, ok := result["settings"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(settings).To(HaveKey("superuserPassword"))
+	})
+
+	It("is idempotent: returns the same passwords on repeated calls", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"userPassword"},
+		}
+
+		result1, err := reconcileCredentialSecret(ctx, k8sClient, namespace, workspace, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		result2, err := reconcileCredentialSecret(ctx, k8sClient, namespace, workspace, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(result1["userPassword"]).To(Equal(result2["userPassword"]))
 	})
 })
 

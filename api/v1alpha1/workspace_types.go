@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -52,6 +53,102 @@ const (
 	ReasonReconcileError = "ReconcileError"
 )
 
+// WorkspaceServiceState defines the desired lifecycle state of a workspace service.
+// +kubebuilder:validation:Enum=Running;Stopped;Deleted
+type WorkspaceServiceState string
+
+const (
+	// WorkspaceServiceStateRunning installs or upgrades the Helm release.
+	WorkspaceServiceStateRunning WorkspaceServiceState = "Running"
+
+	// WorkspaceServiceStateStopped uninstalls the Helm release but retains PVCs (data preserved).
+	WorkspaceServiceStateStopped WorkspaceServiceState = "Stopped"
+
+	// WorkspaceServiceStateDeleted uninstalls the Helm release and deletes PVCs (full teardown).
+	// The entry remains in the CRD as a historical record.
+	WorkspaceServiceStateDeleted WorkspaceServiceState = "Deleted"
+)
+
+// WorkspaceServiceChart identifies a Helm chart in an OCI registry.
+// Registry and Repository are optional and will fall back to operator defaults if not specified.
+type WorkspaceServiceChart struct {
+	// Registry represents the hostname of the OCI registry. E.g. harbor.build.chorus-tre.local
+	// +optional
+	Registry string `json:"registry,omitempty"`
+	// Repository contains the project and chart name. E.g. services/postgres
+	// +optional
+	Repository string `json:"repository,omitempty"`
+	// Tag contains the chart version (semver). E.g. 1.6.1
+	Tag string `json:"tag"`
+}
+
+// WorkspaceServiceCredentials configures auto-generated password injection.
+type WorkspaceServiceCredentials struct {
+	// SecretName is the name of the Kubernetes Secret the operator creates in the workspace namespace.
+	// Passwords are stored here and never written to the CRD.
+	SecretName string `json:"secretName"`
+
+	// Paths is a list of dot-notation Helm value paths for which the operator auto-generates passwords.
+	// One 24-char random password is generated per entry, stored in SecretName, and injected into Helm.
+	// +optional
+	Paths []string `json:"paths,omitempty"`
+}
+
+// WorkspaceService defines a Helm-chart-based service running in the workspace namespace.
+type WorkspaceService struct {
+	// State controls the service lifecycle.
+	// +optional
+	// +kubebuilder:default=Running
+	State WorkspaceServiceState `json:"state,omitempty"`
+
+	// Chart identifies the Helm chart to deploy.
+	// Registry and Repository are optional and fall back to operator defaults.
+	Chart WorkspaceServiceChart `json:"chart"`
+
+	// Values contains free-form Helm values merged at install/upgrade time.
+	// Use to override chart defaults (e.g. storage.requestedSize).
+	// Credential values take precedence over anything set here.
+	// +optional
+	Values *apiextensionsv1.JSON `json:"values,omitempty"`
+
+	// Credentials configures auto-generated password injection.
+	// Passwords are never written to the CRD — only to the named Secret.
+	// +optional
+	Credentials *WorkspaceServiceCredentials `json:"credentials,omitempty"`
+
+	// ConnectionInfoTemplate is a string with placeholder substitution rendered into status.services[*].connectionInfo.
+	// Supported placeholders (exact syntax, no spaces): {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}}.
+	// This is not a full Go template — conditionals and pipelines are not supported.
+	// +optional
+	ConnectionInfoTemplate string `json:"connectionInfoTemplate,omitempty"`
+}
+
+// WorkspaceStatusServiceStatus is the observed state of a workspace service.
+// +kubebuilder:validation:Enum=Progressing;Running;Stopped;Deleted;Failed
+type WorkspaceStatusServiceStatus string
+
+const (
+	WorkspaceStatusServiceStatusProgressing WorkspaceStatusServiceStatus = "Progressing"
+	WorkspaceStatusServiceStatusRunning     WorkspaceStatusServiceStatus = "Running"
+	WorkspaceStatusServiceStatusStopped     WorkspaceStatusServiceStatus = "Stopped"
+	WorkspaceStatusServiceStatusDeleted     WorkspaceStatusServiceStatus = "Deleted"
+	WorkspaceStatusServiceStatusFailed      WorkspaceStatusServiceStatus = "Failed"
+)
+
+// WorkspaceStatusService is the observed status of a workspace service.
+type WorkspaceStatusService struct {
+	// Status is the observed lifecycle state of the service.
+	Status WorkspaceStatusServiceStatus `json:"status"`
+
+	// Message provides additional context (e.g. error details).
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// ConnectionInfo is the rendered connection string from connectionInfoTemplate.
+	// +optional
+	ConnectionInfo string `json:"connectionInfo,omitempty"`
+}
+
 // WorkspaceSpec defines the desired state of Workspace
 type WorkspaceSpec struct {
 	// NetworkPolicy defines the desired network policy mode for this workspace.
@@ -74,6 +171,10 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:items:MaxLength=253
 	// +listType=set
 	AllowedFQDNs []string `json:"allowedFQDNs,omitempty"`
+
+	// Services represent a map of services and their state
+	// +optional
+	Services map[string]WorkspaceService `json:"services,omitempty"`
 }
 
 // WorkspaceStatus defines the observed state of Workspace
@@ -95,6 +196,10 @@ type WorkspaceStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Services represent the observed state of each workspace service.
+	// +optional
+	Services map[string]WorkspaceStatusService `json:"services,omitempty"`
 }
 
 // +kubebuilder:object:root=true
