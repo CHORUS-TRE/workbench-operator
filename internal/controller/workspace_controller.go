@@ -168,8 +168,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Periodic resync so external Helm release changes (manual deletes, drift) are detected
-	// without waiting for a spec change.
-	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	// without waiting for a spec change. Skip for service-less workspaces.
+	if len(workspace.Spec.Services) > 0 {
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
+	return ctrl.Result{}, nil
 }
 
 // reconcileNetworkPolicy creates or updates the CiliumNetworkPolicy for the
