@@ -177,19 +177,28 @@ type WorkspaceSpec struct {
 	Services map[string]WorkspaceService `json:"services,omitempty"`
 }
 
+// NetworkPolicyStatus is the observed state of the workspace network policy.
+type NetworkPolicyStatus struct {
+	// Status is the network policy reconciliation status.
+	// Values: "Progressing", "Open", "Airgapped", "FQDNAllowlist", "Error".
+	// +optional
+	// +kubebuilder:validation:Enum=Progressing;Open;Airgapped;FQDNAllowlist;Error
+	Status string `json:"status,omitempty"`
+
+	// Message is a human-readable description of the active policy or the reason for an error.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 // WorkspaceStatus defines the observed state of Workspace
 type WorkspaceStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// NetworkPolicy is the network policy mode currently active for this workspace.
-	// Values: "Progressing" (reconcile in progress), "Open" (full internet allowed),
-	// "Airgapped" (all external traffic blocked), "FQDNAllowlist" (FQDN allowlist active),
-	// "Error" (policy could not be applied, see conditions for reason).
+	// NetworkPolicy is the observed state of the network policy for this workspace.
 	// +optional
-	// +kubebuilder:validation:Enum=Progressing;Open;Airgapped;FQDNAllowlist;Error
-	NetworkPolicy string `json:"networkPolicy,omitempty"`
+	NetworkPolicy NetworkPolicyStatus `json:"networkPolicy,omitempty"`
 
 	// Conditions represent the latest available observations of a Workspace's state.
 	// +optional
@@ -204,8 +213,7 @@ type WorkspaceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Network-Policy",type=string,JSONPath=`.status.networkPolicy`
-// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="NetworkPolicyReady")].reason`
+// +kubebuilder:printcolumn:name="Network-Policy",type=string,JSONPath=`.status.networkPolicy.status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Workspace is the Schema for the workspaces API

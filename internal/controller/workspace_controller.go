@@ -60,8 +60,11 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// On first creation, set Progressing state so the user sees immediate feedback
 	// before the reconcile completes.
-	if workspace.Status.NetworkPolicy == "" {
-		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyProgressing
+	if workspace.Status.NetworkPolicy.Status == "" {
+		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyStatus{
+			Status:  defaultv1alpha1.NetworkPolicyProgressing,
+			Message: "Network policy reconciliation in progress",
+		}
 		apimeta.SetStatusCondition(&workspace.Status.Conditions, metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 			Status:             metav1.ConditionFalse,
@@ -93,7 +96,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			fmt.Sprintf("Invalid AllowedFQDNs entry: %s", err.Error()),
 		)
 
-		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyError
+		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyStatus{
+			Status:  defaultv1alpha1.NetworkPolicyError,
+			Message: fmt.Sprintf("Network policy not applied: %s", err.Error()),
+		}
 		_ = r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after FQDN validation error", false)
 		// Permanent error: user must fix the spec; requeuing won't help.
 		return ctrl.Result{}, nil
@@ -118,7 +124,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				"CiliumNetworkPolicy CRD not found — network policies cannot be enforced",
 			)
 
-			workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyError
+			workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyStatus{
+				Status:  defaultv1alpha1.NetworkPolicyError,
+				Message: "Network policy not applied: CiliumNetworkPolicy CRD not installed in the cluster",
+			}
 			_ = r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after Cilium CRD not found", false)
 			// Permanent error: Cilium must be installed; requeuing won't help.
 			return ctrl.Result{}, nil
@@ -133,7 +142,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			Message:            fmt.Sprintf("Network policy not applied: %s", err.Error()),
 		}
 
-		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyError
+		workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyStatus{
+			Status:  defaultv1alpha1.NetworkPolicyError,
+			Message: fmt.Sprintf("Network policy not applied: %s", err.Error()),
+		}
 		_ = r.setConditionAndUpdateStatus(ctx, &workspace, condition, "Unable to update workspace status after reconcile error", false)
 
 		return ctrl.Result{}, err
@@ -146,13 +158,17 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Success: mirror spec mode to status. Error and Progressing states are set
 	// in the error paths above; reaching here guarantees a valid applied mode.
-	workspace.Status.NetworkPolicy = workspace.Spec.NetworkPolicy
+	msg := networkPolicyStatusMessage(workspace.Spec)
+	workspace.Status.NetworkPolicy = defaultv1alpha1.NetworkPolicyStatus{
+		Status:  workspace.Spec.NetworkPolicy,
+		Message: msg,
+	}
 	condition := metav1.Condition{
 		Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
 		Status:             metav1.ConditionTrue,
 		ObservedGeneration: workspace.Generation,
 		Reason:             defaultv1alpha1.ReasonApplied,
-		Message:            networkPolicyStatusMessage(workspace.Spec),
+		Message:            msg,
 	}
 
 	// Status update failures should be visible in production logs; treat as transient and requeue.

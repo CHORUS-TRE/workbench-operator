@@ -191,7 +191,10 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonApplied))
-			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyAirgapped))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyStatus{
+				Status:  defaultv1alpha1.NetworkPolicyAirgapped,
+				Message: "Network policy applied: airgapped, all external traffic blocked",
+			}))
 
 			// Verify CNP was created
 			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
@@ -237,7 +240,10 @@ var _ = Describe("WorkspaceReconciler", func() {
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyFQDNAllowlist))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyStatus{
+				Status:  defaultv1alpha1.NetworkPolicyFQDNAllowlist,
+				Message: "Network policy applied: FQDN allowlist active, allowed FQDNs: example.com, *.corp.internal",
+			}))
 		})
 
 		It("creates CNP with full internet access when open and no FQDNs", func() {
@@ -275,7 +281,10 @@ var _ = Describe("WorkspaceReconciler", func() {
 			cond := findCondition(updated.Status.Conditions, defaultv1alpha1.ConditionNetworkPolicyReady)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyOpen))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyStatus{
+				Status:  defaultv1alpha1.NetworkPolicyOpen,
+				Message: "Network policy applied: open, all external internet traffic allowed (ports 80/443)",
+			}))
 		})
 
 		It("updates ObservedGeneration on successful reconcile", func() {
@@ -540,7 +549,10 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(cond.Reason).To(Equal(defaultv1alpha1.ReasonCiliumNotInstalled))
 			Expect(cond.Message).To(ContainSubstring("CiliumNetworkPolicy CRD not installed"))
-			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyError))
+			Expect(updated.Status.NetworkPolicy).To(Equal(defaultv1alpha1.NetworkPolicyStatus{
+				Status:  defaultv1alpha1.NetworkPolicyError,
+				Message: "Network policy not applied: CiliumNetworkPolicy CRD not installed in the cluster",
+			}))
 		})
 	})
 })
