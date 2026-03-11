@@ -54,6 +54,8 @@ spec:
         {{- if .Values.imagePullSecrets }}
         - name: HELM_CONFIG_HOME
           value: /helm-registry
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm-cache
         {{- end }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}

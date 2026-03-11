@@ -99,8 +99,11 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	settings := cli.New()
 	settings.SetNamespace(namespace)
 
-	pathOpts := action.ChartPathOptions{Version: chartVersion}
-	chartPath, err := pathOpts.LocateChart(chartRef, settings)
+	// Use NewInstall to locate the chart — its constructor propagates cfg.RegistryClient
+	// into ChartPathOptions.registryClient (unexported), which LocateChart needs for OCI.
+	locator := action.NewInstall(cfg)
+	locator.Version = chartVersion
+	chartPath, err := locator.ChartPathOptions.LocateChart(chartRef, settings)
 	if err != nil {
 		return fmt.Errorf("locating chart %s: %w", chartRef, err)
 	}
