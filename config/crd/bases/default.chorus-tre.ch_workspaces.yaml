@@ -18,6 +18,9 @@ spec:
     - jsonPath: .status.networkPolicy.status
       name: Network-Policy
       type: string
+    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].reason
+      name: Reason
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
