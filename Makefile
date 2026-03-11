@@ -88,7 +88,7 @@ test: manifests generate fmt vet envtest ## Run tests, filtering out the e2e one
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
 .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
 test-e2e:
-	go test ./test/e2e/ -v -ginkgo.v
+	go test ./test/e2e/ -v -ginkgo.v -ginkgo.fail-fast -timeout 10m
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -187,6 +187,15 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy-e2e
+deploy-e2e: manifests kustomize ## Deploy controller using the test overlay (no Prometheus dependency).
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/test | $(KUBECTL) apply -f -
+
+.PHONY: undeploy-e2e
+undeploy-e2e: kustomize ## Undeploy controller using the test overlay.
+	$(KUSTOMIZE) build config/test | $(KUBECTL) delete --ignore-not-found=true -f -
 
 .PHONY: helm  ## Generate the Helm charts from the kustomize result
 helm: manifests kustomize helmify

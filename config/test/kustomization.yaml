@@ -1,0 +1,19 @@
+# Test overlay: same as config/default but excludes Prometheus (no ServiceMonitor CRD needed)
+# and the Chorus registry patch (registry is configured at runtime via E2E_REGISTRY).
+#
+# We duplicate the resource list from config/default rather than layering on top,
+# because kustomize does not support removing resources from a base.
+namespace: workbench-operator-system
+
+namePrefix: workbench-operator-
+
+resources:
+  - ../crd
+  - ../rbac
+  - ../manager
+  - metrics_service.yaml
+
+patches:
+  - path: manager_metrics_patch.yaml
+    target:
+      kind: Deployment
