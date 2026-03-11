@@ -91,18 +91,15 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 // helmInstallOrUpgrade installs the chart if the release doesn't exist, or upgrades it otherwise.
 // chartRef is the full OCI reference, e.g. oci://harbor.build.chorus-tre.local/services/postgres.
 // chartVersion is the semver chart version, e.g. 1.6.1.
+//
+// Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
+// missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`.
 func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName, chartRef, chartVersion string, values map[string]interface{}) error {
 	settings := cli.New()
 	settings.SetNamespace(namespace)
 
-	upgradeAction := action.NewUpgrade(cfg)
-	upgradeAction.Install = true
-	upgradeAction.Namespace = namespace
-	upgradeAction.Wait = false
-	upgradeAction.Atomic = false
-	upgradeAction.ChartPathOptions.Version = chartVersion
-
-	chartPath, err := upgradeAction.ChartPathOptions.LocateChart(chartRef, settings)
+	pathOpts := action.ChartPathOptions{Version: chartVersion}
+	chartPath, err := pathOpts.LocateChart(chartRef, settings)
 	if err != nil {
 		return fmt.Errorf("locating chart %s: %w", chartRef, err)
 	}
@@ -112,27 +109,48 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		return fmt.Errorf("loading chart %s: %w", chartPath, err)
 	}
 
-	if _, err := upgradeAction.RunWithContext(ctx, releaseName, ch, values); err != nil {
-		return fmt.Errorf("helm install/upgrade %s: %w", releaseName, err)
+	releaseStatus, err := helmReleaseStatus(cfg, releaseName)
+	if err != nil {
+		return fmt.Errorf("checking release %s: %w", releaseName, err)
+	}
+
+	if releaseStatus == "not-found" {
+		installAction := action.NewInstall(cfg)
+		installAction.Namespace = namespace
+		installAction.ReleaseName = releaseName
+		installAction.Wait = false
+		installAction.Atomic = false
+		if _, err := installAction.RunWithContext(ctx, ch, values); err != nil {
+			return fmt.Errorf("helm install %s: %w", releaseName, err)
+		}
+	} else {
+		upgradeAction := action.NewUpgrade(cfg)
+		upgradeAction.Namespace = namespace
+		upgradeAction.Wait = false
+		upgradeAction.Atomic = false
+		if _, err := upgradeAction.RunWithContext(ctx, releaseName, ch, values); err != nil {
+			return fmt.Errorf("helm upgrade %s: %w", releaseName, err)
+		}
 	}
 
 	return nil
 }
 
-// helmUninstall uninstalls a Helm release. If the release does not exist, it is a no-op.
-func helmUninstall(cfg *action.Configuration, releaseName string) error {
+// helmUninstall uninstalls a Helm release and reports whether it was present.
+// If the release does not exist, it is a no-op and returns (false, nil).
+func helmUninstall(cfg *action.Configuration, releaseName string) (bool, error) {
 	uninstallAction := action.NewUninstall(cfg)
 	uninstallAction.KeepHistory = false
 	uninstallAction.Wait = false
 
 	if _, err := uninstallAction.Run(releaseName); err != nil {
 		if strings.Contains(err.Error(), driver.ErrReleaseNotFound.Error()) {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("helm uninstall %s: %w", releaseName, err)
+		return false, fmt.Errorf("helm uninstall %s: %w", releaseName, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // helmReleaseStatus returns the Helm release status string, or "not-found" if the release doesn't exist.
@@ -149,37 +167,41 @@ func helmReleaseStatus(cfg *action.Configuration, releaseName string) (string, e
 }
 
 // deleteReleasePVCs deletes all PVCs labeled with the Helm release instance name.
-func deleteReleasePVCs(ctx context.Context, k8sClient client.Client, namespace, releaseName string) error {
+// Returns the count of PVCs deleted.
+func deleteReleasePVCs(ctx context.Context, k8sClient client.Client, namespace, releaseName string) (int, error) {
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	if err := k8sClient.List(ctx, pvcList,
 		client.InNamespace(namespace),
 		client.MatchingLabels{"app.kubernetes.io/instance": releaseName},
 	); err != nil {
-		return fmt.Errorf("listing PVCs for release %s: %w", releaseName, err)
+		return 0, fmt.Errorf("listing PVCs for release %s: %w", releaseName, err)
 	}
 
+	deleted := 0
 	for i := range pvcList.Items {
 		if err := k8sClient.Delete(ctx, &pvcList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting PVC %s: %w", pvcList.Items[i].Name, err)
+			return deleted, fmt.Errorf("deleting PVC %s: %w", pvcList.Items[i].Name, err)
 		}
+		deleted++
 	}
 
-	return nil
+	return deleted, nil
 }
 
-// deleteCredentialSecret deletes the credential Secret for a service. If the Secret does not exist, it is a no-op.
-func deleteCredentialSecret(ctx context.Context, k8sClient client.Client, namespace, secretName string) error {
+// deleteCredentialSecret deletes the credential Secret for a service and reports whether it was present.
+// If the Secret does not exist, it is a no-op and returns (false, nil).
+func deleteCredentialSecret(ctx context.Context, k8sClient client.Client, namespace, secretName string) (bool, error) {
 	secret := &corev1.Secret{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("getting credential secret %s: %w", secretName, err)
+		return false, fmt.Errorf("getting credential secret %s: %w", secretName, err)
 	}
 	if err := k8sClient.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("deleting credential secret %s: %w", secretName, err)
+		return false, fmt.Errorf("deleting credential secret %s: %w", secretName, err)
 	}
-	return nil
+	return true, nil
 }
 
 // generatePassword returns a random URL-safe base64 password of the given length.
