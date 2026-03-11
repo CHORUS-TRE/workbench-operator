@@ -93,7 +93,8 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 // chartVersion is the semver chart version, e.g. 1.6.1.
 //
 // Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
-// missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`.
+// missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
+// with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
 func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName, chartRef, chartVersion string, values map[string]interface{}) error {
 	settings := cli.New()
 	settings.SetNamespace(namespace)
@@ -109,26 +110,51 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		return fmt.Errorf("loading chart %s: %w", chartPath, err)
 	}
 
+	newInstall := func() error {
+		a := action.NewInstall(cfg)
+		a.Namespace = namespace
+		a.ReleaseName = releaseName
+		a.Wait = false
+		a.Atomic = false
+		_, err := a.RunWithContext(ctx, ch, values)
+		return err
+	}
+
+	newUpgrade := func() error {
+		a := action.NewUpgrade(cfg)
+		a.Namespace = namespace
+		a.Wait = false
+		a.Atomic = false
+		a.ChartPathOptions.Version = chartVersion
+		_, err := a.RunWithContext(ctx, releaseName, ch, values)
+		return err
+	}
+
 	releaseStatus, err := helmReleaseStatus(cfg, releaseName)
 	if err != nil {
 		return fmt.Errorf("checking release %s: %w", releaseName, err)
 	}
 
 	if releaseStatus == "not-found" {
-		installAction := action.NewInstall(cfg)
-		installAction.Namespace = namespace
-		installAction.ReleaseName = releaseName
-		installAction.Wait = false
-		installAction.Atomic = false
-		if _, err := installAction.RunWithContext(ctx, ch, values); err != nil {
+		// Release absent: install. If a concurrent reconcile already installed it, fall back to upgrade.
+		if err := newInstall(); err != nil {
+			if strings.Contains(err.Error(), driver.ErrReleaseExists.Error()) {
+				if err := newUpgrade(); err != nil {
+					return fmt.Errorf("helm upgrade %s: %w", releaseName, err)
+				}
+				return nil
+			}
 			return fmt.Errorf("helm install %s: %w", releaseName, err)
 		}
 	} else {
-		upgradeAction := action.NewUpgrade(cfg)
-		upgradeAction.Namespace = namespace
-		upgradeAction.Wait = false
-		upgradeAction.Atomic = false
-		if _, err := upgradeAction.RunWithContext(ctx, releaseName, ch, values); err != nil {
+		// Release present: upgrade. If a concurrent reconcile removed it, fall back to install.
+		if err := newUpgrade(); err != nil {
+			if strings.Contains(err.Error(), driver.ErrNoDeployedReleases.Error()) {
+				if err := newInstall(); err != nil {
+					return fmt.Errorf("helm install %s: %w", releaseName, err)
+				}
+				return nil
+			}
 			return fmt.Errorf("helm upgrade %s: %w", releaseName, err)
 		}
 	}
@@ -179,10 +205,14 @@ func deleteReleasePVCs(ctx context.Context, k8sClient client.Client, namespace, 
 
 	deleted := 0
 	for i := range pvcList.Items {
-		if err := k8sClient.Delete(ctx, &pvcList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-			return deleted, fmt.Errorf("deleting PVC %s: %w", pvcList.Items[i].Name, err)
+		if err := k8sClient.Delete(ctx, &pvcList.Items[i]); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return deleted, fmt.Errorf("deleting PVC %s: %w", pvcList.Items[i].Name, err)
+			}
+			// already gone between List and Delete — don't count
+		} else {
+			deleted++
 		}
-		deleted++
 	}
 
 	return deleted, nil
