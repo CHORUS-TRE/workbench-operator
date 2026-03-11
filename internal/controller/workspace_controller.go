@@ -401,8 +401,7 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 
 		case defaultv1alpha1.WorkspaceServiceStateStopped:
-			// helmUninstall is a no-op if the release is already absent.
-			if err := helmUninstall(cfg, releaseName); err != nil {
+			if _, err := helmUninstall(cfg, releaseName); err != nil {
 				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
@@ -412,8 +411,10 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 
 		case defaultv1alpha1.WorkspaceServiceStateDeleted:
-			// helmUninstall is a no-op if the release is already absent.
-			if err := helmUninstall(cfg, releaseName); err != nil {
+			var deletedParts []string
+
+			releaseDeleted, err := helmUninstall(cfg, releaseName)
+			if err != nil {
 				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
@@ -421,7 +422,13 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				}
 				continue
 			}
-			if err := deleteReleasePVCs(ctx, r.Client, namespace, releaseName); err != nil {
+			if releaseDeleted {
+				r.Recorder.Event(workspace, "Normal", "ServiceDeleted", fmt.Sprintf("service %s: Helm release %s uninstalled", key, releaseName))
+				deletedParts = append(deletedParts, "release uninstalled")
+			}
+
+			pvcCount, err := deleteReleasePVCs(ctx, r.Client, namespace, releaseName)
+			if err != nil {
 				logger.Error(err, "Failed to delete PVCs", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
@@ -429,8 +436,14 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				}
 				continue
 			}
+			if pvcCount > 0 {
+				r.Recorder.Event(workspace, "Normal", "ServiceDeleted", fmt.Sprintf("service %s: %d PVC(s) deleted", key, pvcCount))
+				deletedParts = append(deletedParts, fmt.Sprintf("%d PVC(s) deleted", pvcCount))
+			}
+
 			if svc.Credentials != nil {
-				if err := deleteCredentialSecret(ctx, r.Client, namespace, svc.Credentials.SecretName); err != nil {
+				credDeleted, err := deleteCredentialSecret(ctx, r.Client, namespace, svc.Credentials.SecretName)
+				if err != nil {
 					logger.Error(err, "Failed to delete credential secret", "service", key, "secret", svc.Credentials.SecretName)
 					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
@@ -438,7 +451,21 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 					}
 					continue
 				}
+				if credDeleted {
+					r.Recorder.Event(workspace, "Normal", "ServiceDeleted", fmt.Sprintf("service %s: credentials secret %s deleted", key, svc.Credentials.SecretName))
+					deletedParts = append(deletedParts, "credentials deleted")
+				}
 			}
+
+			msg := "Deleted"
+			if len(deletedParts) > 0 {
+				msg = "Deleted: " + strings.Join(deletedParts, ", ")
+			}
+			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusDeleted,
+				Message: msg,
+			}
+			continue
 		}
 
 		// Fetch status after the action so buildServiceStatus reflects the current state.
