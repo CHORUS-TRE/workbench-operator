@@ -2,10 +2,12 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -515,6 +517,38 @@ var _ = Describe("WorkspaceReconciler", func() {
 		})
 	})
 
+	Describe("Reconcile - service requeue", func() {
+		It("returns 5-minute requeue when workspace has services", func() {
+			workspace := &defaultv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workspaceName,
+					Namespace: workspaceNamespace,
+				},
+				Spec: defaultv1alpha1.WorkspaceSpec{
+					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
+					Services: map[string]defaultv1alpha1.WorkspaceService{
+						"postgres": {
+							State: defaultv1alpha1.WorkspaceServiceStateStopped,
+							Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			reconciler := &WorkspaceReconciler{
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				Recorder:   record.NewFakeRecorder(10),
+				RestConfig: cfg,
+				Registry:   "oci://registry.example.invalid",
+			}
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(5 * time.Minute))
+		})
+	})
+
 	Describe("Reconcile - Cilium CRD not installed", func() {
 		It("sets NetworkPolicyReady=False with CiliumNotInstalled when CRD is missing", func() {
 			workspace := &defaultv1alpha1.Workspace{
@@ -630,37 +664,37 @@ var _ = Describe("buildServiceStatus", func() {
 
 	It("returns Running when Helm is deployed and spec state is Running", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("deployed", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
+		Expect(buildServiceStatus("deployed", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
 	})
 
 	It("returns Progressing for pending-install", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("pending-install", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+		Expect(buildServiceStatus("pending-install", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing for pending-upgrade", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("pending-upgrade", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+		Expect(buildServiceStatus("pending-upgrade", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Failed for failed Helm release", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("failed", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(buildServiceStatus("failed", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
 	})
 
 	It("returns Stopped when release not found and spec is Stopped", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		Expect(buildServiceStatus("not-found", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
+		Expect(buildServiceStatus("not-found", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
 	})
 
 	It("returns Deleted when release not found and spec is Deleted", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
-		Expect(buildServiceStatus("not-found", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
+		Expect(buildServiceStatus("not-found", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
 	})
 
 	It("returns Progressing for unknown Helm state", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("superseded", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+		Expect(buildServiceStatus("superseded", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("renders connectionInfoTemplate when Running", func() {
@@ -668,7 +702,7 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
 		}
-		status := buildServiceStatus("deployed", svc, "ws-pg", "pg-creds", workspace)
+		status := buildServiceStatus("deployed", "", svc, "ws-pg", "pg-creds", workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
 		Expect(status.ConnectionInfo).To(Equal("postgresql://ws-pg.default:5432"))
 	})
@@ -678,7 +712,7 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "secret: {{.SecretName}}",
 		}
-		Expect(buildServiceStatus("deployed", svc, "rel", "my-creds", workspace).ConnectionInfo).To(Equal("secret: my-creds"))
+		Expect(buildServiceStatus("deployed", "", svc, "rel", "my-creds", workspace).ConnectionInfo).To(Equal("secret: my-creds"))
 	})
 
 	It("does not render connectionInfoTemplate when not Running", func() {
@@ -686,7 +720,7 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateStopped,
 			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
 		}
-		Expect(buildServiceStatus("not-found", svc, "ws-pg", "", workspace).ConnectionInfo).To(BeEmpty())
+		Expect(buildServiceStatus("not-found", "", svc, "ws-pg", "", workspace).ConnectionInfo).To(BeEmpty())
 	})
 })
 
@@ -802,3 +836,271 @@ func (c *noCiliumClient) Create(ctx context.Context, obj client.Object, opts ...
 	}
 	return c.Client.Create(ctx, obj, opts...)
 }
+
+var _ = Describe("ensureWorkspaceControllerRef", func() {
+	var reconciler *WorkspaceReconciler
+	BeforeEach(func() {
+		reconciler = &WorkspaceReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+	})
+
+	makeWorkspace := func(name, uid string) *defaultv1alpha1.Workspace {
+		return &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+				UID:       types.UID(uid),
+			},
+		}
+	}
+
+	makeObj := func() *unstructured.Unstructured {
+		obj := &unstructured.Unstructured{}
+		obj.SetName("test-cnp")
+		obj.SetNamespace("default")
+		obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "cilium.io", Version: "v2", Kind: "CiliumNetworkPolicy"})
+		return obj
+	}
+
+	It("sets owner ref and returns true when object has no owner", func() {
+		ws := makeWorkspace("ws-no-owner", "uid-1")
+		obj := makeObj()
+		changed, err := reconciler.ensureWorkspaceControllerRef(ws, obj)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(metav1.GetControllerOf(obj)).NotTo(BeNil())
+	})
+
+	It("returns false and no error when the same workspace already owns the object", func() {
+		ws := makeWorkspace("ws-same-owner", "uid-2")
+		obj := makeObj()
+		_, err := reconciler.ensureWorkspaceControllerRef(ws, obj)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Call again with the same workspace — already owned, no change
+		changed, err := reconciler.ensureWorkspaceControllerRef(ws, obj)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeFalse())
+	})
+
+	It("returns an error when a different workspace owns the object", func() {
+		ws1 := makeWorkspace("ws-owner-a", "uid-3a")
+		ws2 := makeWorkspace("ws-owner-b", "uid-3b")
+		obj := makeObj()
+
+		_, err := reconciler.ensureWorkspaceControllerRef(ws1, obj)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = reconciler.ensureWorkspaceControllerRef(ws2, obj)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("controlled by"))
+	})
+
+	It("updates the UID in the owner reference when the workspace was recreated", func() {
+		ws := makeWorkspace("ws-uid-update", "uid-4-old")
+		obj := makeObj()
+
+		_, err := reconciler.ensureWorkspaceControllerRef(ws, obj)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(metav1.GetControllerOf(obj).UID).To(Equal(types.UID("uid-4-old")))
+
+		// Simulate workspace recreated: same name, new UID
+		wsNew := makeWorkspace("ws-uid-update", "uid-4-new")
+		changed, err := reconciler.ensureWorkspaceControllerRef(wsNew, obj)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(changed).To(BeTrue())
+		Expect(metav1.GetControllerOf(obj).UID).To(Equal(types.UID("uid-4-new")))
+	})
+})
+
+var _ = Describe("reconcileServices", func() {
+	ctx := context.Background()
+	const namespace = "default"
+
+	newReconcilerWithHelm := func() *WorkspaceReconciler {
+		return &WorkspaceReconciler{
+			Client:     k8sClient,
+			Scheme:     k8sClient.Scheme(),
+			Recorder:   record.NewFakeRecorder(10),
+			RestConfig: cfg,
+			Registry:   "oci://registry.example.invalid",
+		}
+	}
+
+	It("returns nil immediately when there are no services", func() {
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "no-svc-ws", Namespace: namespace},
+		}
+		err := newReconcilerWithHelm().reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("sets Failed status when credential secret is owned by another workspace", func() {
+		const secretName = "shared-creds-conflict"
+		// Create the secret owned by a different workspace first
+		otherWS := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-ws-conflict", Namespace: namespace, UID: "uid-conflict-other"},
+		}
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: secretName, Paths: []string{"pw"}}
+		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, otherWS, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		DeferCleanup(func() {
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
+				_ = k8sClient.Delete(ctx, secret)
+			}
+		})
+
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "conflict-ws", Namespace: namespace, UID: "uid-conflict-this"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateRunning,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{
+							SecretName: secretName,
+							Paths:      []string{"pw"},
+						},
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err = r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred()) // per-service errors go to status, not returned
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("not owned by this Workspace"))
+	})
+
+	It("sets Failed status when service values JSON is invalid", func() {
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "bad-values-ws", Namespace: namespace, UID: "uid-bad-values"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State:  defaultv1alpha1.WorkspaceServiceStateRunning,
+						Chart:  defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						Values: &apiextensionsv1.JSON{Raw: []byte(`{not valid}`)},
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("parse service values"))
+	})
+
+	It("sets Stopped status when service is Stopped and release does not exist", func() {
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "stopped-ws", Namespace: namespace, UID: "uid-stopped"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateStopped,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
+	})
+
+	It("sets Deleted status when service is Deleted and release and PVCs do not exist", func() {
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "deleted-ws", Namespace: namespace, UID: "uid-deleted"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateDeleted,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
+	})
+
+	It("sets Deleted status and removes the credential secret", func() {
+		const secretName = "svc-creds-to-delete"
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "creds-del-ws", Namespace: namespace, UID: "uid-creds-del"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateDeleted,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{
+							SecretName: secretName,
+							Paths:      []string{"password"},
+						},
+					},
+				},
+			},
+		}
+
+		// Pre-create the credential secret owned by this workspace
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: secretName, Paths: []string{"password"}}
+		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		DeferCleanup(func() {
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
+				_ = k8sClient.Delete(ctx, secret)
+			}
+		})
+
+		r := newReconcilerWithHelm()
+		err = r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("credentials deleted"))
+
+		// Secret should be gone
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, &corev1.Secret{})
+		Expect(client.IgnoreNotFound(err)).To(Succeed())
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("defaults empty State to Running and sets Failed when Helm install fails", func() {
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-state-ws", Namespace: namespace, UID: "uid-default-state"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						// State is empty — should default to Running
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		// Helm install fails (no real registry) — status should be Failed
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+	})
+})

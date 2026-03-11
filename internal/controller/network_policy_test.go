@@ -277,3 +277,27 @@ var _ = Describe("toFQDNSelectors", func() {
 		Expect(selectors).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 	})
 })
+
+var _ = Describe("cnpNameForWorkspace", func() {
+	It("returns short name with suffix when name fits within 253 chars", func() {
+		name := cnpNameForWorkspace("my-workspace")
+		Expect(name).To(Equal("my-workspace-egress"))
+		Expect(len(name)).To(BeNumerically("<=", 253))
+	})
+
+	It("hashes and truncates very long names", func() {
+		long := strings.Repeat("a", 300)
+		name := cnpNameForWorkspace(long)
+		Expect(len(name)).To(BeNumerically("<=", 253))
+		Expect(name).To(ContainSubstring("-egress-"))
+	})
+
+	It("falls back to 'ws' prefix when truncated name consists only of dashes", func() {
+		// A workspace name made of dashes: truncation leaves only dashes, TrimRight
+		// removes them all, so the prefix collapses to "" and falls back to "ws".
+		allDashes := strings.Repeat("-", 300)
+		name := cnpNameForWorkspace(allDashes)
+		Expect(len(name)).To(BeNumerically("<=", 253))
+		Expect(name).To(HavePrefix("ws"))
+	})
+})
