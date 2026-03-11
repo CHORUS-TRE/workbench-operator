@@ -19,11 +19,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.networkPolicy
+    - jsonPath: .status.networkPolicy.status
       name: Network-Policy
-      type: string
-    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].reason
-      name: Reason
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -218,18 +215,25 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               networkPolicy:
-                description: |-
-                  NetworkPolicy is the network policy mode currently active for this workspace.
-                  Values: "Progressing" (reconcile in progress), "Open" (full internet allowed),
-                  "Airgapped" (all external traffic blocked), "FQDNAllowlist" (FQDN allowlist active),
-                  "Error" (policy could not be applied, see conditions for reason).
-                enum:
-                - Progressing
-                - Open
-                - Airgapped
-                - FQDNAllowlist
-                - Error
-                type: string
+                description: NetworkPolicy is the observed state of the network policy
+                  for this workspace.
+                properties:
+                  message:
+                    description: Message is a human-readable description of the active
+                      policy or the reason for an error.
+                    type: string
+                  status:
+                    description: |-
+                      Status is the network policy reconciliation status.
+                      Values: "Progressing", "Open", "Airgapped", "FQDNAllowlist", "Error".
+                    enum:
+                    - Progressing
+                    - Open
+                    - Airgapped
+                    - FQDNAllowlist
+                    - Error
+                    type: string
+                type: object
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
