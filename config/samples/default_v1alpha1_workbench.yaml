@@ -8,11 +8,12 @@ metadata:
   namespace: workspace
 spec:
   initContainer:
-    version: "0.0.2-1"
+    version: "0.0.2-4"
   server:
-    version: "6.3.2-4"
+    version: "6.3.6-r0-3"
     user: user_name
     userid: 1002
+    clipboard: disabled  # disabled | to-server (paste into workbench) | to-client (copy from workbench) | both
   storage:
     s3: true
     nfs: true

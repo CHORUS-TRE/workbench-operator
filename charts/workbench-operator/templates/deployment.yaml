@@ -51,6 +51,10 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        {{- if .Values.imagePullSecrets }}
+        - name: HELM_CONFIG_HOME
+          value: /helm-registry
+        {{- end }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}
         livenessProbe:
@@ -70,6 +74,12 @@ spec:
           }}
         securityContext: {{- toYaml .Values.controllerManager.manager.containerSecurityContext
           | nindent 10 }}
+        {{- if .Values.imagePullSecrets }}
+        volumeMounts:
+        - name: helm-registry-auth
+          mountPath: /helm-registry/registry
+          readOnly: true
+        {{- end }}
       imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
       securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
         8 }}
@@ -78,3 +88,12 @@ spec:
       priorityClassName: {{ .Values.controllerManager.priorityClassName }}
       {{- end }}
       terminationGracePeriodSeconds: 10
+      {{- if .Values.imagePullSecrets }}
+      volumes:
+      - name: helm-registry-auth
+        secret:
+          secretName: {{ (index .Values.imagePullSecrets 0).name }}
+          items:
+          - key: .dockerconfigjson
+            path: config.json
+      {{- end }}
