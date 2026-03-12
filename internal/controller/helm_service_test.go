@@ -364,7 +364,7 @@ var _ = Describe("checkServicePodsHealth", func() {
 
 		status, msg := checkServicePodsHealth(ctx, k8sClient, namespace, releaseName)
 		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
-		Expect(msg).To(ContainSubstring("init container"))
+		Expect(msg).To(ContainSubstring("Init container"))
 	})
 
 	It("returns Progressing when an init container is waiting but not crashing", func() {

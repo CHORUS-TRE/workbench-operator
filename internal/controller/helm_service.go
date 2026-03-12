@@ -397,14 +397,14 @@ func checkServicePodsHealth(ctx context.Context, k8sClient client.Client, namesp
 		// Pod-level failure
 		if pod.Status.Phase == corev1.PodFailed {
 			return defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-				fmt.Sprintf("pod %s failed: %s", pod.Name, pod.Status.Message)
+				fmt.Sprintf("Pod %s failed: %s", pod.Name, pod.Status.Message)
 		}
 
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Waiting != nil {
 				reason := cs.State.Waiting.Reason
 				if reason == "CrashLoopBackOff" || reason == "OOMKilled" || reason == "ImagePullBackOff" || reason == "ErrImagePull" {
-					msg := fmt.Sprintf("container %s: %s", cs.Name, reason)
+					msg := fmt.Sprintf("Container %s: %s", cs.Name, reason)
 					if cs.State.Waiting.Message != "" {
 						msg += ": " + cs.State.Waiting.Message
 					}
@@ -421,7 +421,7 @@ func checkServicePodsHealth(ctx context.Context, k8sClient client.Client, namesp
 				reason := cs.State.Waiting.Reason
 				if reason == "CrashLoopBackOff" || reason == "OOMKilled" || reason == "ImagePullBackOff" || reason == "ErrImagePull" {
 					return defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-						fmt.Sprintf("init container %s: %s", cs.Name, reason)
+						fmt.Sprintf("Init container %s: %s", cs.Name, reason)
 				}
 				allReady = false
 			}
