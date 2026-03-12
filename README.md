@@ -1,7 +1,5 @@
 # workbench-operator
 
-Testing things
-
 Operator for workbenches.
 
 ## Description
