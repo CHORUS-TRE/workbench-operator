@@ -137,6 +137,15 @@ var _ = Describe("controller", Ordered, func() {
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 			ExpectWithOffset(1, string(apiPort)).NotTo(BeEmpty(), "could not determine API server port")
 
+			By("verifying container[0] is the manager (guard against index-based patch breakage)")
+			cmd = exec.Command("kubectl", "get", "deployment",
+				"workbench-operator-controller-manager", "-n", namespace,
+				"-o", `jsonpath={.spec.template.spec.containers[0].name}`)
+			containerName, err := utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+			ExpectWithOffset(1, string(containerName)).To(Equal("manager"),
+				"expected containers[0] to be 'manager', got %q — JSON patch indices need updating", string(containerName))
+
 			// Build the DinD patch: leader election + direct API server endpoint.
 			// When E2E_REGISTRY is set, also configure the operator's --registry flag
 			// so that service tests can pull Helm charts from an accessible registry.
@@ -240,8 +249,9 @@ var _ = Describe("controller", Ordered, func() {
 				dumpDiagnostics(testNS)
 			}
 
-			// Clean up workspaces in test namespace
-			cmd := exec.Command("kubectl", "delete", "workspaces", "--all", "-n", testNS, "--ignore-not-found")
+			// Clean up workspaces in test namespace and wait for deletion to complete
+			cmd := exec.Command("kubectl", "delete", "workspaces", "--all", "-n", testNS,
+				"--ignore-not-found", "--wait=true", "--timeout=30s")
 			_, _ = utils.Run(cmd)
 			// Wait for CNPs to be garbage collected
 			Eventually(func() bool {
@@ -251,7 +261,7 @@ var _ = Describe("controller", Ordered, func() {
 					return false
 				}
 				return string(out) == "[]" || string(out) == ""
-			}, 60*time.Second, time.Second).Should(BeTrue())
+			}, 15*time.Second, time.Second).Should(BeTrue())
 		})
 
 		It("creates a CiliumNetworkPolicy for an airgapped workspace", func() {
