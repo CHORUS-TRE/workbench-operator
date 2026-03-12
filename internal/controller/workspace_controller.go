@@ -377,6 +377,13 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		}
 		repository = strings.Trim(repository, "/")
 
+		// Derive the Helm sub-chart values prefix from the last segment of the repository
+		// path. CHORUS-TRE service charts are wrapper charts whose sole dependency shares
+		// the same name as the chart itself (e.g. services/postgres → prefix "postgres"),
+		// so user-supplied values and credentials are wrapped under that key automatically.
+		repoParts := strings.Split(repository, "/")
+		valuesPrefix := repoParts[len(repoParts)-1]
+
 		chartRef := fmt.Sprintf("oci://%s/%s", registry, repository)
 
 		secretName := ""
@@ -411,7 +418,7 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				continue
 			}
 
-			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, chartRef, svc.Chart.Tag, mergeMaps(userValues, credValues)); err != nil {
+			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, chartRef, svc.Chart.Tag, mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix))); err != nil {
 				logger.Error(err, "Failed to install/upgrade Helm release", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
@@ -489,7 +496,7 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		}
 
 		// Fetch status after the action so buildServiceStatus reflects the current state.
-		helmStatus, err := helmReleaseStatus(cfg, releaseName)
+		helmStatus, helmDescription, err := helmReleaseStatus(cfg, releaseName)
 		if err != nil {
 			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
 			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
@@ -499,7 +506,20 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			continue
 		}
 
-		workspace.Status.Services[key] = buildServiceStatus(helmStatus, svc, releaseName, secretName, workspace)
+		svcStatus := buildServiceStatus(helmStatus, helmDescription, svc, releaseName, secretName, workspace)
+
+		// Override status with actual pod health when Helm thinks the release is deployed.
+		// Helm marks a release as "deployed" as soon as manifests are applied, regardless of
+		// whether pods are actually running — so we must check pod health separately.
+		if svcStatus.Status == defaultv1alpha1.WorkspaceStatusServiceStatusRunning {
+			if podStatus, podMsg := checkServicePodsHealth(ctx, r.Client, namespace, releaseName); podStatus != "" {
+				svcStatus.Status = podStatus
+				svcStatus.Message = podMsg
+				svcStatus.ConnectionInfo = ""
+			}
+		}
+
+		workspace.Status.Services[key] = svcStatus
 	}
 	return nil
 }

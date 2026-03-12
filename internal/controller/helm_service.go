@@ -128,14 +128,26 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		a.Namespace = namespace
 		a.Wait = false
 		a.Atomic = false
+		a.MaxHistory = 10
 		a.ChartPathOptions.Version = chartVersion
 		_, err := a.RunWithContext(ctx, releaseName, ch, values)
 		return err
 	}
 
-	releaseStatus, err := helmReleaseStatus(cfg, releaseName)
-	if err != nil {
-		return fmt.Errorf("checking release %s: %w", releaseName, err)
+	var releaseStatus string
+	statusAction := action.NewStatus(cfg)
+	if rel, err := statusAction.Run(releaseName); err != nil {
+		if strings.Contains(err.Error(), driver.ErrReleaseNotFound.Error()) {
+			releaseStatus = "not-found"
+		} else {
+			return fmt.Errorf("checking release %s: %w", releaseName, err)
+		}
+	} else {
+		releaseStatus = string(rel.Info.Status)
+		// Skip upgrade when already deployed with the same chart version and values.
+		if releaseStatus == "deployed" && rel.Chart.Metadata.Version == chartVersion && releaseValuesMatch(rel.Config, values) {
+			return nil
+		}
 	}
 
 	if releaseStatus == "not-found" {
@@ -165,6 +177,17 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	return nil
 }
 
+// releaseValuesMatch compares two Helm values maps by JSON serialization.
+// Returns true when both maps are semantically equal.
+func releaseValuesMatch(deployed, desired map[string]interface{}) bool {
+	a, err1 := json.Marshal(deployed)
+	b, err2 := json.Marshal(desired)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return string(a) == string(b)
+}
+
 // helmUninstall uninstalls a Helm release and reports whether it was present.
 // If the release does not exist, it is a no-op and returns (false, nil).
 func helmUninstall(cfg *action.Configuration, releaseName string) (bool, error) {
@@ -182,17 +205,17 @@ func helmUninstall(cfg *action.Configuration, releaseName string) (bool, error) 
 	return true, nil
 }
 
-// helmReleaseStatus returns the Helm release status string, or "not-found" if the release doesn't exist.
-func helmReleaseStatus(cfg *action.Configuration, releaseName string) (string, error) {
+// helmReleaseStatus returns the Helm release status string and description, or "not-found" if the release doesn't exist.
+func helmReleaseStatus(cfg *action.Configuration, releaseName string) (string, string, error) {
 	statusAction := action.NewStatus(cfg)
 	rel, err := statusAction.Run(releaseName)
 	if err != nil {
 		if strings.Contains(err.Error(), driver.ErrReleaseNotFound.Error()) {
-			return "not-found", nil
+			return "not-found", "", nil
 		}
-		return "", err
+		return "", "", err
 	}
-	return string(rel.Info.Status), nil
+	return string(rel.Info.Status), rel.Info.Description, nil
 }
 
 // deleteReleasePVCs deletes all PVCs labeled with the Helm release instance name.
@@ -327,6 +350,17 @@ func dotNotationToNestedMap(key, value string) map[string]interface{} {
 	return result
 }
 
+// wrapWithPrefix wraps values under a single top-level key, mirroring the Helm
+// sub-chart convention where a wrapper chart passes values to its dependency
+// under the dependency name (e.g. postgres.settings.superuserPassword).
+// When prefix is empty or values is empty, the original map is returned unchanged.
+func wrapWithPrefix(values map[string]interface{}, prefix string) map[string]interface{} {
+	if prefix == "" || len(values) == 0 {
+		return values
+	}
+	return map[string]interface{}{prefix: values}
+}
+
 // mergeMaps merges override into base recursively. Override values take precedence.
 func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
@@ -347,8 +381,61 @@ func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 	return result
 }
 
+// checkServicePodsHealth inspects pods belonging to a Helm release and returns a status override
+// when pods are unhealthy. Returns ("", "") when pods are healthy or no pods exist yet.
+func checkServicePodsHealth(ctx context.Context, k8sClient client.Client, namespace, releaseName string) (defaultv1alpha1.WorkspaceStatusServiceStatus, string) {
+	podList := &corev1.PodList{}
+	if err := k8sClient.List(ctx, podList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"app.kubernetes.io/instance": releaseName},
+	); err != nil || len(podList.Items) == 0 {
+		return "", ""
+	}
+
+	allReady := true
+	for _, pod := range podList.Items {
+		// Pod-level failure
+		if pod.Status.Phase == corev1.PodFailed {
+			return defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+				fmt.Sprintf("pod %s failed: %s", pod.Name, pod.Status.Message)
+		}
+
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Waiting != nil {
+				reason := cs.State.Waiting.Reason
+				if reason == "CrashLoopBackOff" || reason == "OOMKilled" || reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+					msg := fmt.Sprintf("container %s: %s", cs.Name, reason)
+					if cs.State.Waiting.Message != "" {
+						msg += ": " + cs.State.Waiting.Message
+					}
+					return defaultv1alpha1.WorkspaceStatusServiceStatusFailed, msg
+				}
+				allReady = false
+			}
+			if !cs.Ready {
+				allReady = false
+			}
+		}
+		for _, cs := range pod.Status.InitContainerStatuses {
+			if cs.State.Waiting != nil {
+				reason := cs.State.Waiting.Reason
+				if reason == "CrashLoopBackOff" || reason == "OOMKilled" || reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+					return defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+						fmt.Sprintf("init container %s: %s", cs.Name, reason)
+				}
+				allReady = false
+			}
+		}
+	}
+
+	if !allReady {
+		return defaultv1alpha1.WorkspaceStatusServiceStatusProgressing, "pods are starting"
+	}
+	return "", ""
+}
+
 // buildServiceStatus maps Helm release state + desired spec state to a WorkspaceStatusService.
-func buildServiceStatus(helmStatus string, svc defaultv1alpha1.WorkspaceService, releaseName, secretName string, workspace *defaultv1alpha1.Workspace) defaultv1alpha1.WorkspaceStatusService {
+func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.WorkspaceService, releaseName, secretName string, workspace *defaultv1alpha1.Workspace) defaultv1alpha1.WorkspaceStatusService {
 	var state defaultv1alpha1.WorkspaceStatusServiceStatus
 
 	switch {
@@ -377,6 +464,7 @@ func buildServiceStatus(helmStatus string, svc defaultv1alpha1.WorkspaceService,
 
 	return defaultv1alpha1.WorkspaceStatusService{
 		Status:         state,
+		Message:        helmDescription,
 		ConnectionInfo: connectionInfo,
 	}
 }
