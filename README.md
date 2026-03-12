@@ -1,5 +1,7 @@
 # workbench-operator
 
+needed for retrig
+
 Operator for workbenches.
 
 ## Description
