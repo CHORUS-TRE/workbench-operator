@@ -134,18 +134,19 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		return err
 	}
 
-	releaseStatus, _, err := helmReleaseStatus(cfg, releaseName)
-	if err != nil {
-		return fmt.Errorf("checking release %s: %w", releaseName, err)
-	}
-
-	// Skip upgrade when the release is already deployed with the same chart version and values.
-	if releaseStatus == "deployed" {
-		statusAction := action.NewStatus(cfg)
-		if rel, err := statusAction.Run(releaseName); err == nil {
-			if rel.Chart.Metadata.Version == chartVersion && releaseValuesMatch(rel.Config, values) {
-				return nil
-			}
+	var releaseStatus string
+	statusAction := action.NewStatus(cfg)
+	if rel, err := statusAction.Run(releaseName); err != nil {
+		if strings.Contains(err.Error(), driver.ErrReleaseNotFound.Error()) {
+			releaseStatus = "not-found"
+		} else {
+			return fmt.Errorf("checking release %s: %w", releaseName, err)
+		}
+	} else {
+		releaseStatus = string(rel.Info.Status)
+		// Skip upgrade when already deployed with the same chart version and values.
+		if releaseStatus == "deployed" && rel.Chart.Metadata.Version == chartVersion && releaseValuesMatch(rel.Config, values) {
+			return nil
 		}
 	}
 
