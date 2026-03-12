@@ -429,7 +429,7 @@ func checkServicePodsHealth(ctx context.Context, k8sClient client.Client, namesp
 	}
 
 	if !allReady {
-		return defaultv1alpha1.WorkspaceStatusServiceStatusProgressing, "pods are starting"
+		return defaultv1alpha1.WorkspaceStatusServiceStatusProgressing, "Pods are starting"
 	}
 	return "", ""
 }
@@ -466,6 +466,7 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 		Status:         state,
 		Message:        helmDescription,
 		ConnectionInfo: connectionInfo,
+		SecretName:     secretName,
 	}
 }
 

@@ -390,7 +390,7 @@ var _ = Describe("checkServicePodsHealth", func() {
 
 		status, msg := checkServicePodsHealth(ctx, k8sClient, namespace, releaseName)
 		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
-		Expect(msg).To(Equal("pods are starting"))
+		Expect(msg).To(Equal("Pods are starting"))
 	})
 })
 
@@ -535,5 +535,17 @@ var _ = Describe("buildServiceStatus", func() {
 		}
 		status := buildServiceStatus("failed", "", svc, "my-release", "", workspace)
 		Expect(status.ConnectionInfo).To(BeEmpty())
+	})
+
+	It("populates SecretName in status", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
+		status := buildServiceStatus("deployed", "", svc, "rel", "my-creds", workspace)
+		Expect(status.SecretName).To(Equal("my-creds"))
+	})
+
+	It("populates SecretName even when not Running", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
+		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", workspace)
+		Expect(status.SecretName).To(Equal("my-creds"))
 	})
 })

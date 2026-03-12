@@ -147,6 +147,10 @@ type WorkspaceStatusService struct {
 	// ConnectionInfo is the rendered connection string from connectionInfoTemplate.
 	// +optional
 	ConnectionInfo string `json:"connectionInfo,omitempty"`
+
+	// SecretName is the name of the Secret containing the service credentials.
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
 }
 
 // WorkspaceSpec defines the desired state of Workspace
