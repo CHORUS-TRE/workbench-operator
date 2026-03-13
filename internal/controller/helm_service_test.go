@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"helm.sh/helm/v3/pkg/chart"
+
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
@@ -547,5 +549,30 @@ var _ = Describe("buildServiceStatus", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
 		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", workspace)
 		Expect(status.SecretName).To(Equal("my-creds"))
+	})
+})
+
+var _ = Describe("autoValuesPrefix", func() {
+	makeChart := func(depNames ...string) *chart.Chart {
+		deps := make([]*chart.Dependency, len(depNames))
+		for i, name := range depNames {
+			deps[i] = &chart.Dependency{Name: name}
+		}
+		return &chart.Chart{Metadata: &chart.Metadata{Dependencies: deps}}
+	}
+
+	It("returns the repo last segment for a single-dependency chart", func() {
+		ch := makeChart("postgres")
+		Expect(autoValuesPrefix(ch, "postgres")).To(Equal("postgres"))
+	})
+
+	It("returns empty string for an umbrella chart with multiple dependencies", func() {
+		ch := makeChart("mlflow", "postgres")
+		Expect(autoValuesPrefix(ch, "mlflow")).To(BeEmpty())
+	})
+
+	It("returns empty string for a chart with no dependencies", func() {
+		ch := makeChart()
+		Expect(autoValuesPrefix(ch, "standalone")).To(BeEmpty())
 	})
 })

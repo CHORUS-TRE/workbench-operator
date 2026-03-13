@@ -30,3 +30,24 @@ spec:
         storage:
           requestedSize: 1Gi
       connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/postgres"
+    mlflow:
+      state: Running
+      chart:
+        repository: services/mlflow
+        tag: "1.8.1"
+      credentials:
+        secretName: mlflow-creds
+        paths:
+          - postgres.settings.superuserPassword.value   # postgres admin password
+          - mlflow.backendStore.postgres.password       # mlflow app user password
+      values:
+        postgres:
+          settings:
+            superuserPassword:
+              existingSecret: mlflow-creds
+              secretKey: "postgres.settings.superuserPassword.value"
+            userDatabase:
+              password:
+                existingSecret: mlflow-creds
+                secretKey: "mlflow.backendStore.postgres.password"
+      connectionInfoTemplate: "http://{{.ReleaseName}}.{{.Namespace}}:5000"

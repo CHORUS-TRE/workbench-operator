@@ -377,12 +377,8 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		}
 		repository = strings.Trim(repository, "/")
 
-		// Derive the Helm sub-chart values prefix from the last segment of the repository
-		// path. CHORUS-TRE service charts are wrapper charts whose sole dependency shares
-		// the same name as the chart itself (e.g. services/postgres → prefix "postgres"),
-		// so user-supplied values and credentials are wrapped under that key automatically.
 		repoParts := strings.Split(repository, "/")
-		valuesPrefix := repoParts[len(repoParts)-1]
+		repoLastSegment := repoParts[len(repoParts)-1]
 
 		chartRef := fmt.Sprintf("oci://%s/%s", registry, repository)
 
@@ -398,16 +394,6 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 
 		switch desiredState {
 		case defaultv1alpha1.WorkspaceServiceStateRunning:
-			credValues, err := reconcileCredentialSecret(ctx, r.Client, namespace, workspace, svc.Credentials)
-			if err != nil {
-				logger.Error(err, "Failed to reconcile credential secret", "service", key)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: fmt.Sprintf("Failed to reconcile credentials: %s", err.Error()),
-				}
-				continue
-			}
-
 			userValues, err := parseServiceValues(&svc)
 			if err != nil {
 				logger.Error(err, "Failed to parse service values", "service", key)
@@ -418,7 +404,28 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				continue
 			}
 
-			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, chartRef, svc.Chart.Tag, mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix))); err != nil {
+			credValues, err := reconcileCredentialSecret(ctx, r.Client, namespace, workspace, svc.Credentials)
+			if err != nil {
+				logger.Error(err, "Failed to reconcile credential secret", "service", key)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: fmt.Sprintf("Failed to reconcile credentials: %s", err.Error()),
+				}
+				continue
+			}
+
+			ch, err := locateAndLoadChart(cfg, chartRef, svc.Chart.Tag, namespace)
+			if err != nil {
+				logger.Error(err, "Failed to locate/load chart", "service", key, "chart", chartRef)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: fmt.Sprintf("Failed to load chart: %s", err.Error()),
+				}
+				continue
+			}
+			valuesPrefix := autoValuesPrefix(ch, repoLastSegment)
+
+			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix))); err != nil {
 				logger.Error(err, "Failed to install/upgrade Helm release", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,

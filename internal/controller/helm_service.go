@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/registry"
@@ -88,31 +89,54 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 	return cfg, nil
 }
 
-// helmInstallOrUpgrade installs the chart if the release doesn't exist, or upgrades it otherwise.
+// locateAndLoadChart pulls and loads a Helm chart from an OCI registry, returning the loaded chart object.
 // chartRef is the full OCI reference, e.g. oci://harbor.build.chorus-tre.local/services/postgres.
 // chartVersion is the semver chart version, e.g. 1.6.1.
 //
-// Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
-// missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
-// with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
-func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName, chartRef, chartVersion string, values map[string]interface{}) error {
+// Use NewInstall to locate the chart — its constructor propagates cfg.RegistryClient
+// into ChartPathOptions.registryClient (unexported), which LocateChart needs for OCI.
+func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, namespace string) (*chart.Chart, error) {
 	settings := cli.New()
 	settings.SetNamespace(namespace)
-
-	// Use NewInstall to locate the chart — its constructor propagates cfg.RegistryClient
-	// into ChartPathOptions.registryClient (unexported), which LocateChart needs for OCI.
 	locator := action.NewInstall(cfg)
 	locator.Version = chartVersion
 	chartPath, err := locator.ChartPathOptions.LocateChart(chartRef, settings)
 	if err != nil {
-		return fmt.Errorf("locating chart %s: %w", chartRef, err)
+		return nil, fmt.Errorf("locating chart %s: %w", chartRef, err)
 	}
-
 	ch, err := loader.Load(chartPath)
 	if err != nil {
-		return fmt.Errorf("loading chart %s: %w", chartPath, err)
+		return nil, fmt.Errorf("loading chart %s: %w", chartPath, err)
 	}
+	return ch, nil
+}
 
+// autoValuesPrefix returns the Helm values wrapping prefix for a chart.
+//
+// The heuristic relies on two assumptions that hold for all CHORUS-TRE service charts:
+//   - A chart with exactly 1 dependency is a thin wrapper whose sole subchart shares the
+//     chart's name (last segment of the repository path). User values are wrapped under
+//     that key so Helm routes them to the subchart (e.g. services/postgres → "postgres:").
+//   - A chart with 2+ dependencies is an umbrella chart where each subchart has its own
+//     top-level key. No wrapping is applied; users supply the full value structure directly.
+//
+// If a future chart has multiple dependencies but only one is a "real" subchart (e.g. the
+// others are library or utility charts), this heuristic will incorrectly skip wrapping.
+// In that case, revisit and extend this function with a more targeted detection strategy.
+func autoValuesPrefix(ch *chart.Chart, repoLastSegment string) string {
+	if len(ch.Metadata.Dependencies) == 1 {
+		return repoLastSegment
+	}
+	return ""
+}
+
+// helmInstallOrUpgrade installs the chart if the release doesn't exist, or upgrades it otherwise.
+// ch is a pre-loaded chart object (use locateAndLoadChart to obtain it).
+//
+// Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
+// missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
+// with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
+func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch *chart.Chart, values map[string]interface{}) error {
 	newInstall := func() error {
 		a := action.NewInstall(cfg)
 		a.Namespace = namespace
@@ -129,7 +153,7 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		a.Wait = false
 		a.Atomic = false
 		a.MaxHistory = 10
-		a.ChartPathOptions.Version = chartVersion
+		a.ChartPathOptions.Version = ch.Metadata.Version
 		_, err := a.RunWithContext(ctx, releaseName, ch, values)
 		return err
 	}
@@ -145,7 +169,7 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	} else {
 		releaseStatus = string(rel.Info.Status)
 		// Skip upgrade when already deployed with the same chart version and values.
-		if releaseStatus == "deployed" && rel.Chart.Metadata.Version == chartVersion && releaseValuesMatch(rel.Config, values) {
+		if releaseStatus == "deployed" && rel.Chart.Metadata.Version == ch.Metadata.Version && releaseValuesMatch(rel.Config, values) {
 			return nil
 		}
 	}
