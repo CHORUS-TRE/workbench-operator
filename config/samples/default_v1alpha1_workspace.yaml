@@ -22,11 +22,11 @@ spec:
       credentials:
         secretName: postgres-creds
         paths:
-          - settings.superuserPassword
+          - settings.superuserPassword.value
       values:
         settings:
-          superuser: postgres
-          superuserDatabase: workspacedb
+          superuser:
+            value: postgres
         storage:
           requestedSize: 1Gi
-      connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/workspacedb (secret: {{.SecretName}})"
+      connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/postgres"

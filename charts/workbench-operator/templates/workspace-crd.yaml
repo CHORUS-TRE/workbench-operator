@@ -255,6 +255,10 @@ spec:
                       description: Message provides additional context (e.g. error
                         details).
                       type: string
+                    secretName:
+                      description: SecretName is the name of the Secret containing
+                        the service credentials.
+                      type: string
                     status:
                       description: Status is the observed lifecycle state of the service.
                       enum:

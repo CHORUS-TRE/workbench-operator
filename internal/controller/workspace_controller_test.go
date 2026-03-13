@@ -705,6 +705,7 @@ var _ = Describe("buildServiceStatus", func() {
 		status := buildServiceStatus("deployed", "", svc, "ws-pg", "pg-creds", workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
 		Expect(status.ConnectionInfo).To(Equal("postgresql://ws-pg.default:5432"))
+		Expect(status.SecretName).To(Equal("pg-creds"))
 	})
 
 	It("renders SecretName in connectionInfoTemplate", func() {
