@@ -112,10 +112,17 @@ func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, names
 }
 
 // autoValuesPrefix returns the Helm values wrapping prefix for a chart.
-// Single-dependency charts (simple wrapper, e.g. services/postgres) wrap user values under
-// the last repository path segment, matching the sole subchart name.
-// Umbrella charts with multiple dependencies (e.g. services/mlflow) return "" so that
-// user values are passed at the top level without wrapping.
+//
+// The heuristic relies on two assumptions that hold for all CHORUS-TRE service charts:
+//   - A chart with exactly 1 dependency is a thin wrapper whose sole subchart shares the
+//     chart's name (last segment of the repository path). User values are wrapped under
+//     that key so Helm routes them to the subchart (e.g. services/postgres → "postgres:").
+//   - A chart with 2+ dependencies is an umbrella chart where each subchart has its own
+//     top-level key. No wrapping is applied; users supply the full value structure directly.
+//
+// If a future chart has multiple dependencies but only one is a "real" subchart (e.g. the
+// others are library or utility charts), this heuristic will incorrectly skip wrapping.
+// In that case, revisit and extend this function with a more targeted detection strategy.
 func autoValuesPrefix(ch *chart.Chart, repoLastSegment string) string {
 	if len(ch.Metadata.Dependencies) == 1 {
 		return repoLastSegment
