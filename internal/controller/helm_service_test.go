@@ -201,6 +201,43 @@ var _ = Describe("reconcileCredentialSecret (ownership)", func() {
 	})
 })
 
+var _ = Describe("reconcileCredentialSecret (path aliases)", func() {
+	ctx := context.Background()
+	const namespace = "default"
+	const secretName = "alias-cred-secret"
+
+	ws := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "alias-ws", Namespace: namespace, UID: "uid-alias"},
+	}
+
+	AfterEach(func() {
+		secret := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
+			_ = k8sClient.Delete(ctx, secret)
+		}
+	})
+
+	It("injects one password at multiple helm paths and stores it under the primary key", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"a.b.value|x.y.password"},
+		}
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Secret stores password under primary key only
+		secret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret)).To(Succeed())
+		Expect(secret.Data).To(HaveKey("a.b.value"))
+		Expect(secret.Data).NotTo(HaveKey("x.y.password"))
+
+		// Helm values injected at both paths with the same value
+		pw := string(secret.Data["a.b.value"])
+		Expect(result).To(HaveKeyWithValue("a", HaveKeyWithValue("b", HaveKeyWithValue("value", pw))))
+		Expect(result).To(HaveKeyWithValue("x", HaveKeyWithValue("y", HaveKeyWithValue("password", pw))))
+	})
+})
+
 var _ = Describe("checkServicePodsHealth", func() {
 	ctx := context.Background()
 	const namespace = "default"
