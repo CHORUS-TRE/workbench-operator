@@ -306,13 +306,21 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 		return nil, nil
 	}
 
+	for _, entry := range creds.Paths {
+		for _, seg := range strings.Split(entry, "|") {
+			if strings.TrimSpace(seg) == "" {
+				return nil, fmt.Errorf("credential path %q contains an empty segment", entry)
+			}
+		}
+	}
+
 	secret := &corev1.Secret{}
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: creds.SecretName, Namespace: namespace}, secret)
 
 	if apierrors.IsNotFound(err) {
 		data := make(map[string][]byte)
 		for _, entry := range creds.Paths {
-			secretKey := strings.SplitN(entry, "|", 2)[0]
+			secretKey := strings.Split(entry, "|")[0]
 			pw, err := generatePassword(24)
 			if err != nil {
 				return nil, fmt.Errorf("generating password for %s: %w", secretKey, err)
@@ -356,7 +364,7 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 		secretKey := helmPaths[0]
 		val, ok := secret.Data[secretKey]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("credential secret %s is missing expected key %q", creds.SecretName, secretKey)
 		}
 		for _, helmPath := range helmPaths {
 			helmValues = mergeMaps(helmValues, dotNotationToNestedMap(helmPath, string(val)))

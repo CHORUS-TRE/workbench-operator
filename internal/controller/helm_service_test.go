@@ -142,7 +142,7 @@ var _ = Describe("reconcileCredentialSecret (missing key in existing secret)", f
 		}
 	})
 
-	It("skips keys absent from the existing secret's data without error", func() {
+	It("returns an error when a key listed in paths is absent from the existing secret", func() {
 		// Pre-create a secret owned by ws that only has "password", not "adminPassword"
 		Expect(k8sClient.Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -159,10 +159,8 @@ var _ = Describe("reconcileCredentialSecret (missing key in existing secret)", f
 			SecretName: secretName,
 			Paths:      []string{"password", "adminPassword"},
 		}
-		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(HaveKey("password"))
-		Expect(result).NotTo(HaveKey("adminPassword"))
+		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).To(MatchError(ContainSubstring("adminPassword")))
 	})
 })
 
@@ -236,6 +234,54 @@ var _ = Describe("reconcileCredentialSecret (path aliases)", func() {
 		Expect(result).To(HaveKeyWithValue("a", HaveKeyWithValue("b", HaveKeyWithValue("value", pw))))
 		Expect(result).To(HaveKeyWithValue("x", HaveKeyWithValue("y", HaveKeyWithValue("password", pw))))
 	})
+
+	It("reads back an existing secret and injects all alias paths", func() {
+		// Pre-create the secret with only the primary key (as it would exist after first reconcile)
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					*metav1.NewControllerRef(ws, defaultv1alpha1.GroupVersion.WithKind("Workspace")),
+				},
+			},
+			Data: map[string][]byte{"a.b.value": []byte("existingpw")},
+		})).To(Succeed())
+
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"a.b.value|x.y.password"},
+		}
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Both alias paths receive the value from the existing secret
+		Expect(result).To(HaveKeyWithValue("a", HaveKeyWithValue("b", HaveKeyWithValue("value", "existingpw"))))
+		Expect(result).To(HaveKeyWithValue("x", HaveKeyWithValue("y", HaveKeyWithValue("password", "existingpw"))))
+	})
+})
+
+var _ = Describe("reconcileCredentialSecret (path validation)", func() {
+	ctx := context.Background()
+	const namespace = "default"
+
+	ws := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "validation-ws", Namespace: namespace, UID: "uid-validation"},
+	}
+
+	DescribeTable("returns an error for malformed path entries",
+		func(path string) {
+			creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+				SecretName: "validation-secret",
+				Paths:      []string{path},
+			}
+			_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+			Expect(err).To(MatchError(ContainSubstring("empty segment")))
+		},
+		Entry("trailing pipe", "a.b|"),
+		Entry("leading pipe", "|a.b"),
+		Entry("double pipe", "a.b||c.d"),
+	)
 })
 
 var _ = Describe("checkServicePodsHealth", func() {
