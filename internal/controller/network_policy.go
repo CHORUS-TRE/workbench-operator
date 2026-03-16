@@ -222,18 +222,21 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		// Airgapped: no external traffic beyond kube-dns and intra-namespace.
 	}
 
-	// Ingress: only allow connections from pods within the same namespace.
-	// Without this, any pod in the cluster (other workspaces) can reach services here.
-	// No toPorts restriction is applied — workbench pods need flexible intra-namespace
-	// connectivity across arbitrary ports (display servers, socat proxies, app services).
-	// The namespace boundary is the trust boundary; port-level restriction inside it
-	// is impractical and would require the operator to track every service port.
+	// Ingress: allow connections from:
+	//   - same namespace (intra-workspace: workbench pods, service pods)
+	//   - backend namespace (reverse-proxy to Xpra server on port 8080)
+	// No toPorts restriction — workbench pods use arbitrary ports internally.
 	ingressRules := []map[string]any{
 		{
 			"fromEndpoints": []map[string]any{
 				{
 					"matchLabels": map[string]any{
 						"k8s:io.kubernetes.pod.namespace": workspace.Namespace,
+					},
+				},
+				{
+					"matchLabels": map[string]any{
+						"k8s:io.kubernetes.pod.namespace": "backend",
 					},
 				},
 			},
