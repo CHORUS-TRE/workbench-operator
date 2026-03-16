@@ -41,4 +41,6 @@ spec:
           - postgres.settings.superuserPassword.value
           - postgres.userDatabase.password.value|mlflow.backendStore.postgres.password
       values: {}
+      computedValues:
+        mlflow.backendStore.postgres.host: "{{.ReleaseName}}-mlflow-db"
       connectionInfoTemplate: "http://{{.ReleaseName}}.{{.Namespace}}"

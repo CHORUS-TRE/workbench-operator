@@ -511,6 +511,24 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 	}
 }
 
+// evaluateComputedValues evaluates each dot-notation path template and returns a nested Helm values map.
+// Supports the same placeholder syntax as ConnectionInfoTemplate.
+func evaluateComputedValues(computedValues map[string]string, releaseName, namespace, secretName string) map[string]interface{} {
+	result := make(map[string]interface{})
+	if len(computedValues) == 0 {
+		return result
+	}
+	replacer := strings.NewReplacer(
+		"{{.Namespace}}", namespace,
+		"{{.ReleaseName}}", releaseName,
+		"{{.SecretName}}", secretName,
+	)
+	for path, tmpl := range computedValues {
+		result = mergeMaps(result, dotNotationToNestedMap(path, replacer.Replace(tmpl)))
+	}
+	return result
+}
+
 // parseServiceValues unmarshals the raw JSON values from a WorkspaceService into a map.
 func parseServiceValues(svc *defaultv1alpha1.WorkspaceService) (map[string]interface{}, error) {
 	userValues := make(map[string]interface{})

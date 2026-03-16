@@ -825,6 +825,67 @@ var _ = Describe("buildServiceStatus", func() {
 	})
 })
 
+var _ = Describe("evaluateComputedValues", func() {
+	It("returns an empty map when computedValues is nil", func() {
+		result := evaluateComputedValues(nil, "rel", "ns", "sec")
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns an empty map when computedValues is empty", func() {
+		result := evaluateComputedValues(map[string]string{}, "rel", "ns", "sec")
+		Expect(result).To(BeEmpty())
+	})
+
+	It("substitutes {{.ReleaseName}} in a value", func() {
+		result := evaluateComputedValues(
+			map[string]string{"mlflow.backendStore.postgres.host": "{{.ReleaseName}}-mlflow-db"},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(result).To(HaveKeyWithValue("mlflow",
+			HaveKeyWithValue("backendStore",
+				HaveKeyWithValue("postgres",
+					HaveKeyWithValue("host", "workspace156-mlflow-mlflow-db")))))
+	})
+
+	It("substitutes {{.Namespace}} in a value", func() {
+		result := evaluateComputedValues(
+			map[string]string{"app.namespace": "{{.Namespace}}"},
+			"rel", "mynamespace", "",
+		)
+		Expect(result).To(HaveKeyWithValue("app", HaveKeyWithValue("namespace", "mynamespace")))
+	})
+
+	It("substitutes {{.SecretName}} in a value", func() {
+		result := evaluateComputedValues(
+			map[string]string{"app.secret": "{{.SecretName}}"},
+			"rel", "ns", "my-secret",
+		)
+		Expect(result).To(HaveKeyWithValue("app", HaveKeyWithValue("secret", "my-secret")))
+	})
+
+	It("leaves an unrecognised placeholder unchanged", func() {
+		result := evaluateComputedValues(
+			map[string]string{"app.val": "{{.Unknown}}"},
+			"rel", "ns", "sec",
+		)
+		Expect(result).To(HaveKeyWithValue("app", HaveKeyWithValue("val", "{{.Unknown}}")))
+	})
+
+	It("merges multiple paths into a single nested map", func() {
+		result := evaluateComputedValues(
+			map[string]string{
+				"a.host": "{{.ReleaseName}}-db",
+				"a.port": "5432",
+			},
+			"myrel", "myns", "",
+		)
+		inner, ok := result["a"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(inner["host"]).To(Equal("myrel-db"))
+		Expect(inner["port"]).To(Equal("5432"))
+	})
+})
+
 var _ = Describe("autoValuesPrefix", func() {
 	makeChart := func(depNames ...string) *chart.Chart {
 		deps := make([]*chart.Dependency, len(depNames))

@@ -425,7 +425,8 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 			valuesPrefix := autoValuesPrefix(ch, repoLastSegment)
 
-			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix))); err != nil {
+			computedVals := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, secretName)
+			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, mergeMaps(mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix)), computedVals)); err != nil {
 				logger.Error(err, "Failed to install/upgrade Helm release", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
