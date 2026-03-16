@@ -23,13 +23,13 @@ var _ = Describe("buildNetworkPolicy", func() {
 		}
 	}
 
-	It("builds kube-dns + intra-namespace egress for Airgapped workspace", func() {
+	It("builds kube-dns + intra-namespace egress and intra-namespace ingress for Airgapped workspace", func() {
 		ws := baseWorkspace()
 
 		cnp, err := buildNetworkPolicy(ws)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp).NotTo(BeNil())
-		Expect(cnp.GetName()).To(Equal("workspace-egress"))
+		Expect(cnp.GetName()).To(Equal("workspace-netpol"))
 		Expect(cnp.GetNamespace()).To(Equal("workspace-ns"))
 
 		spec := cnp.Object["spec"].(map[string]any)
@@ -37,16 +37,28 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(es["matchLabels"]).To(BeEmpty())
 
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(2))
+		Expect(egress).To(HaveLen(3))
 
 		dnsRule := egress[0]
 		Expect(dnsRule["toEndpoints"]).NotTo(BeEmpty())
 		Expect(dnsRule["toPorts"]).NotTo(BeEmpty())
 
-		intraRule := egress[1]
-		toEndpoints := intraRule["toEndpoints"].([]map[string]any)
+		intraEndpointRule := egress[1]
+		toEndpoints := intraEndpointRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
+
+		intraServiceRule := egress[2]
+		toServices := intraServiceRule["toServices"].([]map[string]any)
+		Expect(toServices).To(HaveLen(1))
+		svcSelector := toServices[0]["k8sServiceSelector"].(map[string]any)
+		nsSel := svcSelector["namespaceSelector"].(map[string]any)
+		Expect(nsSel["matchLabels"]).To(HaveKeyWithValue("kubernetes.io/metadata.name", "workspace-ns"))
+
+		ingress := spec["ingress"].([]map[string]any)
+		Expect(ingress).To(HaveLen(1))
+		fromEndpoints := ingress[0]["fromEndpoints"].([]map[string]any)
+		Expect(fromEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
 	})
 
 	It("adds FQDN allowlist rules with HTTP/HTTPS ports when FQDNAllowlist", func() {
@@ -58,9 +70,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 
-		fqdnRule := egress[2]
+		fqdnRule := egress[3]
 		toFQDNs := fqdnRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
@@ -80,9 +92,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 
-		allowInternetRule := egress[2]
+		allowInternetRule := egress[3]
 		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
 
 		toPorts := allowInternetRule["toPorts"].([]map[string]any)
@@ -121,7 +133,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp.GetName()).To(Equal(cnpNameForWorkspace(ws.Name)))
 		Expect(len(cnp.GetName())).To(BeNumerically("<=", 253))
-		Expect(cnp.GetName()).To(ContainSubstring("-egress-"))
+		Expect(cnp.GetName()).To(ContainSubstring("-netpol-"))
 	})
 })
 
@@ -326,7 +338,7 @@ var _ = Describe("validateFQDNs (whitespace edge cases)", func() {
 var _ = Describe("cnpNameForWorkspace", func() {
 	It("returns short name with suffix when name fits within 253 chars", func() {
 		name := cnpNameForWorkspace("my-workspace")
-		Expect(name).To(Equal("my-workspace-egress"))
+		Expect(name).To(Equal("my-workspace-netpol"))
 		Expect(len(name)).To(BeNumerically("<=", 253))
 	})
 
@@ -334,7 +346,7 @@ var _ = Describe("cnpNameForWorkspace", func() {
 		long := strings.Repeat("a", 300)
 		name := cnpNameForWorkspace(long)
 		Expect(len(name)).To(BeNumerically("<=", 253))
-		Expect(name).To(ContainSubstring("-egress-"))
+		Expect(name).To(ContainSubstring("-netpol-"))
 	})
 
 	It("falls back to 'ws' prefix when truncated name consists only of dashes", func() {

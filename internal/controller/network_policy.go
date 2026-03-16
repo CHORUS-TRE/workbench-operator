@@ -25,9 +25,9 @@ const (
 	maxFQDNLength = 253
 	// Kubernetes object names are DNS subdomains (max 253 chars).
 	maxK8sNameLength = 253
-	// Truncated names use "-egress-" + hash as a stable suffix.
-	cnpLongNameSuffix = "-egress-"
-	cnpNameSuffix     = "-egress"
+	// Truncated names use "-netpol-" + hash as a stable suffix.
+	cnpLongNameSuffix = "-netpol-"
+	cnpNameSuffix     = "-netpol"
 	cnpNameHashLen    = 10
 )
 
@@ -110,13 +110,21 @@ func validateFQDNs(entries []string) error {
 }
 
 // buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
-// that enforces workspace-level egress policy (kube-dns + intra-namespace + optional
-// FQDN allowlist or full internet).
+// that enforces workspace-level egress and ingress policy.
 //
-// Policy mapping:
-//   - Open          → kube-dns + intra-namespace + full internet
-//   - FQDNAllowlist → kube-dns + intra-namespace + FQDN allowlist
-//   - Airgapped     → kube-dns + intra-namespace only
+// Egress policy mapping:
+//   - Open          → kube-dns + intra-namespace (pod + service) + full internet
+//   - FQDNAllowlist → kube-dns + intra-namespace (pod + service) + FQDN allowlist
+//   - Airgapped     → kube-dns + intra-namespace (pod + service) only
+//
+// Ingress policy: only pods within the same namespace may connect inbound.
+// This prevents pods in other workspaces from reaching services in this workspace.
+//
+// Note: toServices is required alongside toEndpoints because in clusters running
+// kube-proxy alongside Cilium, iptables DNAT (ClusterIP → pod IP) happens after
+// Cilium's eBPF policy check. toEndpoints matches pod IPs (post-DNAT) and covers
+// direct pod-to-pod traffic; toServices matches the ClusterIP identity (pre-DNAT)
+// and covers traffic routed through Kubernetes services.
 //
 // IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
 // Returns an error if invalid FQDNs are detected.
@@ -129,6 +137,23 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		"workspace": workspace.Name,
 	}
 
+	// namespaceLabelSelector targets a Kubernetes Namespace object by its auto-assigned
+	// metadata label. Used in toServices.k8sServiceSelector.namespaceSelector, which
+	// selects namespace resources — not pods.
+	//
+	// toEndpoints/fromEndpoints rules use the Cilium-synthetic label
+	// "k8s:io.kubernetes.pod.namespace" instead, which is stamped on pod identities
+	// (not namespace objects) by Cilium's policy engine.
+	namespaceLabelSelector := map[string]any{
+		"matchLabels": map[string]any{
+			"kubernetes.io/metadata.name": workspace.Namespace,
+		},
+	}
+
+	// Note: no fromEndpoints/fromServices filter is needed on any rule below.
+	// The top-level endpointSelector (empty matchLabels) already scopes this entire
+	// policy to pods in the workspace namespace — Cilium only applies these egress
+	// rules to pods selected by that selector.
 	egressRules := []map[string]any{
 		// DNS to kube-system (kube-dns)
 		{
@@ -153,15 +178,27 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 				},
 			},
 		},
-		// Intra-namespace traffic (empty matchLabels selects all pods in the namespace)
+		// Intra-namespace pod-to-pod traffic (direct pod IP, post-DNAT).
 		{
 			"toEndpoints": []map[string]any{
 				{
-					// Explicitly scope to the workspace namespace. For namespaced CiliumNetworkPolicy,
-					// omitting this label would still default to same-namespace, but being explicit
-					// avoids confusion and makes intent clear to readers.
 					"matchLabels": map[string]any{
 						"k8s:io.kubernetes.pod.namespace": workspace.Namespace,
+					},
+				},
+			},
+		},
+		// Intra-namespace service traffic (ClusterIP, pre-DNAT).
+		// Required when kube-proxy handles DNAT via iptables after Cilium's policy check.
+		// The empty selector matches all services in the namespace. This is intentional:
+		// each workspace owns its namespace exclusively — no external services
+		// (monitoring, mesh proxies, etc.) are deployed here by design.
+		{
+			"toServices": []map[string]any{
+				{
+					"k8sServiceSelector": map[string]any{
+						"selector":          map[string]any{"matchLabels": map[string]any{}},
+						"namespaceSelector": namespaceLabelSelector,
 					},
 				},
 			},
@@ -185,6 +222,24 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		// Airgapped: no external traffic beyond kube-dns and intra-namespace.
 	}
 
+	// Ingress: only allow connections from pods within the same namespace.
+	// Without this, any pod in the cluster (other workspaces) can reach services here.
+	// No toPorts restriction is applied — workbench pods need flexible intra-namespace
+	// connectivity across arbitrary ports (display servers, socat proxies, app services).
+	// The namespace boundary is the trust boundary; port-level restriction inside it
+	// is impractical and would require the operator to track every service port.
+	ingressRules := []map[string]any{
+		{
+			"fromEndpoints": []map[string]any{
+				{
+					"matchLabels": map[string]any{
+						"k8s:io.kubernetes.pod.namespace": workspace.Namespace,
+					},
+				},
+			},
+		},
+	}
+
 	return &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "cilium.io/v2",
@@ -199,7 +254,8 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 				"endpointSelector": map[string]any{
 					"matchLabels": map[string]any{},
 				},
-				"egress": egressRules,
+				"egress":  egressRules,
+				"ingress": ingressRules,
 			},
 		},
 	}, nil

@@ -62,7 +62,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 		// Clean up any CNP that may exist
 		cnp := &unstructured.Unstructured{}
 		cnp.SetGroupVersionKind(cnpGVK)
-		cnp.SetName(workspaceName + "-egress")
+		cnp.SetName(workspaceName + "-netpol")
 		cnp.SetNamespace(workspaceNamespace)
 		_ = k8sClient.Delete(ctx, cnp)
 	})
@@ -102,7 +102,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(cond.Message).To(ContainSubstring("invalid FQDN"))
 
 			// CNP should not be created when FQDNs are invalid
-			_, err = getCNP(workspaceName+"-egress", workspaceNamespace)
+			_, err = getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -199,15 +199,18 @@ var _ = Describe("WorkspaceReconciler", func() {
 			}))
 
 			// Verify CNP was created
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cnp.GetLabels()).To(HaveKeyWithValue("workspace", workspaceName))
 
-			// Verify egress rules: Airgapped → 2 rules (kube-dns + intra-namespace)
+			// Verify egress rules: Airgapped → 3 rules (kube-dns + intra-namespace endpoints + intra-namespace services)
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(2)) // kube-dns + intra-namespace
+			Expect(egress).To(HaveLen(3)) // kube-dns + intra-namespace endpoints + intra-namespace services
+			// Verify ingress rule restricts to same namespace
+			ingress := specMap["ingress"].([]any)
+			Expect(ingress).To(HaveLen(1))
 		})
 
 		It("creates CNP restricting egress to specified FQDNs", func() {
@@ -227,14 +230,14 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify CNP was created with 3 egress rules
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			// Verify CNP was created with 4 egress rules
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(3)) // kube-dns + intra-ns + FQDN
+			Expect(egress).To(HaveLen(4)) // kube-dns + intra-ns endpoints + intra-ns services + FQDN
 
 			// Verify condition
 			updated := &defaultv1alpha1.Workspace{}
@@ -264,17 +267,17 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify CNP was created with 3 egress rules
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			// Verify CNP was created with 4 egress rules
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(3)) // kube-dns + intra-ns + CIDR
+			Expect(egress).To(HaveLen(4)) // kube-dns + intra-ns endpoints + intra-ns services + CIDR
 
 			// Verify the toCIDR rule is present
-			lastRule := egress[2].(map[string]any)
+			lastRule := egress[3].(map[string]any)
 			Expect(lastRule).To(HaveKey("toCIDR"))
 
 			// Verify condition
@@ -328,7 +331,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 
 			ownerRefs := cnp.GetOwnerReferences()
@@ -361,7 +364,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify CNP exists and its owner reference UID matches the workspace
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 
 			ownerRefs := cnp.GetOwnerReferences()
@@ -390,7 +393,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// CNP should exist
-			_, err = getCNP(workspaceName+"-egress", workspaceNamespace)
+			_, err = getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Delete the workspace
@@ -420,12 +423,12 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify Airgapped: 2 egress rules
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			// Verify Airgapped: 3 egress rules
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			egress := spec.(map[string]any)["egress"].([]any)
-			Expect(egress).To(HaveLen(2))
+			Expect(egress).To(HaveLen(3))
 
 			// Update workspace to Open (full internet)
 			fresh := &defaultv1alpha1.Workspace{}
@@ -437,12 +440,12 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify Open: 3 egress rules (kube-dns + intra-ns + CIDR)
-			cnp, err = getCNP(workspaceName+"-egress", workspaceNamespace)
+			// Verify Open: 4 egress rules (kube-dns + intra-ns endpoints + intra-ns services + CIDR)
+			cnp, err = getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			spec, _, _ = unstructured.NestedFieldCopy(cnp.Object, "spec")
 			egress = spec.(map[string]any)["egress"].([]any)
-			Expect(egress).To(HaveLen(3))
+			Expect(egress).To(HaveLen(4))
 		})
 
 		It("updates CNP when AllowedFQDNs list changes", func() {
@@ -463,7 +466,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Fetch CNP and check initial FQDN rule
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			initialRV := cnp.GetResourceVersion()
 
@@ -478,7 +481,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// CNP should have been updated (different resource version)
-			cnp, err = getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err = getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cnp.GetResourceVersion()).NotTo(Equal(initialRV))
 		})
@@ -503,7 +506,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			cnp, err := getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			firstRV := cnp.GetResourceVersion()
 
@@ -511,7 +514,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			cnp, err = getCNP(workspaceName+"-egress", workspaceNamespace)
+			cnp, err = getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cnp.GetResourceVersion()).To(Equal(firstRV))
 		})
