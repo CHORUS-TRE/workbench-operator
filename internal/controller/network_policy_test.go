@@ -58,9 +58,10 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ingress := spec["ingress"].([]map[string]any)
 		Expect(ingress).To(HaveLen(1))
 		fromEndpoints := ingress[0]["fromEndpoints"].([]map[string]any)
-		Expect(fromEndpoints).To(HaveLen(2))
+		Expect(fromEndpoints).To(HaveLen(3))
 		Expect(fromEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
 		Expect(fromEndpoints[1]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "backend"))
+		Expect(fromEndpoints[2]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "prometheus"))
 	})
 
 	It("adds FQDN allowlist rules with HTTP/HTTPS ports when FQDNAllowlist", func() {

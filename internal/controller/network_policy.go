@@ -225,6 +225,7 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 	// Ingress: allow connections from:
 	//   - same namespace (intra-workspace: workbench pods, service pods)
 	//   - backend namespace (reverse-proxy to Xpra server on port 8080)
+	//   - prometheus namespace (Prometheus scrapes metrics directly from pods via HTTP)
 	// No toPorts restriction — workbench pods use arbitrary ports internally.
 	ingressRules := []map[string]any{
 		{
@@ -237,6 +238,11 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 				{
 					"matchLabels": map[string]any{
 						"k8s:io.kubernetes.pod.namespace": "backend",
+					},
+				},
+				{
+					"matchLabels": map[string]any{
+						"k8s:io.kubernetes.pod.namespace": "prometheus",
 					},
 				},
 			},
