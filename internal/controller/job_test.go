@@ -9,6 +9,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -350,6 +352,67 @@ var _ = Describe("initJob", func() {
 		Expect(envMap).To(HaveKey("KIOSK_JWT_TOKEN"))
 		Expect(envMap["KIOSK_JWT_TOKEN"]).To(Equal(jwtToken))
 	})
+
+	It("sets HOME and USER env vars from workbench spec", func() {
+		app := makeApp("myapp", "apps/myapp", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		Expect(err).NotTo(HaveOccurred())
+		envMap := make(map[string]string)
+		for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+			envMap[e.Name] = e.Value
+		}
+		Expect(envMap["HOME"]).To(Equal("/home/alice"))
+		Expect(envMap["USER"]).To(Equal("alice"))
+	})
+
+	It("sets DISPLAY env var using service name and namespace", func() {
+		app := makeApp("myapp", "apps/myapp", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		Expect(err).NotTo(HaveOccurred())
+		envMap := make(map[string]string)
+		for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+			envMap[e.Name] = e.Value
+		}
+		Expect(envMap["DISPLAY"]).To(Equal("wb1.ns1:80"))
+	})
+
+	It("sets RestartPolicy to OnFailure", func() {
+		app := makeApp("myapp", "apps/myapp", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
+	})
+
+	It("sets pod SecurityContext with FSGroup and SeccompProfile", func() {
+		app := makeApp("myapp", "apps/myapp", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		Expect(err).NotTo(HaveOccurred())
+		sc := job.Spec.Template.Spec.SecurityContext
+		Expect(sc).NotTo(BeNil())
+		Expect(*sc.FSGroup).To(Equal(int64(1001)))
+		Expect(sc.SeccompProfile).NotTo(BeNil())
+		Expect(sc.SeccompProfile.Type).To(Equal(corev1.SeccompProfileTypeRuntimeDefault))
+	})
+
+	It("sets pod Hostname to app name", func() {
+		app := makeApp("myapp", "apps/myapp", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(job.Spec.Template.Spec.Hostname).To(Equal("myapp"))
+	})
+
+	It("sets init container command to /docker-entrypoint.sh", func() {
+		app := makeApp("myapp", "apps/myapp", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(job.Spec.Template.Spec.InitContainers[0].Command).To(Equal([]string{"/docker-entrypoint.sh"}))
+	})
 })
 
 var _ = Describe("updateJob", func() {
@@ -385,5 +448,94 @@ var _ = Describe("updateJob", func() {
 		src := batchv1.Job{} // nil suspend
 		dst := makeSuspendedJob(true)
 		Expect(updateJob(src, &dst)).To(BeFalse())
+	})
+})
+
+var _ = Describe("findJobs / deleteJob / deleteJobs", func() {
+	ctx := context.Background()
+	const namespace = "default"
+	const workbenchName = "find-delete-job-wb"
+
+	wb := defaultv1alpha1.Workbench{
+		ObjectMeta: metav1.ObjectMeta{Name: workbenchName, Namespace: namespace},
+	}
+
+	makeMinimalJob := func(name string) *batchv1.Job {
+		return &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+				Labels:    map[string]string{matchingLabel: workbenchName},
+			},
+			Spec: batchv1.JobSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers:    []corev1.Container{{Name: "test", Image: "busybox"}},
+						RestartPolicy: corev1.RestartPolicyNever,
+					},
+				},
+			},
+		}
+	}
+
+	AfterEach(func() {
+		list := &batchv1.JobList{}
+		if err := k8sClient.List(ctx, list, client.InNamespace(namespace), client.MatchingLabels{matchingLabel: workbenchName}); err == nil {
+			for i := range list.Items {
+				_ = k8sClient.Delete(ctx, &list.Items[i], client.PropagationPolicy("Background"))
+			}
+		}
+	})
+
+	Describe("findJobs", func() {
+		It("returns an empty list when no jobs match", func() {
+			r := newTestReconciler(Config{})
+			list, err := r.findJobs(ctx, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list.Items).To(BeEmpty())
+		})
+
+		It("returns matching jobs", func() {
+			Expect(k8sClient.Create(ctx, makeMinimalJob("find-job-1"))).To(Succeed())
+			r := newTestReconciler(Config{})
+			list, err := r.findJobs(ctx, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list.Items).To(HaveLen(1))
+			Expect(list.Items[0].Name).To(Equal("find-job-1"))
+		})
+	})
+
+	Describe("deleteJob", func() {
+		It("deletes the given job", func() {
+			Expect(k8sClient.Create(ctx, makeMinimalJob("delete-job-1"))).To(Succeed())
+			job := &batchv1.Job{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "delete-job-1", Namespace: namespace}, job)).To(Succeed())
+
+			r := newTestReconciler(Config{})
+			Expect(r.deleteJob(ctx, job)).To(Succeed())
+
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "delete-job-1", Namespace: namespace}, &batchv1.Job{})
+			Expect(client.IgnoreNotFound(err)).To(Succeed())
+			Expect(err).To(HaveOccurred()) // NotFound
+		})
+	})
+
+	Describe("deleteJobs", func() {
+		It("returns 0 when no jobs exist", func() {
+			r := newTestReconciler(Config{})
+			count, err := r.deleteJobs(ctx, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(0))
+		})
+
+		It("deletes matching jobs and returns the count", func() {
+			Expect(k8sClient.Create(ctx, makeMinimalJob("delete-jobs-1"))).To(Succeed())
+			Expect(k8sClient.Create(ctx, makeMinimalJob("delete-jobs-2"))).To(Succeed())
+
+			r := newTestReconciler(Config{})
+			count, err := r.deleteJobs(ctx, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(count).To(Equal(2))
+		})
 	})
 })

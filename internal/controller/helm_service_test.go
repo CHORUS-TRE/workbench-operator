@@ -50,6 +50,14 @@ var _ = Describe("parseServiceValues", func() {
 	})
 })
 
+var _ = Describe("reconcileCredentialSecret (nil creds)", func() {
+	It("returns nil, nil when creds is nil", func() {
+		result, err := reconcileCredentialSecret(context.Background(), k8sClient, "default", &defaultv1alpha1.Workspace{}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeNil())
+	})
+})
+
 var _ = Describe("deleteCredentialSecret", func() {
 	ctx := context.Background()
 	const namespace = "default"
@@ -80,6 +88,51 @@ var _ = Describe("deleteCredentialSecret", func() {
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, &corev1.Secret{})
 		Expect(client.IgnoreNotFound(err)).To(Succeed())
 		Expect(err).To(HaveOccurred()) // should be NotFound
+	})
+})
+
+var _ = Describe("reconcileCredentialSecret (multiple independent paths)", func() {
+	ctx := context.Background()
+	const namespace = "default"
+	const secretName = "multi-path-cred-secret"
+
+	ws := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "multi-path-ws", Namespace: namespace, UID: "uid-multi-path"},
+	}
+
+	AfterEach(func() {
+		secret := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
+			_ = k8sClient.Delete(ctx, secret)
+		}
+	})
+
+	It("generates a distinct password for each path and injects them into helm values", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"db.password", "admin.password"},
+		}
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		secret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret)).To(Succeed())
+		Expect(secret.Data).To(HaveKey("db.password"))
+		Expect(secret.Data).To(HaveKey("admin.password"))
+		Expect(string(secret.Data["db.password"])).NotTo(Equal(string(secret.Data["admin.password"])))
+
+		Expect(result).To(HaveKeyWithValue("db", HaveKeyWithValue("password", string(secret.Data["db.password"]))))
+		Expect(result).To(HaveKeyWithValue("admin", HaveKeyWithValue("password", string(secret.Data["admin.password"]))))
+	})
+
+	It("returns empty helm values when Paths is empty", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{},
+		}
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty())
 	})
 })
 
@@ -124,6 +177,32 @@ var _ = Describe("deleteReleasePVCs", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(count).To(Equal(1))
 	})
+
+	It("deletes multiple PVCs and returns the correct count", func() {
+		const multiRelease = "pvc-del-multi-release"
+		pvcNames := []string{"data-" + multiRelease + "-0", "data-" + multiRelease + "-1"}
+		for _, name := range pvcNames {
+			Expect(k8sClient.Create(ctx, &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+					Labels:    map[string]string{"app.kubernetes.io/instance": multiRelease},
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("1Gi"),
+						},
+					},
+				},
+			})).To(Succeed())
+		}
+
+		count, err := deleteReleasePVCs(ctx, k8sClient, namespace, multiRelease)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(Equal(2))
+	})
 })
 
 var _ = Describe("reconcileCredentialSecret (missing key in existing secret)", func() {
@@ -142,7 +221,7 @@ var _ = Describe("reconcileCredentialSecret (missing key in existing secret)", f
 		}
 	})
 
-	It("skips keys absent from the existing secret's data without error", func() {
+	It("returns an error when a key listed in paths is absent from the existing secret", func() {
 		// Pre-create a secret owned by ws that only has "password", not "adminPassword"
 		Expect(k8sClient.Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -159,10 +238,8 @@ var _ = Describe("reconcileCredentialSecret (missing key in existing secret)", f
 			SecretName: secretName,
 			Paths:      []string{"password", "adminPassword"},
 		}
-		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(HaveKey("password"))
-		Expect(result).NotTo(HaveKey("adminPassword"))
+		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).To(MatchError(ContainSubstring("adminPassword")))
 	})
 })
 
@@ -199,6 +276,91 @@ var _ = Describe("reconcileCredentialSecret (ownership)", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("not owned by this Workspace"))
 	})
+})
+
+var _ = Describe("reconcileCredentialSecret (path aliases)", func() {
+	ctx := context.Background()
+	const namespace = "default"
+	const secretName = "alias-cred-secret"
+
+	ws := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "alias-ws", Namespace: namespace, UID: "uid-alias"},
+	}
+
+	AfterEach(func() {
+		secret := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
+			_ = k8sClient.Delete(ctx, secret)
+		}
+	})
+
+	It("injects one password at multiple helm paths and stores it under the primary key", func() {
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"a.b.value|x.y.password"},
+		}
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Secret stores password under primary key only
+		secret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret)).To(Succeed())
+		Expect(secret.Data).To(HaveKey("a.b.value"))
+		Expect(secret.Data).NotTo(HaveKey("x.y.password"))
+
+		// Helm values injected at both paths with the same value
+		pw := string(secret.Data["a.b.value"])
+		Expect(result).To(HaveKeyWithValue("a", HaveKeyWithValue("b", HaveKeyWithValue("value", pw))))
+		Expect(result).To(HaveKeyWithValue("x", HaveKeyWithValue("y", HaveKeyWithValue("password", pw))))
+	})
+
+	It("reads back an existing secret and injects all alias paths", func() {
+		// Pre-create the secret with only the primary key (as it would exist after first reconcile)
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					*metav1.NewControllerRef(ws, defaultv1alpha1.GroupVersion.WithKind("Workspace")),
+				},
+			},
+			Data: map[string][]byte{"a.b.value": []byte("existingpw")},
+		})).To(Succeed())
+
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+			SecretName: secretName,
+			Paths:      []string{"a.b.value|x.y.password"},
+		}
+		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Both alias paths receive the value from the existing secret
+		Expect(result).To(HaveKeyWithValue("a", HaveKeyWithValue("b", HaveKeyWithValue("value", "existingpw"))))
+		Expect(result).To(HaveKeyWithValue("x", HaveKeyWithValue("y", HaveKeyWithValue("password", "existingpw"))))
+	})
+})
+
+var _ = Describe("reconcileCredentialSecret (path validation)", func() {
+	ctx := context.Background()
+	const namespace = "default"
+
+	ws := &defaultv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "validation-ws", Namespace: namespace, UID: "uid-validation"},
+	}
+
+	DescribeTable("returns an error for malformed path entries",
+		func(path string) {
+			creds := &defaultv1alpha1.WorkspaceServiceCredentials{
+				SecretName: "validation-secret",
+				Paths:      []string{path},
+			}
+			_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+			Expect(err).To(MatchError(ContainSubstring("empty segment")))
+		},
+		Entry("trailing pipe", "a.b|"),
+		Entry("leading pipe", "|a.b"),
+		Entry("double pipe", "a.b||c.d"),
+	)
 })
 
 var _ = Describe("checkServicePodsHealth", func() {
@@ -394,6 +556,105 @@ var _ = Describe("checkServicePodsHealth", func() {
 		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 		Expect(msg).To(Equal("Pods are starting"))
 	})
+
+	It("returns Failed when a container is in OOMKilled", func() {
+		Expect(k8sClient.Create(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: releaseName + "-pod-oom", Namespace: namespace, Labels: label,
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "db", Image: "postgres:15"}}},
+		})).To(Succeed())
+		pod := &corev1.Pod{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: releaseName + "-pod-oom", Namespace: namespace}, pod)).To(Succeed())
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "db",
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "OOMKilled"}},
+		}}
+		Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+		status, msg := checkServicePodsHealth(ctx, k8sClient, namespace, releaseName)
+		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(msg).To(ContainSubstring("OOMKilled"))
+	})
+
+	It("returns Failed when a container is in ErrImagePull", func() {
+		Expect(k8sClient.Create(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: releaseName + "-pod-errimgpull", Namespace: namespace, Labels: label,
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "db", Image: "postgres:15"}}},
+		})).To(Succeed())
+		pod := &corev1.Pod{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: releaseName + "-pod-errimgpull", Namespace: namespace}, pod)).To(Succeed())
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "db",
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull"}},
+		}}
+		Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+		status, msg := checkServicePodsHealth(ctx, k8sClient, namespace, releaseName)
+		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(msg).To(ContainSubstring("ErrImagePull"))
+	})
+
+	It("returns Failed when an init container is in OOMKilled", func() {
+		Expect(k8sClient.Create(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: releaseName + "-pod-init-oom", Namespace: namespace, Labels: label,
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init-db", Image: "busybox"}},
+				Containers:     []corev1.Container{{Name: "db", Image: "postgres:15"}},
+			},
+		})).To(Succeed())
+		pod := &corev1.Pod{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: releaseName + "-pod-init-oom", Namespace: namespace}, pod)).To(Succeed())
+		pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "init-db",
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "OOMKilled"}},
+		}}
+		Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+		status, msg := checkServicePodsHealth(ctx, k8sClient, namespace, releaseName)
+		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(msg).To(ContainSubstring("Init container"))
+		Expect(msg).To(ContainSubstring("OOMKilled"))
+	})
+
+	It("returns Failed when one pod is crashing and another is ready", func() {
+		Expect(k8sClient.Create(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: releaseName + "-pod-multi-crash", Namespace: namespace, Labels: label,
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "db", Image: "postgres:15"}}},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: releaseName + "-pod-multi-ready", Namespace: namespace, Labels: label,
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "db", Image: "postgres:15"}}},
+		})).To(Succeed())
+
+		crashPod := &corev1.Pod{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: releaseName + "-pod-multi-crash", Namespace: namespace}, crashPod)).To(Succeed())
+		crashPod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "db",
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+		}}
+		Expect(k8sClient.Status().Update(ctx, crashPod)).To(Succeed())
+
+		readyPod := &corev1.Pod{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: releaseName + "-pod-multi-ready", Namespace: namespace}, readyPod)).To(Succeed())
+		readyPod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name:  "db",
+			Ready: true,
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}}
+		Expect(k8sClient.Status().Update(ctx, readyPod)).To(Succeed())
+
+		status, _ := checkServicePodsHealth(ctx, k8sClient, namespace, releaseName)
+		Expect(status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+	})
 })
 
 var _ = Describe("releaseValuesMatch", func() {
@@ -549,6 +810,18 @@ var _ = Describe("buildServiceStatus", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
 		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", workspace)
 		Expect(status.SecretName).To(Equal("my-creds"))
+	})
+
+	It("returns Progressing when deployed but desired state is Stopped", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
+		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
+	})
+
+	It("returns Progressing when deployed but desired state is Deleted", func() {
+		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
+		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 })
 

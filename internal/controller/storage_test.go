@@ -6,6 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -387,6 +388,15 @@ var _ = Describe("StorageManager.GetEnabledProviders", func() {
 		Expect(providers).To(HaveLen(1))
 		Expect(providers[0].GetStorageType()).To(Equal(StorageTypeS3))
 	})
+
+	It("returns empty slice when all storage types are explicitly disabled", func() {
+		sm := NewStorageManager(newTestReconciler(Config{}))
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb", Namespace: "ns"},
+			Spec:       defaultv1alpha1.WorkbenchSpec{Storage: &defaultv1alpha1.StorageConfig{S3: false, NFS: false, Local: false}},
+		}
+		Expect(sm.GetEnabledProviders(wb)).To(BeEmpty())
+	})
 })
 
 var _ = Describe("StorageManager.GetVolumeAndMountSpecs", func() {
@@ -449,6 +459,74 @@ var _ = Describe("StorageManager.GetVolumeAndMountSpecs", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(vols).To(BeEmpty())
 		Expect(mounts).To(BeEmpty())
+	})
+})
+
+var _ = Describe("StorageManager.ProcessEnabledStorage", func() {
+	ctx := context.Background()
+
+	It("returns an empty map when no storage is enabled", func() {
+		sm := NewStorageManager(newTestReconciler(Config{}))
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-proc-none", Namespace: "default"},
+			Spec:       defaultv1alpha1.WorkbenchSpec{Storage: &defaultv1alpha1.StorageConfig{S3: false, NFS: false}},
+		}
+		result, err := sm.ProcessEnabledStorage(ctx, wb)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns an empty map and no error when drivers are unavailable", func() {
+		// S3 and NFS require CSI drivers not present in testenv — both skip gracefully
+		sm := NewStorageManager(newTestReconciler(Config{}))
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-proc-nodrivers", Namespace: "default"},
+			Spec:       defaultv1alpha1.WorkbenchSpec{Storage: &defaultv1alpha1.StorageConfig{S3: true, NFS: true}},
+		}
+		result, err := sm.ProcessEnabledStorage(ctx, wb)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty())
+	})
+})
+
+var _ = Describe("StorageManager.processStorageProvider", func() {
+	ctx := context.Background()
+
+	It("returns empty string when driver is not available", func() {
+		sm := NewStorageManager(newTestReconciler(Config{}))
+		// LocalProvider with LocalStorageEnabled=false → HasDriver returns false
+		provider := NewLocalProvider(newTestReconciler(Config{LocalStorageEnabled: false}))
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-proc-provider", Namespace: "default"},
+		}
+		pvcName, err := sm.processStorageProvider(ctx, wb, provider)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvcName).To(BeEmpty())
+	})
+
+	It("returns empty string when driver is present but secret is missing", func() {
+		// Create the JuiceFS CSIDriver so HasDriver returns true
+		csiDriver := &storagev1.CSIDriver{
+			ObjectMeta: metav1.ObjectMeta{Name: "csi.juicefs.com"},
+		}
+		_ = k8sClient.Create(ctx, csiDriver)
+
+		defer func() {
+			_ = k8sClient.Delete(ctx, csiDriver)
+		}()
+
+		cfg := Config{
+			JuiceFSSecretName:      "nonexistent-juicefs-secret-xyz",
+			JuiceFSSecretNamespace: "default",
+		}
+		sm := NewStorageManager(newTestReconciler(cfg))
+		provider := NewS3Provider(newTestReconciler(cfg))
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-proc-nosecret", Namespace: "default"},
+		}
+		pvcName, err := sm.processStorageProvider(ctx, wb, provider)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pvcName).To(BeEmpty())
 	})
 })
 

@@ -18,7 +18,7 @@ spec:
       state: Running
       chart:
         repository: services/postgres
-        tag: "1.6.1"
+        tag: "0.0.1"
       credentials:
         secretName: postgres-creds
         paths:
@@ -34,20 +34,11 @@ spec:
       state: Running
       chart:
         repository: services/mlflow
-        tag: "1.8.1"
+        tag: "0.0.1"
       credentials:
         secretName: mlflow-creds
         paths:
-          - postgres.settings.superuserPassword.value   # postgres admin password
-          - mlflow.backendStore.postgres.password       # mlflow app user password
-      values:
-        postgres:
-          settings:
-            superuserPassword:
-              existingSecret: mlflow-creds
-              secretKey: "postgres.settings.superuserPassword.value"
-            userDatabase:
-              password:
-                existingSecret: mlflow-creds
-                secretKey: "mlflow.backendStore.postgres.password"
+          - postgres.settings.superuserPassword.value
+          - postgres.userDatabase.password.value|mlflow.backendStore.postgres.password
+      values: {}
       connectionInfoTemplate: "http://{{.ReleaseName}}.{{.Namespace}}:5000"

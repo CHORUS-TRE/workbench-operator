@@ -278,6 +278,51 @@ var _ = Describe("toFQDNSelectors", func() {
 	})
 })
 
+var _ = Describe("normalizeFQDNEntry", func() {
+	It("lowercases uppercase input", func() {
+		Expect(normalizeFQDNEntry("EXAMPLE.COM")).To(Equal("example.com"))
+	})
+
+	It("trims leading and trailing whitespace", func() {
+		Expect(normalizeFQDNEntry("  example.com  ")).To(Equal("example.com"))
+	})
+
+	It("lowercases and trims simultaneously", func() {
+		Expect(normalizeFQDNEntry("  ExAmPlE.CoM  ")).To(Equal("example.com"))
+	})
+
+	It("returns empty string for whitespace-only input", func() {
+		Expect(normalizeFQDNEntry("   ")).To(Equal(""))
+	})
+
+	It("returns empty string for empty input", func() {
+		Expect(normalizeFQDNEntry("")).To(Equal(""))
+	})
+
+	It("preserves valid wildcard prefix", func() {
+		Expect(normalizeFQDNEntry("*.Corp.Internal")).To(Equal("*.corp.internal"))
+	})
+})
+
+var _ = Describe("validateFQDNs (whitespace edge cases)", func() {
+	It("accepts FQDN with surrounding whitespace as valid after trimming", func() {
+		err := validateFQDNs([]string{"  example.com  "})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects whitespace-only entry (normalizes to empty)", func() {
+		err := validateFQDNs([]string{"   "})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("empty FQDN"))
+	})
+
+	It("detects duplicates across mixed-case and whitespace variants", func() {
+		err := validateFQDNs([]string{" EXAMPLE.COM ", "example.com"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("duplicate FQDN entry"))
+	})
+})
+
 var _ = Describe("cnpNameForWorkspace", func() {
 	It("returns short name with suffix when name fits within 253 chars", func() {
 		name := cnpNameForWorkspace("my-workspace")
