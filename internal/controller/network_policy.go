@@ -25,9 +25,9 @@ const (
 	maxFQDNLength = 253
 	// Kubernetes object names are DNS subdomains (max 253 chars).
 	maxK8sNameLength = 253
-	// Truncated names use "-egress-" + hash as a stable suffix.
-	cnpLongNameSuffix = "-egress-"
-	cnpNameSuffix     = "-egress"
+	// Truncated names use "-netpol-" + hash as a stable suffix.
+	cnpLongNameSuffix = "-netpol-"
+	cnpNameSuffix     = "-netpol"
 	cnpNameHashLen    = 10
 )
 
@@ -137,12 +137,23 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		"workspace": workspace.Name,
 	}
 
+	// namespaceLabelSelector targets a Kubernetes Namespace object by its auto-assigned
+	// metadata label. Used in toServices.k8sServiceSelector.namespaceSelector, which
+	// selects namespace resources — not pods.
+	//
+	// toEndpoints/fromEndpoints rules use the Cilium-synthetic label
+	// "k8s:io.kubernetes.pod.namespace" instead, which is stamped on pod identities
+	// (not namespace objects) by Cilium's policy engine.
 	namespaceLabelSelector := map[string]any{
 		"matchLabels": map[string]any{
 			"kubernetes.io/metadata.name": workspace.Namespace,
 		},
 	}
 
+	// Note: no fromEndpoints/fromServices filter is needed on any rule below.
+	// The top-level endpointSelector (empty matchLabels) already scopes this entire
+	// policy to pods in the workspace namespace — Cilium only applies these egress
+	// rules to pods selected by that selector.
 	egressRules := []map[string]any{
 		// DNS to kube-system (kube-dns)
 		{
@@ -179,6 +190,9 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		},
 		// Intra-namespace service traffic (ClusterIP, pre-DNAT).
 		// Required when kube-proxy handles DNAT via iptables after Cilium's policy check.
+		// The empty selector matches all services in the namespace. This is intentional:
+		// each workspace owns its namespace exclusively — no external services
+		// (monitoring, mesh proxies, etc.) are deployed here by design.
 		{
 			"toServices": []map[string]any{
 				{
@@ -210,6 +224,10 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 
 	// Ingress: only allow connections from pods within the same namespace.
 	// Without this, any pod in the cluster (other workspaces) can reach services here.
+	// No toPorts restriction is applied — workbench pods need flexible intra-namespace
+	// connectivity across arbitrary ports (display servers, socat proxies, app services).
+	// The namespace boundary is the trust boundary; port-level restriction inside it
+	// is impractical and would require the operator to track every service port.
 	ingressRules := []map[string]any{
 		{
 			"fromEndpoints": []map[string]any{

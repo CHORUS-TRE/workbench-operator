@@ -29,7 +29,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		cnp, err := buildNetworkPolicy(ws)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp).NotTo(BeNil())
-		Expect(cnp.GetName()).To(Equal("workspace-egress"))
+		Expect(cnp.GetName()).To(Equal("workspace-netpol"))
 		Expect(cnp.GetNamespace()).To(Equal("workspace-ns"))
 
 		spec := cnp.Object["spec"].(map[string]any)
@@ -133,7 +133,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp.GetName()).To(Equal(cnpNameForWorkspace(ws.Name)))
 		Expect(len(cnp.GetName())).To(BeNumerically("<=", 253))
-		Expect(cnp.GetName()).To(ContainSubstring("-egress-"))
+		Expect(cnp.GetName()).To(ContainSubstring("-netpol-"))
 	})
 })
 
@@ -338,7 +338,7 @@ var _ = Describe("validateFQDNs (whitespace edge cases)", func() {
 var _ = Describe("cnpNameForWorkspace", func() {
 	It("returns short name with suffix when name fits within 253 chars", func() {
 		name := cnpNameForWorkspace("my-workspace")
-		Expect(name).To(Equal("my-workspace-egress"))
+		Expect(name).To(Equal("my-workspace-netpol"))
 		Expect(len(name)).To(BeNumerically("<=", 253))
 	})
 
@@ -346,7 +346,7 @@ var _ = Describe("cnpNameForWorkspace", func() {
 		long := strings.Repeat("a", 300)
 		name := cnpNameForWorkspace(long)
 		Expect(len(name)).To(BeNumerically("<=", 253))
-		Expect(name).To(ContainSubstring("-egress-"))
+		Expect(name).To(ContainSubstring("-netpol-"))
 	})
 
 	It("falls back to 'ws' prefix when truncated name consists only of dashes", func() {
