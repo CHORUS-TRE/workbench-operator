@@ -825,6 +825,74 @@ var _ = Describe("buildServiceStatus", func() {
 	})
 })
 
+var _ = Describe("evaluateComputedValues", func() {
+	It("returns an empty map when computedValues is nil", func() {
+		result, err := evaluateComputedValues(nil, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns an empty map when computedValues is empty", func() {
+		result, err := evaluateComputedValues(map[string]string{}, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty())
+	})
+
+	It("substitutes {{.ReleaseName}} in a value", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{"mlflow.backendStore.postgres.host": "{{.ReleaseName}}-mlflow-db"},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveKeyWithValue("mlflow",
+			HaveKeyWithValue("backendStore",
+				HaveKeyWithValue("postgres",
+					HaveKeyWithValue("host", "workspace156-mlflow-mlflow-db")))))
+	})
+
+	It("substitutes {{.Namespace}} in a value", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{"app.namespace": "{{.Namespace}}"},
+			"rel", "mynamespace", "",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveKeyWithValue("app", HaveKeyWithValue("namespace", "mynamespace")))
+	})
+
+	It("substitutes {{.SecretName}} in a value", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{"app.secret": "{{.SecretName}}"},
+			"rel", "ns", "my-secret",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveKeyWithValue("app", HaveKeyWithValue("secret", "my-secret")))
+	})
+
+	It("returns an error for an unrecognised placeholder", func() {
+		_, err := evaluateComputedValues(
+			map[string]string{"app.val": "{{.Unknown}}"},
+			"rel", "ns", "sec",
+		)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("merges multiple paths into a single nested map", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{
+				"a.host": "{{.ReleaseName}}-db",
+				"a.port": "5432",
+			},
+			"myrel", "myns", "",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		inner, ok := result["a"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(inner["host"]).To(Equal("myrel-db"))
+		Expect(inner["port"]).To(Equal("5432"))
+	})
+})
+
 var _ = Describe("autoValuesPrefix", func() {
 	makeChart := func(depNames ...string) *chart.Chart {
 		deps := make([]*chart.Dependency, len(depNames))
