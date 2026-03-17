@@ -23,13 +23,13 @@ var _ = Describe("buildNetworkPolicy", func() {
 		}
 	}
 
-	It("builds kube-dns + intra-namespace egress for Airgapped workspace", func() {
+	It("builds kube-dns + intra-namespace egress and intra-namespace ingress for Airgapped workspace", func() {
 		ws := baseWorkspace()
 
 		cnp, err := buildNetworkPolicy(ws)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp).NotTo(BeNil())
-		Expect(cnp.GetName()).To(Equal("workspace-egress"))
+		Expect(cnp.GetName()).To(Equal("workspace-netpol"))
 		Expect(cnp.GetNamespace()).To(Equal("workspace-ns"))
 
 		spec := cnp.Object["spec"].(map[string]any)
@@ -37,16 +37,31 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(es["matchLabels"]).To(BeEmpty())
 
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(2))
+		Expect(egress).To(HaveLen(3))
 
 		dnsRule := egress[0]
 		Expect(dnsRule["toEndpoints"]).NotTo(BeEmpty())
 		Expect(dnsRule["toPorts"]).NotTo(BeEmpty())
 
-		intraRule := egress[1]
-		toEndpoints := intraRule["toEndpoints"].([]map[string]any)
+		intraEndpointRule := egress[1]
+		toEndpoints := intraEndpointRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
+
+		intraServiceRule := egress[2]
+		toServices := intraServiceRule["toServices"].([]map[string]any)
+		Expect(toServices).To(HaveLen(1))
+		svcSelector := toServices[0]["k8sServiceSelector"].(map[string]any)
+		nsSel := svcSelector["namespaceSelector"].(map[string]any)
+		Expect(nsSel["matchLabels"]).To(HaveKeyWithValue("kubernetes.io/metadata.name", "workspace-ns"))
+
+		ingress := spec["ingress"].([]map[string]any)
+		Expect(ingress).To(HaveLen(1))
+		fromEndpoints := ingress[0]["fromEndpoints"].([]map[string]any)
+		Expect(fromEndpoints).To(HaveLen(3))
+		Expect(fromEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
+		Expect(fromEndpoints[1]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "backend"))
+		Expect(fromEndpoints[2]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "prometheus"))
 	})
 
 	It("adds FQDN allowlist rules with HTTP/HTTPS ports when FQDNAllowlist", func() {
@@ -58,9 +73,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 
-		fqdnRule := egress[2]
+		fqdnRule := egress[3]
 		toFQDNs := fqdnRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
@@ -80,9 +95,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 
-		allowInternetRule := egress[2]
+		allowInternetRule := egress[3]
 		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
 
 		toPorts := allowInternetRule["toPorts"].([]map[string]any)
@@ -121,7 +136,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp.GetName()).To(Equal(cnpNameForWorkspace(ws.Name)))
 		Expect(len(cnp.GetName())).To(BeNumerically("<=", 253))
-		Expect(cnp.GetName()).To(ContainSubstring("-egress-"))
+		Expect(cnp.GetName()).To(ContainSubstring("-netpol-"))
 	})
 })
 
@@ -278,10 +293,55 @@ var _ = Describe("toFQDNSelectors", func() {
 	})
 })
 
+var _ = Describe("normalizeFQDNEntry", func() {
+	It("lowercases uppercase input", func() {
+		Expect(normalizeFQDNEntry("EXAMPLE.COM")).To(Equal("example.com"))
+	})
+
+	It("trims leading and trailing whitespace", func() {
+		Expect(normalizeFQDNEntry("  example.com  ")).To(Equal("example.com"))
+	})
+
+	It("lowercases and trims simultaneously", func() {
+		Expect(normalizeFQDNEntry("  ExAmPlE.CoM  ")).To(Equal("example.com"))
+	})
+
+	It("returns empty string for whitespace-only input", func() {
+		Expect(normalizeFQDNEntry("   ")).To(Equal(""))
+	})
+
+	It("returns empty string for empty input", func() {
+		Expect(normalizeFQDNEntry("")).To(Equal(""))
+	})
+
+	It("preserves valid wildcard prefix", func() {
+		Expect(normalizeFQDNEntry("*.Corp.Internal")).To(Equal("*.corp.internal"))
+	})
+})
+
+var _ = Describe("validateFQDNs (whitespace edge cases)", func() {
+	It("accepts FQDN with surrounding whitespace as valid after trimming", func() {
+		err := validateFQDNs([]string{"  example.com  "})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects whitespace-only entry (normalizes to empty)", func() {
+		err := validateFQDNs([]string{"   "})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("empty FQDN"))
+	})
+
+	It("detects duplicates across mixed-case and whitespace variants", func() {
+		err := validateFQDNs([]string{" EXAMPLE.COM ", "example.com"})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("duplicate FQDN entry"))
+	})
+})
+
 var _ = Describe("cnpNameForWorkspace", func() {
 	It("returns short name with suffix when name fits within 253 chars", func() {
 		name := cnpNameForWorkspace("my-workspace")
-		Expect(name).To(Equal("my-workspace-egress"))
+		Expect(name).To(Equal("my-workspace-netpol"))
 		Expect(len(name)).To(BeNumerically("<=", 253))
 	})
 
@@ -289,7 +349,7 @@ var _ = Describe("cnpNameForWorkspace", func() {
 		long := strings.Repeat("a", 300)
 		name := cnpNameForWorkspace(long)
 		Expect(len(name)).To(BeNumerically("<=", 253))
-		Expect(name).To(ContainSubstring("-egress-"))
+		Expect(name).To(ContainSubstring("-netpol-"))
 	})
 
 	It("falls back to 'ws' prefix when truncated name consists only of dashes", func() {

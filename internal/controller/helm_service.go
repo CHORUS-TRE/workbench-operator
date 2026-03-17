@@ -91,7 +91,7 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 
 // locateAndLoadChart pulls and loads a Helm chart from an OCI registry, returning the loaded chart object.
 // chartRef is the full OCI reference, e.g. oci://harbor.build.chorus-tre.local/services/postgres.
-// chartVersion is the semver chart version, e.g. 1.6.1.
+// chartVersion is the semver chart version, e.g. 0.0.1.
 //
 // Use NewInstall to locate the chart — its constructor propagates cfg.RegistryClient
 // into ChartPathOptions.registryClient (unexported), which LocateChart needs for OCI.
@@ -297,9 +297,21 @@ func generatePassword(length int) (string, error) {
 
 // reconcileCredentialSecret creates or reads the credential Secret and returns
 // the passwords as a nested Helm values map. Idempotent: existing passwords are never rotated.
+//
+// Each path entry supports "|"-separated aliases: "secretKey[|extraHelmPath...]".
+// The first segment is the Secret key; all segments are injection targets in the Helm values.
+// This allows one password to be injected at multiple Helm value paths simultaneously.
 func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, namespace string, workspace *defaultv1alpha1.Workspace, creds *defaultv1alpha1.WorkspaceServiceCredentials) (map[string]interface{}, error) {
 	if creds == nil {
 		return nil, nil
+	}
+
+	for _, entry := range creds.Paths {
+		for _, seg := range strings.Split(entry, "|") {
+			if strings.TrimSpace(seg) == "" {
+				return nil, fmt.Errorf("credential path %q contains an empty segment", entry)
+			}
+		}
 	}
 
 	secret := &corev1.Secret{}
@@ -307,12 +319,13 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 
 	if apierrors.IsNotFound(err) {
 		data := make(map[string][]byte)
-		for _, key := range creds.Paths {
+		for _, entry := range creds.Paths {
+			secretKey := strings.Split(entry, "|")[0]
 			pw, err := generatePassword(24)
 			if err != nil {
-				return nil, fmt.Errorf("generating password for %s: %w", key, err)
+				return nil, fmt.Errorf("generating password for %s: %w", secretKey, err)
 			}
-			data[key] = []byte(pw)
+			data[secretKey] = []byte(pw)
 		}
 
 		secret = &corev1.Secret{
@@ -346,12 +359,16 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 	}
 
 	helmValues := make(map[string]interface{})
-	for _, key := range creds.Paths {
-		val, ok := secret.Data[key]
+	for _, entry := range creds.Paths {
+		helmPaths := strings.Split(entry, "|")
+		secretKey := helmPaths[0]
+		val, ok := secret.Data[secretKey]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("credential secret %s is missing expected key %q", creds.SecretName, secretKey)
 		}
-		helmValues = mergeMaps(helmValues, dotNotationToNestedMap(key, string(val)))
+		for _, helmPath := range helmPaths {
+			helmValues = mergeMaps(helmValues, dotNotationToNestedMap(helmPath, string(val)))
+		}
 	}
 
 	return helmValues, nil
@@ -492,6 +509,29 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 		ConnectionInfo: connectionInfo,
 		SecretName:     secretName,
 	}
+}
+
+// evaluateComputedValues evaluates each dot-notation path template and returns a nested Helm values map.
+// Supports the same placeholder syntax as ConnectionInfoTemplate.
+// Returns an error if any value still contains "{{." after substitution, which indicates an unrecognised placeholder (likely a typo).
+func evaluateComputedValues(computedValues map[string]string, releaseName, namespace, secretName string) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+	if len(computedValues) == 0 {
+		return result, nil
+	}
+	replacer := strings.NewReplacer(
+		"{{.Namespace}}", namespace,
+		"{{.ReleaseName}}", releaseName,
+		"{{.SecretName}}", secretName,
+	)
+	for path, tmpl := range computedValues {
+		resolved := replacer.Replace(tmpl)
+		if strings.Contains(resolved, "{{.") {
+			return nil, fmt.Errorf("computedValues[%q]: unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", path, resolved)
+		}
+		result = mergeMaps(result, dotNotationToNestedMap(path, resolved))
+	}
+	return result, nil
 }
 
 // parseServiceValues unmarshals the raw JSON values from a WorkspaceService into a map.

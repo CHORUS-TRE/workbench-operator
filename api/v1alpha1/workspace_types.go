@@ -121,6 +121,13 @@ type WorkspaceService struct {
 	// This is not a full Go template — conditionals and pipelines are not supported.
 	// +optional
 	ConnectionInfoTemplate string `json:"connectionInfoTemplate,omitempty"`
+
+	// ComputedValues is a map of dot-notation Helm value paths to placeholder strings evaluated at deploy time.
+	// Supported placeholders (exact syntax, no spaces): {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}}.
+	// Computed values are merged last and take precedence over Values and Credentials.
+	// Example: {"mlflow.backendStore.postgres.host": "{{.ReleaseName}}-mlflow-db"}
+	// +optional
+	ComputedValues map[string]string `json:"computedValues,omitempty"`
 }
 
 // WorkspaceStatusServiceStatus is the observed state of a workspace service.

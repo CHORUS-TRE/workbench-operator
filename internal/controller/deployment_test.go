@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -275,6 +277,68 @@ var _ = Describe("initDeployment", func() {
 		d := initDeployment(workbench, cfg)
 		Expect(d.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("my.registry.io/apps/xpra-server:"))
 	})
+
+	It("sets XPRA_CLIPBOARD_DIRECTION to 'disabled' when Clipboard is empty", func() {
+		d := initDeployment(workbench, Config{})
+		var found bool
+		for _, env := range d.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "XPRA_CLIPBOARD_DIRECTION" {
+				Expect(env.Value).To(Equal("disabled"))
+				found = true
+				break
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
+	It("sets XPRA_CLIPBOARD_DIRECTION to the spec value when Clipboard is set", func() {
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-clip", Namespace: "ns-clip"},
+			Spec: defaultv1alpha1.WorkbenchSpec{
+				Server: defaultv1alpha1.WorkbenchServer{Clipboard: "both"},
+			},
+		}
+		d := initDeployment(wb, Config{})
+		var found bool
+		for _, env := range d.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "XPRA_CLIPBOARD_DIRECTION" {
+				Expect(env.Value).To(Equal("both"))
+				found = true
+				break
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
+	It("sets socat image pull policy to PullAlways when image uses :latest tag", func() {
+		cfg := Config{SocatImage: "alpine/socat:latest"}
+		d := initDeployment(workbench, cfg)
+		Expect(d.Spec.Template.Spec.InitContainers[0].ImagePullPolicy).To(Equal(corev1.PullAlways))
+	})
+
+	It("sets socat image pull policy to PullIfNotPresent when image uses a pinned tag", func() {
+		cfg := Config{SocatImage: "alpine/socat:1.7.4"}
+		d := initDeployment(workbench, cfg)
+		Expect(d.Spec.Template.Spec.InitContainers[0].ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
+	})
+
+	It("sets server image pull policy to PullAlways when version is latest", func() {
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-latest", Namespace: "ns-latest"},
+			Spec:       defaultv1alpha1.WorkbenchSpec{Server: defaultv1alpha1.WorkbenchServer{Version: "latest"}},
+		}
+		d := initDeployment(wb, Config{})
+		Expect(d.Spec.Template.Spec.Containers[0].ImagePullPolicy).To(Equal(corev1.PullAlways))
+	})
+
+	It("sets server image pull policy to PullIfNotPresent when version is pinned", func() {
+		wb := defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{Name: "wb-pinned", Namespace: "ns-pinned"},
+			Spec:       defaultv1alpha1.WorkbenchSpec{Server: defaultv1alpha1.WorkbenchServer{Version: "v3.1.0"}},
+		}
+		d := initDeployment(wb, Config{})
+		Expect(d.Spec.Template.Spec.Containers[0].ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
+	})
 })
 
 var _ = Describe("determineAppContainerMessage", func() {
@@ -392,5 +456,80 @@ var _ = Describe("determineAppContainerMessage", func() {
 			},
 		}
 		Expect(r.determineAppContainerMessage(cs)).To(Equal("Readiness probe failing"))
+	})
+})
+
+var _ = Describe("NewHTTPProbe", func() {
+	It("returns a probe with the given path, port, delay, and period", func() {
+		p := NewHTTPProbe("/healthz", "http", 5, 10)
+		Expect(p.HTTPGet).NotTo(BeNil())
+		Expect(p.HTTPGet.Path).To(Equal("/healthz"))
+		Expect(p.HTTPGet.Port.String()).To(Equal("http"))
+		Expect(p.InitialDelaySeconds).To(Equal(int32(5)))
+		Expect(p.PeriodSeconds).To(Equal(int32(10)))
+		Expect(p.TimeoutSeconds).To(Equal(int32(2)))
+		Expect(p.SuccessThreshold).To(Equal(int32(1)))
+		Expect(p.FailureThreshold).To(Equal(int32(10)))
+	})
+})
+
+var _ = Describe("NewTCPProbe", func() {
+	It("returns a probe with the given port, delay, and period", func() {
+		p := NewTCPProbe("x11-socket", 3, 7)
+		Expect(p.TCPSocket).NotTo(BeNil())
+		Expect(p.TCPSocket.Port.String()).To(Equal("x11-socket"))
+		Expect(p.InitialDelaySeconds).To(Equal(int32(3)))
+		Expect(p.PeriodSeconds).To(Equal(int32(7)))
+		Expect(p.TimeoutSeconds).To(Equal(int32(2)))
+		Expect(p.SuccessThreshold).To(Equal(int32(1)))
+		Expect(p.FailureThreshold).To(Equal(int32(10)))
+	})
+})
+
+var _ = Describe("deleteDeployments", func() {
+	ctx := context.Background()
+	const namespace = "default"
+	const workbenchName = "delete-deploy-wb"
+
+	wb := defaultv1alpha1.Workbench{
+		ObjectMeta: metav1.ObjectMeta{Name: workbenchName, Namespace: namespace},
+	}
+
+	AfterEach(func() {
+		list := &appsv1.DeploymentList{}
+		if err := k8sClient.List(ctx, list, client.MatchingLabels{matchingLabel: workbenchName}); err == nil {
+			for i := range list.Items {
+				_ = k8sClient.Delete(ctx, &list.Items[i])
+			}
+		}
+	})
+
+	It("returns 0 when no deployments exist", func() {
+		r := &WorkbenchReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10)}
+		count, err := r.deleteDeployments(ctx, wb)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(Equal(0))
+	})
+
+	It("deletes matching deployments and returns the count", func() {
+		Expect(k8sClient.Create(ctx, &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "del-deploy-test-1",
+				Namespace: namespace,
+				Labels:    map[string]string{matchingLabel: workbenchName},
+			},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "test", Image: "busybox"}}},
+				},
+			},
+		})).To(Succeed())
+
+		r := &WorkbenchReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(10)}
+		count, err := r.deleteDeployments(ctx, wb)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(Equal(1))
 	})
 })

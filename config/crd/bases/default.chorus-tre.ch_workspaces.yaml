@@ -101,6 +101,15 @@ spec:
                       required:
                       - tag
                       type: object
+                    computedValues:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        ComputedValues is a map of dot-notation Helm value paths to placeholder strings evaluated at deploy time.
+                        Supported placeholders (exact syntax, no spaces): {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}}.
+                        Computed values are merged last and take precedence over Values and Credentials.
+                        Example: {"mlflow.backendStore.postgres.host": "{{.ReleaseName}}-mlflow-db"}
+                      type: object
                     connectionInfoTemplate:
                       description: |-
                         ConnectionInfoTemplate is a string with placeholder substitution rendered into status.services[*].connectionInfo.
