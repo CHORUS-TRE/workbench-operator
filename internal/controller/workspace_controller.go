@@ -425,8 +425,18 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 			valuesPrefix := autoValuesPrefix(ch, repoLastSegment)
 
-			computedVals := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, secretName)
-			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, mergeMaps(mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix)), computedVals)); err != nil {
+			computedVals, err := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, secretName)
+			if err != nil {
+				logger.Error(err, "Invalid computedValues", "service", key, "release", releaseName)
+				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
+					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+					Message: err.Error(),
+				}
+				continue
+			}
+			baseVals := mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix))
+			finalVals := mergeMaps(baseVals, wrapWithPrefix(computedVals, valuesPrefix))
+			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, finalVals); err != nil {
 				logger.Error(err, "Failed to install/upgrade Helm release", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
 					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,

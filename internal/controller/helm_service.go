@@ -513,10 +513,11 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 
 // evaluateComputedValues evaluates each dot-notation path template and returns a nested Helm values map.
 // Supports the same placeholder syntax as ConnectionInfoTemplate.
-func evaluateComputedValues(computedValues map[string]string, releaseName, namespace, secretName string) map[string]interface{} {
+// Returns an error if any value still contains "{{." after substitution, which indicates an unrecognised placeholder (likely a typo).
+func evaluateComputedValues(computedValues map[string]string, releaseName, namespace, secretName string) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 	if len(computedValues) == 0 {
-		return result
+		return result, nil
 	}
 	replacer := strings.NewReplacer(
 		"{{.Namespace}}", namespace,
@@ -524,9 +525,13 @@ func evaluateComputedValues(computedValues map[string]string, releaseName, names
 		"{{.SecretName}}", secretName,
 	)
 	for path, tmpl := range computedValues {
-		result = mergeMaps(result, dotNotationToNestedMap(path, replacer.Replace(tmpl)))
+		resolved := replacer.Replace(tmpl)
+		if strings.Contains(resolved, "{{.") {
+			return nil, fmt.Errorf("computedValues[%q]: unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", path, resolved)
+		}
+		result = mergeMaps(result, dotNotationToNestedMap(path, resolved))
 	}
-	return result
+	return result, nil
 }
 
 // parseServiceValues unmarshals the raw JSON values from a WorkspaceService into a map.
