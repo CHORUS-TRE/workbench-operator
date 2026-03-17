@@ -40,4 +40,6 @@ type Config struct {
 	// WorkbenchDefaultResources is the default resource requirements for the xpra server container.
 	// When nil, no resources are set (current behavior).
 	WorkbenchDefaultResources *corev1.ResourceRequirements
+	// PVCLabels is an optional set of labels to add to every PVC created by the operator.
+	PVCLabels map[string]string
 }

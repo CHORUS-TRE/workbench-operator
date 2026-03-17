@@ -1,4 +1,10 @@
 
+# Storage configuration
+storage:
+  # pvcLabels is an optional map of labels to add to every PVC created by the operator.
+  pvcLabels:
+    velero.io/exclude-from-backup: "true"
+
 # JuiceFS configuration
 juicefs:
   secretName: juicefs-secret

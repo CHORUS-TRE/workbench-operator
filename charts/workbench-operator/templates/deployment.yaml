@@ -26,6 +26,9 @@ spec:
         - --juicefs-secret-namespace={{ .Values.juicefs.secretNamespace }}
         - --nfs-secret-name={{ .Values.nfs.secretName }}
         - --nfs-secret-namespace={{ .Values.nfs.secretNamespace }}
+        {{- range $k, $v := .Values.storage.pvcLabels }}
+        - --pvc-label={{ $k }}={{ $v }}
+        {{- end }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
         {{- with .Values.workbench.serverResources }}

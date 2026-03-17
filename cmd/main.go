@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -29,6 +31,26 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
+
+// labelFlag is a repeated flag that accumulates key=value pairs into a map.
+type labelFlag map[string]string
+
+func (f labelFlag) String() string {
+	pairs := make([]string, 0, len(f))
+	for k, v := range f {
+		pairs = append(pairs, k+"="+v)
+	}
+	return strings.Join(pairs, ",")
+}
+
+func (f labelFlag) Set(s string) error {
+	k, v, ok := strings.Cut(s, "=")
+	if !ok {
+		return fmt.Errorf("pvc-label %q must be in key=value format", s)
+	}
+	f[k] = v
+	return nil
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -64,6 +86,7 @@ func main() {
 	var workbenchMemoryLimit string
 	var workbenchCPURequest string
 	var workbenchMemoryRequest string
+	pvcLabels := labelFlag{}
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -95,6 +118,7 @@ func main() {
 	flag.StringVar(&workbenchMemoryLimit, "workbench-memory-limit", "", "Default memory limit for the workbench server container (e.g. 512Mi)")
 	flag.StringVar(&workbenchCPURequest, "workbench-cpu-request", "", "Default CPU request for the workbench server container (e.g. 100m)")
 	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
+	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -210,6 +234,7 @@ func main() {
 			WorkbenchStartupTimeout:      workbenchStartupTimeout,
 			ApplicationStartupTimeout:    applicationStartupTimeout,
 			WorkbenchDefaultResources:    workbenchDefaultResources,
+			PVCLabels:                    map[string]string(pvcLabels),
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")
