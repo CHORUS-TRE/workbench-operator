@@ -119,6 +119,20 @@ var _ = Describe("StorageManager", func() {
 			Expect(pvc.Namespace).To(Equal("ns1"))
 		})
 
+		It("CreatePVC includes labels from Config.PVCLabels", func() {
+			p2 := NewS3Provider(newTestReconciler(Config{
+				JuiceFSSecretName:      "my-juicefs-secret",
+				JuiceFSSecretNamespace: "my-namespace",
+				PVCLabels:              map[string]string{"test-label/key": "test-value"},
+			}))
+			wb := defaultv1alpha1.Workbench{
+				ObjectMeta: metav1.ObjectMeta{Name: "wb1", Namespace: "ns1"},
+			}
+			pvc, err := p2.BaseProvider.CreatePVC(ctx, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pvc.Labels).To(HaveKeyWithValue("test-label/key", "test-value"))
+		})
+
 		It("HasSecret returns false when secret does not exist", func() {
 			Expect(p.HasSecret(ctx, k8sClient)).To(BeFalse())
 		})

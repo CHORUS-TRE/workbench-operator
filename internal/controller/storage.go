@@ -433,8 +433,11 @@ func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.
 	pvcName := b.GetPVCName(workbench.Namespace)
 	pvName := b.getPVName(workbench.Namespace)
 
-	// Only add label if pvcLabel is not empty
+	// Start with any operator-wide PVC labels from config
 	labels := map[string]string{}
+	for k, v := range b.reconciler.Config.PVCLabels {
+		labels[k] = v
+	}
 	if b.pvcLabel != "" {
 		labels[b.pvcLabel] = "true"
 	}

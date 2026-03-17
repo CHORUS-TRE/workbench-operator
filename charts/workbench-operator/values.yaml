@@ -1,4 +1,10 @@
 
+# Storage configuration
+storage:
+  # pvcLabels is an optional map of labels to add to every PVC created by the operator.
+  pvcLabels:
+    velero.io/exclude-from-backup: "true"
+
 # JuiceFS configuration
 juicefs:
   secretName: juicefs-secret
@@ -45,7 +51,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.40
+      tag: 0.4.41
     resources:
       limits:
         cpu: 500m
