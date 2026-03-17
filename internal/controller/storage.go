@@ -434,7 +434,9 @@ func (b *BaseProvider) CreatePVC(ctx context.Context, workbench defaultv1alpha1.
 	pvName := b.getPVName(workbench.Namespace)
 
 	// Only add label if pvcLabel is not empty
-	labels := map[string]string{}
+	labels := map[string]string{
+		"velero.io/exclude-from-backup": "true",
+	}
 	if b.pvcLabel != "" {
 		labels[b.pvcLabel] = "true"
 	}
