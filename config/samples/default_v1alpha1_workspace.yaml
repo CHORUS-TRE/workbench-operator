@@ -18,7 +18,7 @@ spec:
       state: Running
       chart:
         repository: services/postgres
-        tag: "0.0.1"
+        tag: "0.0.3"
       credentials:
         secretName: postgres-creds
         paths:
@@ -34,7 +34,7 @@ spec:
       state: Running
       chart:
         repository: services/mlflow
-        tag: "0.0.1"
+        tag: "0.0.4"
       credentials:
         secretName: mlflow-creds
         paths:
