@@ -893,6 +893,96 @@ var _ = Describe("evaluateComputedValues", func() {
 	})
 })
 
+var _ = Describe("dotNotationToNestedMap", func() {
+	It("handles a simple dot-notation path", func() {
+		result := dotNotationToNestedMap("a.b.c", "val")
+		Expect(result).To(HaveKeyWithValue("a",
+			HaveKeyWithValue("b",
+				HaveKeyWithValue("c", "val"))))
+	})
+
+	It("handles an array index in the middle of a path", func() {
+		result := dotNotationToNestedMap("mlflow.extraVolumes[0].persistentVolumeClaim.claimName", "my-pvc")
+		mlflow, ok := result["mlflow"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := mlflow["extraVolumes"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(1))
+		elem, ok := slice[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(pvc).To(HaveKeyWithValue("claimName", "my-pvc"))
+	})
+
+	It("handles an array index as the last segment", func() {
+		result := dotNotationToNestedMap("a.items[2]", "val")
+		a, ok := result["a"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := a["items"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(3))
+		Expect(slice[2]).To(Equal("val"))
+	})
+
+	It("creates a slice of the right length for a non-zero index", func() {
+		result := dotNotationToNestedMap("a.items[2].name", "val")
+		a, ok := result["a"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := a["items"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(3))
+		Expect(slice[0]).To(BeNil())
+		Expect(slice[1]).To(BeNil())
+		elem, ok := slice[2].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(elem).To(HaveKeyWithValue("name", "val"))
+	})
+
+	It("handles an array index at the root level (no leading dot)", func() {
+		result := dotNotationToNestedMap("items[0].name", "val")
+		slice, ok := result["items"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(1))
+		elem, ok := slice[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(elem).To(HaveKeyWithValue("name", "val"))
+	})
+})
+
+var _ = Describe("evaluateComputedValues with array notation", func() {
+	It("returns an error for an unrecognised placeholder inside an array path", func() {
+		_, err := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[0].persistentVolumeClaim.claimName": "{{.Unknown}}-artifacts",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("resolves a release-name placeholder inside an array path", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[0].persistentVolumeClaim.claimName": "{{.ReleaseName}}-artifacts",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		mlflow, ok := result["mlflow"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := mlflow["extraVolumes"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(1))
+		elem, ok := slice[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
+	})
+})
+
 var _ = Describe("autoValuesPrefix", func() {
 	makeChart := func(depNames ...string) *chart.Chart {
 		deps := make([]*chart.Dependency, len(depNames))

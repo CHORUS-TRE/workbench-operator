@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -374,21 +376,40 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 	return helmValues, nil
 }
 
+// arrayIndexRe matches a path segment with an array index, e.g. "extraVolumes[0]".
+var arrayIndexRe = regexp.MustCompile(`^(.+)\[(\d+)\]$`)
+
 // dotNotationToNestedMap converts "a.b.c" → {"a": {"b": {"c": value}}}.
+// Array index notation is also supported: "a.b[0].c" → {"a": {"b": [{"c": value}]}}.
 func dotNotationToNestedMap(key, value string) map[string]interface{} {
-	parts := strings.Split(key, ".")
 	result := make(map[string]interface{})
-	current := result
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			current[part] = value
-		} else {
-			next := make(map[string]interface{})
-			current[part] = next
-			current = next
-		}
-	}
+	buildAtPath(result, strings.Split(key, "."), value)
 	return result
+}
+
+// buildAtPath recursively sets value at the given path segments inside m.
+func buildAtPath(m map[string]interface{}, parts []string, value string) {
+	part := parts[0]
+	rest := parts[1:]
+	if matches := arrayIndexRe.FindStringSubmatch(part); matches != nil {
+		mapKey := matches[1]
+		idx, _ := strconv.Atoi(matches[2])
+		slice := make([]interface{}, idx+1)
+		if len(rest) == 0 {
+			slice[idx] = value
+		} else {
+			elem := make(map[string]interface{})
+			buildAtPath(elem, rest, value)
+			slice[idx] = elem
+		}
+		m[mapKey] = slice
+	} else if len(rest) == 0 {
+		m[part] = value
+	} else {
+		next := make(map[string]interface{})
+		m[part] = next
+		buildAtPath(next, rest, value)
+	}
 }
 
 // wrapWithPrefix wraps values under a single top-level key, mirroring the Helm
