@@ -34,7 +34,7 @@ spec:
       state: Running
       chart:
         repository: services/mlflow
-        tag: "0.0.5"
+        tag: "0.0.7"
       credentials:
         secretName: mlflow-creds
         paths:
