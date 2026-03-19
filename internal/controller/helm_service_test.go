@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"io"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -14,6 +15,7 @@ import (
 
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart"
+	chartcommon "helm.sh/helm/v4/pkg/chart/common"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
 	kubefake "helm.sh/helm/v4/pkg/kube/fake"
 	releasecommon "helm.sh/helm/v4/pkg/release/common"
@@ -1141,8 +1143,9 @@ var _ = Describe("autoValuesPrefix", func() {
 var _ = Describe("helmReleaseStatus", func() {
 	newFakeCfg := func() *action.Configuration {
 		return &action.Configuration{
-			Releases:   storage.Init(driver.NewMemory()),
-			KubeClient: &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{}},
+			Releases:     storage.Init(driver.NewMemory()),
+			KubeClient:   &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{Out: io.Discard}},
+			Capabilities: chartcommon.DefaultCapabilities,
 		}
 	}
 
@@ -1192,8 +1195,9 @@ var _ = Describe("helmReleaseStatus", func() {
 var _ = Describe("helmInstallOrUpgrade", func() {
 	newFakeCfg := func() *action.Configuration {
 		return &action.Configuration{
-			Releases:   storage.Init(driver.NewMemory()),
-			KubeClient: &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{}},
+			Releases:     storage.Init(driver.NewMemory()),
+			KubeClient:   &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{Out: io.Discard}},
+			Capabilities: chartcommon.DefaultCapabilities,
 		}
 	}
 
@@ -1203,5 +1207,14 @@ var _ = Describe("helmInstallOrUpgrade", func() {
 		err := helmInstallOrUpgrade(context.Background(), cfg, "default", "my-release", ch, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("no version in metadata"))
+	})
+
+	It("does not return a metadata error when the chart has a version", func() {
+		cfg := newFakeCfg()
+		ch := &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"}}
+		err := helmInstallOrUpgrade(context.Background(), cfg, "default", "versioned-release", ch, nil)
+		// With a correct version field the install must pass the version check.
+		// The fake kube client returns no error, so the whole call succeeds.
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

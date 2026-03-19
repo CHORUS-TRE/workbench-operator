@@ -144,7 +144,7 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	if err != nil {
 		return fmt.Errorf("reading chart metadata: %w", err)
 	}
-	chVersion, ok := chAcc.MetadataAsMap()["version"].(string)
+	chVersion, ok := chAcc.MetadataAsMap()["Version"].(string)
 	if !ok || chVersion == "" {
 		return fmt.Errorf("chart loaded for release %s has no version in metadata", releaseName)
 	}
@@ -189,7 +189,7 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 			if relV1, ok := rel.(*releasev1.Release); ok {
 				relChartAcc, err := chart.NewAccessor(relAcc.Chart())
 				if err == nil {
-					relChartVersion, _ := relChartAcc.MetadataAsMap()["version"].(string)
+					relChartVersion, _ := relChartAcc.MetadataAsMap()["Version"].(string)
 					if relChartVersion == chVersion && releaseValuesMatch(relV1.Config, values) {
 						return nil
 					}
