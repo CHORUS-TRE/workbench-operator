@@ -12,7 +12,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/chart"
+	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	kubefake "helm.sh/helm/v4/pkg/kube/fake"
+	releasecommon "helm.sh/helm/v4/pkg/release/common"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
+	"helm.sh/helm/v4/pkg/storage"
+	"helm.sh/helm/v4/pkg/storage/driver"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -1107,12 +1114,12 @@ var _ = Describe("evaluateComputedValues with array notation", func() {
 })
 
 var _ = Describe("autoValuesPrefix", func() {
-	makeChart := func(depNames ...string) *chart.Chart {
-		deps := make([]*chart.Dependency, len(depNames))
+	makeChart := func(depNames ...string) chart.Charter {
+		deps := make([]*chartv2.Dependency, len(depNames))
 		for i, name := range depNames {
-			deps[i] = &chart.Dependency{Name: name}
+			deps[i] = &chartv2.Dependency{Name: name}
 		}
-		return &chart.Chart{Metadata: &chart.Metadata{Dependencies: deps}}
+		return &chartv2.Chart{Metadata: &chartv2.Metadata{Dependencies: deps}}
 	}
 
 	It("returns the repo last segment for a single-dependency chart", func() {
@@ -1128,5 +1135,55 @@ var _ = Describe("autoValuesPrefix", func() {
 	It("returns empty string for a chart with no dependencies", func() {
 		ch := makeChart()
 		Expect(autoValuesPrefix(ch, "standalone")).To(BeEmpty())
+	})
+})
+
+var _ = Describe("helmReleaseStatus", func() {
+	newFakeCfg := func() *action.Configuration {
+		return &action.Configuration{
+			Releases:   storage.Init(driver.NewMemory()),
+			KubeClient: &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{}},
+		}
+	}
+
+	It("returns not-found when release does not exist", func() {
+		cfg := newFakeCfg()
+		status, desc, err := helmReleaseStatus(cfg, "no-such-release")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(status).To(Equal("not-found"))
+		Expect(desc).To(BeEmpty())
+	})
+
+	It("returns status and description for a deployed release", func() {
+		cfg := newFakeCfg()
+		rel := &releasev1.Release{
+			Name:      "my-release",
+			Namespace: "default",
+			Version:   1,
+			Info:      &releasev1.Info{Status: releasecommon.StatusDeployed, Description: "Install complete"},
+			Chart:     &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"}},
+		}
+		Expect(cfg.Releases.Create(rel)).To(Succeed())
+
+		status, desc, err := helmReleaseStatus(cfg, "my-release")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(status).To(Equal("deployed"))
+		Expect(desc).To(Equal("Install complete"))
+	})
+
+	It("returns status with empty description when Info is nil", func() {
+		cfg := newFakeCfg()
+		rel := &releasev1.Release{
+			Name:      "no-info-release",
+			Namespace: "default",
+			Version:   1,
+			Info:      &releasev1.Info{Status: releasecommon.StatusPendingInstall},
+			Chart:     &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"}},
+		}
+		Expect(cfg.Releases.Create(rel)).To(Succeed())
+
+		status, _, err := helmReleaseStatus(cfg, "no-info-release")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(status).To(Equal("pending-install"))
 	})
 })

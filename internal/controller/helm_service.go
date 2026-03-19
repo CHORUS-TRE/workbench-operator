@@ -24,12 +24,15 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/registry"
-	"helm.sh/helm/v3/pkg/storage/driver"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/chart"
+	"helm.sh/helm/v4/pkg/chart/loader"
+	"helm.sh/helm/v4/pkg/cli"
+	"helm.sh/helm/v4/pkg/kube"
+	"helm.sh/helm/v4/pkg/registry"
+	"helm.sh/helm/v4/pkg/release"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
+	"helm.sh/helm/v4/pkg/storage/driver"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -78,13 +81,10 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 		return nil, fmt.Errorf("creating Helm registry client: %w", err)
 	}
 
-	cfg := new(action.Configuration)
+	cfg := action.NewConfiguration(action.ConfigurationSetLogger(logr.ToSlogHandler(logger.V(1))))
 	cfg.RegistryClient = registryClient
 
-	helmLog := func(format string, v ...interface{}) {
-		logger.V(1).Info(fmt.Sprintf(format, v...))
-	}
-	if err := cfg.Init(getter, namespace, "secret", helmLog); err != nil {
+	if err := cfg.Init(getter, namespace, "secret"); err != nil {
 		return nil, fmt.Errorf("initializing Helm action config: %w", err)
 	}
 
@@ -97,7 +97,7 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 //
 // Use NewInstall to locate the chart — its constructor propagates cfg.RegistryClient
 // into ChartPathOptions.registryClient (unexported), which LocateChart needs for OCI.
-func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, namespace string) (*chart.Chart, error) {
+func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, namespace string) (chart.Charter, error) {
 	settings := cli.New()
 	settings.SetNamespace(namespace)
 	locator := action.NewInstall(cfg)
@@ -125,8 +125,9 @@ func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, names
 // If a future chart has multiple dependencies but only one is a "real" subchart (e.g. the
 // others are library or utility charts), this heuristic will incorrectly skip wrapping.
 // In that case, revisit and extend this function with a more targeted detection strategy.
-func autoValuesPrefix(ch *chart.Chart, repoLastSegment string) string {
-	if len(ch.Metadata.Dependencies) == 1 {
+func autoValuesPrefix(ch chart.Charter, repoLastSegment string) string {
+	acc, err := chart.NewAccessor(ch)
+	if err == nil && len(acc.MetaDependencies()) == 1 {
 		return repoLastSegment
 	}
 	return ""
@@ -138,13 +139,18 @@ func autoValuesPrefix(ch *chart.Chart, repoLastSegment string) string {
 // Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
 // missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
 // with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
-func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch *chart.Chart, values map[string]interface{}) error {
+func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch chart.Charter, values map[string]interface{}) error {
+	chAcc, err := chart.NewAccessor(ch)
+	if err != nil {
+		return fmt.Errorf("reading chart metadata: %w", err)
+	}
+	chVersion, _ := chAcc.MetadataAsMap()["version"].(string)
+
 	newInstall := func() error {
 		a := action.NewInstall(cfg)
 		a.Namespace = namespace
 		a.ReleaseName = releaseName
-		a.Wait = false
-		a.Atomic = false
+		a.WaitStrategy = kube.HookOnlyStrategy
 		_, err := a.RunWithContext(ctx, ch, values)
 		return err
 	}
@@ -152,10 +158,9 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	newUpgrade := func() error {
 		a := action.NewUpgrade(cfg)
 		a.Namespace = namespace
-		a.Wait = false
-		a.Atomic = false
+		a.WaitStrategy = kube.HookOnlyStrategy
 		a.MaxHistory = 10
-		a.ChartPathOptions.Version = ch.Metadata.Version
+		a.ChartPathOptions.Version = chVersion
 		_, err := a.RunWithContext(ctx, releaseName, ch, values)
 		return err
 	}
@@ -169,10 +174,24 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 			return fmt.Errorf("checking release %s: %w", releaseName, err)
 		}
 	} else {
-		releaseStatus = string(rel.Info.Status)
+		relAcc, err := release.NewAccessor(rel)
+		if err != nil {
+			return fmt.Errorf("reading release status: %w", err)
+		}
+		releaseStatus = relAcc.Status()
 		// Skip upgrade when already deployed with the same chart version and values.
-		if releaseStatus == "deployed" && rel.Chart.Metadata.Version == ch.Metadata.Version && releaseValuesMatch(rel.Config, values) {
-			return nil
+		if releaseStatus == "deployed" {
+			relChartAcc, err := chart.NewAccessor(relAcc.Chart())
+			if err == nil {
+				relChartVersion, _ := relChartAcc.MetadataAsMap()["version"].(string)
+				var relConfig map[string]interface{}
+				if relV1, ok := rel.(*releasev1.Release); ok {
+					relConfig = relV1.Config
+				}
+				if relChartVersion == chVersion && releaseValuesMatch(relConfig, values) {
+					return nil
+				}
+			}
 		}
 	}
 
@@ -219,7 +238,7 @@ func releaseValuesMatch(deployed, desired map[string]interface{}) bool {
 func helmUninstall(cfg *action.Configuration, releaseName string) (bool, error) {
 	uninstallAction := action.NewUninstall(cfg)
 	uninstallAction.KeepHistory = false
-	uninstallAction.Wait = false
+	uninstallAction.WaitStrategy = kube.HookOnlyStrategy
 
 	if _, err := uninstallAction.Run(releaseName); err != nil {
 		if strings.Contains(err.Error(), driver.ErrReleaseNotFound.Error()) {
@@ -241,7 +260,16 @@ func helmReleaseStatus(cfg *action.Configuration, releaseName string) (string, s
 		}
 		return "", "", err
 	}
-	return string(rel.Info.Status), rel.Info.Description, nil
+	relAcc, err := release.NewAccessor(rel)
+	if err != nil {
+		return "", "", fmt.Errorf("reading release status: %w", err)
+	}
+	relV1, ok := rel.(*releasev1.Release)
+	description := ""
+	if ok && relV1.Info != nil {
+		description = relV1.Info.Description
+	}
+	return relAcc.Status(), description, nil
 }
 
 // deleteReleasePVCs deletes all PVCs labeled with the Helm release instance name.
