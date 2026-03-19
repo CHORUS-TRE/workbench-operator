@@ -27,6 +27,7 @@ import (
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/chart/loader"
+	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
 	"helm.sh/helm/v4/pkg/registry"
@@ -140,14 +141,13 @@ func autoValuesPrefix(ch chart.Charter, repoLastSegment string) string {
 // missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
 // with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
 func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch chart.Charter, values map[string]interface{}) error {
-	chAcc, err := chart.NewAccessor(ch)
-	if err != nil {
-		return fmt.Errorf("reading chart metadata: %w", err)
-	}
-	chVersion, ok := chAcc.MetadataAsMap()["version"].(string)
-	if !ok || chVersion == "" {
+	// Type-assert to the concrete chart type to read Version directly — avoids the
+	// reflection-based MetadataAsMap() whose keys depend on Go struct field names.
+	chV2, ok := ch.(*chartv2.Chart)
+	if !ok || chV2.Metadata == nil || chV2.Metadata.Version == "" {
 		return fmt.Errorf("chart loaded for release %s has no version in metadata", releaseName)
 	}
+	chVersion := chV2.Metadata.Version
 
 	newInstall := func() error {
 		a := action.NewInstall(cfg)
@@ -187,12 +187,12 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		// if the assertion fails (future release schema), skip the optimisation and upgrade.
 		if releaseStatus == "deployed" {
 			if relV1, ok := rel.(*releasev1.Release); ok {
-				relChartAcc, err := chart.NewAccessor(relAcc.Chart())
-				if err == nil {
-					relChartVersion, _ := relChartAcc.MetadataAsMap()["version"].(string)
-					if relChartVersion == chVersion && releaseValuesMatch(relV1.Config, values) {
-						return nil
-					}
+				var relChartVersion string
+				if relV1.Chart != nil && relV1.Chart.Metadata != nil {
+					relChartVersion = relV1.Chart.Metadata.Version
+				}
+				if relChartVersion == chVersion && releaseValuesMatch(relV1.Config, values) {
+					return nil
 				}
 			}
 		}

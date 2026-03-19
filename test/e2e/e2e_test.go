@@ -3,9 +3,11 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,6 +17,63 @@ import (
 )
 
 const namespace = "workbench-operator-system"
+
+// workspaceManifest returns a reader producing a Workspace YAML manifest for
+// use with kubectl apply -f -.
+func workspaceManifest(namespace, name, networkPolicy string, allowedFQDNs []string) io.Reader {
+	fqdnJSON := "[]"
+	if len(allowedFQDNs) > 0 {
+		b, err := json.Marshal(allowedFQDNs)
+		if err != nil {
+			panic(fmt.Sprintf("failed to marshal allowedFQDNs: %v", err))
+		}
+		fqdnJSON = string(b)
+	}
+
+	manifest := fmt.Sprintf(`apiVersion: default.chorus-tre.ch/v1alpha1
+kind: Workspace
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  networkPolicy: %s
+  allowedFQDNs: %s
+`, name, namespace, networkPolicy, fqdnJSON)
+
+	return strings.NewReader(manifest)
+}
+
+// workspaceWithServiceManifest returns a Workspace manifest that includes a postgres service entry.
+// The chart registry and project are resolved from the operator's --registry and --services-repository flags.
+func workspaceWithServiceManifest(namespace, name, networkPolicy, serviceState string) io.Reader {
+	manifest := fmt.Sprintf(`apiVersion: default.chorus-tre.ch/v1alpha1
+kind: Workspace
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  networkPolicy: %s
+  services:
+    postgres:
+      state: %s
+      chart:
+        repository: services/postgres
+        tag: "0.0.3"
+      credentials:
+        secretName: postgres-creds
+        paths:
+          - settings.superuserPassword
+      values:
+        settings:
+          superuser: postgres
+          superuserDatabase: devdb
+        storage:
+          requestedSize: 1Gi
+      connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/devdb (secret: {{.SecretName}})"
+`, name, namespace, networkPolicy, serviceState)
+
+	return strings.NewReader(manifest)
+}
 
 // dumpDiagnostics outputs controller logs, workspace details, and events
 // for the given namespace to help debug test failures.
@@ -273,20 +332,20 @@ var _ = Describe("controller", Ordered, func() {
 
 			By("verifying CNP is created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-egress", "-n", testNS)
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-netpol", "-n", testNS)
 				_, err := utils.Run(cmd)
 				return err
 			}, 60*time.Second, time.Second).Should(Succeed())
 
-			By("verifying CNP has 2 egress rules (kube-dns + intra-namespace)")
-			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-egress",
+			By("verifying CNP has 3 egress rules (kube-dns + intra-namespace pod + intra-namespace service)")
+			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-netpol",
 				"-n", testNS, "-o", "jsonpath={.spec.egress}")
 			out, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			var egress []map[string]any
 			Expect(json.Unmarshal(out, &egress)).To(Succeed())
-			Expect(egress).To(HaveLen(2))
+			Expect(egress).To(HaveLen(3))
 
 			By("verifying NetworkPolicyReady condition is True")
 			Eventually(func() (string, error) {
@@ -309,9 +368,9 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying CNP is created with 3 egress rules")
+			By("verifying CNP is created with 4 egress rules")
 			Eventually(func() (int, error) {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-egress",
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-netpol",
 					"-n", testNS, "-o", "jsonpath={.spec.egress}")
 				out, err := utils.Run(cmd)
 				if err != nil {
@@ -322,11 +381,11 @@ var _ = Describe("controller", Ordered, func() {
 					return 0, err
 				}
 				return len(egress), nil
-			}, 60*time.Second, time.Second).Should(Equal(3))
+			}, 60*time.Second, time.Second).Should(Equal(4))
 
 			By("verifying the FQDN rule contains expected selectors")
-			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-egress",
-				"-n", testNS, "-o", "jsonpath={.spec.egress[2].toFQDNs}")
+			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-netpol",
+				"-n", testNS, "-o", "jsonpath={.spec.egress[3].toFQDNs}")
 			out, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(out)).To(ContainSubstring("example.com"))
@@ -342,8 +401,8 @@ var _ = Describe("controller", Ordered, func() {
 
 			By("verifying CNP has toCIDR rule for internet access")
 			Eventually(func() (string, error) {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "open-ws-egress",
-					"-n", testNS, "-o", "jsonpath={.spec.egress[2].toCIDR}")
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "open-ws-netpol",
+					"-n", testNS, "-o", "jsonpath={.spec.egress[3].toCIDR}")
 				out, err := utils.Run(cmd)
 				if err != nil {
 					return "", err
@@ -361,13 +420,13 @@ var _ = Describe("controller", Ordered, func() {
 
 			By("waiting for CNP creation")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-egress", "-n", testNS)
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-netpol", "-n", testNS)
 				_, err := utils.Run(cmd)
 				return err
 			}, 60*time.Second, time.Second).Should(Succeed())
 
 			By("verifying owner reference on CNP")
-			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-egress",
+			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-netpol",
 				"-n", testNS, "-o", "jsonpath={.metadata.ownerReferences[0].kind}")
 			out, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -380,7 +439,7 @@ var _ = Describe("controller", Ordered, func() {
 
 			By("verifying CNP is garbage-collected")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-egress",
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "owner-ws-netpol",
 					"-n", testNS, "--ignore-not-found", "-o", "name")
 				out, err := utils.Run(cmd)
 				if err != nil {
@@ -397,30 +456,9 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("waiting for airgapped CNP (2 egress rules)")
+			By("waiting for airgapped CNP (3 egress rules)")
 			Eventually(func() (int, error) {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-egress",
-					"-n", testNS, "-o", "jsonpath={.spec.egress}")
-				out, err := utils.Run(cmd)
-				if err != nil {
-					return 0, err
-				}
-				var egress []map[string]any
-				if err := json.Unmarshal(out, &egress); err != nil {
-					return 0, err
-				}
-				return len(egress), nil
-			}, 60*time.Second, time.Second).Should(Equal(2))
-
-			By("switching workspace to Open")
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "update-ws", "Open", nil)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("verifying CNP is updated to 3 egress rules")
-			Eventually(func() (int, error) {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-egress",
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-netpol",
 					"-n", testNS, "-o", "jsonpath={.spec.egress}")
 				out, err := utils.Run(cmd)
 				if err != nil {
@@ -432,6 +470,27 @@ var _ = Describe("controller", Ordered, func() {
 				}
 				return len(egress), nil
 			}, 60*time.Second, time.Second).Should(Equal(3))
+
+			By("switching workspace to Open")
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = workspaceManifest(testNS, "update-ws", "Open", nil)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying CNP is updated to 4 egress rules")
+			Eventually(func() (int, error) {
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-netpol",
+					"-n", testNS, "-o", "jsonpath={.spec.egress}")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return 0, err
+				}
+				var egress []map[string]any
+				if err := json.Unmarshal(out, &egress); err != nil {
+					return 0, err
+				}
+				return len(egress), nil
+			}, 60*time.Second, time.Second).Should(Equal(4))
 		})
 	})
 
@@ -610,6 +669,35 @@ var _ = Describe("controller", Ordered, func() {
 				_ = json.Unmarshal(out, &items)
 				return len(items) == 0
 			}, 60*time.Second, 2*time.Second).Should(BeTrue())
+		})
+
+		It("re-deploys postgres from Deleted state (fresh install)", func() {
+			By("patching the service state back to Running")
+			cmd := exec.Command("kubectl", "patch", "workspace", wsName,
+				"-n", testNS, "--type=merge",
+				`--patch={"spec":{"services":{"postgres":{"state":"Running"}}}}`)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for status.services.postgres.status == Running")
+			Eventually(func() (string, error) {
+				cmd := exec.Command("kubectl", "get", "workspace", wsName,
+					"-n", testNS, "-o",
+					`jsonpath={.status.services.postgres.status}`)
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return "", err
+				}
+				return string(out), nil
+			}, 120*time.Second, 2*time.Second).Should(Equal("Running"))
+
+			By("verifying connectionInfo is populated for the fresh install")
+			cmd = exec.Command("kubectl", "get", "workspace", wsName,
+				"-n", testNS, "-o",
+				`jsonpath={.status.services.postgres.connectionInfo}`)
+			out, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(out)).To(ContainSubstring(releaseName))
 		})
 	})
 })
