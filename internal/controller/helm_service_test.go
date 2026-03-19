@@ -12,7 +12,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/chart"
+	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	kubefake "helm.sh/helm/v4/pkg/kube/fake"
+	releasecommon "helm.sh/helm/v4/pkg/release/common"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
+	"helm.sh/helm/v4/pkg/storage"
+	"helm.sh/helm/v4/pkg/storage/driver"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -893,13 +900,226 @@ var _ = Describe("evaluateComputedValues", func() {
 	})
 })
 
+var _ = Describe("dotNotationToNestedMap", func() {
+	It("handles a simple dot-notation path", func() {
+		result, err := dotNotationToNestedMap("a.b.c", "val")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveKeyWithValue("a",
+			HaveKeyWithValue("b",
+				HaveKeyWithValue("c", "val"))))
+	})
+
+	It("handles an array index in the middle of a path", func() {
+		result, err := dotNotationToNestedMap("mlflow.extraVolumes[0].persistentVolumeClaim.claimName", "my-pvc")
+		Expect(err).NotTo(HaveOccurred())
+		mlflow, ok := result["mlflow"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := mlflow["extraVolumes"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(1))
+		elem, ok := slice[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(pvc).To(HaveKeyWithValue("claimName", "my-pvc"))
+	})
+
+	It("handles an array index as the last segment", func() {
+		result, err := dotNotationToNestedMap("a.items[2]", "val")
+		Expect(err).NotTo(HaveOccurred())
+		a, ok := result["a"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := a["items"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(3))
+		Expect(slice[2]).To(Equal("val"))
+	})
+
+	It("creates a slice of the right length for a non-zero index", func() {
+		result, err := dotNotationToNestedMap("a.items[2].name", "val")
+		Expect(err).NotTo(HaveOccurred())
+		a, ok := result["a"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := a["items"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(3))
+		Expect(slice[0]).To(BeNil())
+		Expect(slice[1]).To(BeNil())
+		elem, ok := slice[2].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(elem).To(HaveKeyWithValue("name", "val"))
+	})
+
+	It("handles an array index at the root level (no leading dot)", func() {
+		result, err := dotNotationToNestedMap("items[0].name", "val")
+		Expect(err).NotTo(HaveOccurred())
+		slice, ok := result["items"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(1))
+		elem, ok := slice[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(elem).To(HaveKeyWithValue("name", "val"))
+	})
+
+	It("returns an error for an array index exceeding maxArrayIndex", func() {
+		_, err := dotNotationToNestedMap("a.items[1001].name", "val")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("exceeds maximum"))
+	})
+})
+
+var _ = Describe("buildAtPath", func() {
+	It("merges two calls sharing an array key on the same map", func() {
+		m := make(map[string]interface{})
+		Expect(buildAtPath(m, []string{"extraVolumes[0]", "name"}, "artifacts")).To(Succeed())
+		Expect(buildAtPath(m, []string{"extraVolumes[1]", "name"}, "config")).To(Succeed())
+		slice, ok := m["extraVolumes"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(2))
+		Expect(slice[0].(map[string]interface{})).To(HaveKeyWithValue("name", "artifacts"))
+		Expect(slice[1].(map[string]interface{})).To(HaveKeyWithValue("name", "config"))
+	})
+
+	It("merges two calls sharing a map key on the same map", func() {
+		m := make(map[string]interface{})
+		Expect(buildAtPath(m, []string{"postgres", "host"}, "db-host")).To(Succeed())
+		Expect(buildAtPath(m, []string{"postgres", "port"}, "5432")).To(Succeed())
+		pg, ok := m["postgres"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(pg).To(HaveKeyWithValue("host", "db-host"))
+		Expect(pg).To(HaveKeyWithValue("port", "5432"))
+	})
+})
+
+var _ = Describe("mergeSlices", func() {
+	It("merges two same-length slices of maps element-wise", func() {
+		base := []interface{}{map[string]interface{}{"a": "1"}}
+		override := []interface{}{map[string]interface{}{"b": "2"}}
+		result := mergeSlices(base, override)
+		Expect(result).To(HaveLen(1))
+		elem := result[0].(map[string]interface{})
+		Expect(elem).To(HaveKeyWithValue("a", "1"))
+		Expect(elem).To(HaveKeyWithValue("b", "2"))
+	})
+
+	It("keeps base elements beyond override length", func() {
+		base := []interface{}{map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"}}
+		override := []interface{}{map[string]interface{}{"x": "9"}}
+		result := mergeSlices(base, override)
+		Expect(result).To(HaveLen(2))
+		Expect(result[0].(map[string]interface{})).To(HaveKeyWithValue("x", "9"))
+		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("b", "2"))
+	})
+
+	It("appends override elements beyond base length", func() {
+		base := []interface{}{map[string]interface{}{"a": "1"}}
+		override := []interface{}{map[string]interface{}{"x": "9"}, map[string]interface{}{"y": "8"}}
+		result := mergeSlices(base, override)
+		Expect(result).To(HaveLen(2))
+		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("y", "8"))
+	})
+
+	It("override wins for non-map scalar elements", func() {
+		base := []interface{}{"old"}
+		override := []interface{}{"new"}
+		result := mergeSlices(base, override)
+		Expect(result[0]).To(Equal("new"))
+	})
+
+	It("keeps base element when override element is nil", func() {
+		base := []interface{}{map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"}}
+		override := []interface{}{nil, map[string]interface{}{"c": "3"}}
+		result := mergeSlices(base, override)
+		Expect(result[0].(map[string]interface{})).To(HaveKeyWithValue("a", "1"))
+		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("c", "3"))
+	})
+})
+
+var _ = Describe("mergeMaps with slice-aware merging", func() {
+	It("merges two computedValues targeting different indices of the same array", func() {
+		first, _ := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[0].persistentVolumeClaim.claimName": "{{.ReleaseName}}-artifacts",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		second, _ := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[1].name": "extra-vol",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		merged := mergeMaps(first, second)
+		mlflow := merged["mlflow"].(map[string]interface{})
+		slice := mlflow["extraVolumes"].([]interface{})
+		Expect(slice).To(HaveLen(2))
+		elem0 := slice[0].(map[string]interface{})
+		pvc := elem0["persistentVolumeClaim"].(map[string]interface{})
+		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
+		elem1 := slice[1].(map[string]interface{})
+		Expect(elem1).To(HaveKeyWithValue("name", "extra-vol"))
+	})
+})
+
+var _ = Describe("evaluateComputedValues with array notation", func() {
+	It("merges two paths targeting different indices of the same array in one call", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[0].persistentVolumeClaim.claimName": "{{.ReleaseName}}-artifacts",
+				"mlflow.extraVolumes[1].name":                            "extra-vol",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		mlflow := result["mlflow"].(map[string]interface{})
+		slice := mlflow["extraVolumes"].([]interface{})
+		Expect(slice).To(HaveLen(2))
+		elem0 := slice[0].(map[string]interface{})
+		pvc := elem0["persistentVolumeClaim"].(map[string]interface{})
+		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
+		elem1 := slice[1].(map[string]interface{})
+		Expect(elem1).To(HaveKeyWithValue("name", "extra-vol"))
+	})
+
+	It("returns an error for an unrecognised placeholder inside an array path", func() {
+		_, err := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[0].persistentVolumeClaim.claimName": "{{.Unknown}}-artifacts",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("resolves a release-name placeholder inside an array path", func() {
+		result, err := evaluateComputedValues(
+			map[string]string{
+				"mlflow.extraVolumes[0].persistentVolumeClaim.claimName": "{{.ReleaseName}}-artifacts",
+			},
+			"workspace156-mlflow", "workspace156", "",
+		)
+		Expect(err).NotTo(HaveOccurred())
+		mlflow, ok := result["mlflow"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		slice, ok := mlflow["extraVolumes"].([]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(slice).To(HaveLen(1))
+		elem, ok := slice[0].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		Expect(ok).To(BeTrue())
+		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
+	})
+})
+
 var _ = Describe("autoValuesPrefix", func() {
-	makeChart := func(depNames ...string) *chart.Chart {
-		deps := make([]*chart.Dependency, len(depNames))
+	makeChart := func(depNames ...string) chart.Charter {
+		deps := make([]*chartv2.Dependency, len(depNames))
 		for i, name := range depNames {
-			deps[i] = &chart.Dependency{Name: name}
+			deps[i] = &chartv2.Dependency{Name: name}
 		}
-		return &chart.Chart{Metadata: &chart.Metadata{Dependencies: deps}}
+		return &chartv2.Chart{Metadata: &chartv2.Metadata{Dependencies: deps}}
 	}
 
 	It("returns the repo last segment for a single-dependency chart", func() {
@@ -915,5 +1135,73 @@ var _ = Describe("autoValuesPrefix", func() {
 	It("returns empty string for a chart with no dependencies", func() {
 		ch := makeChart()
 		Expect(autoValuesPrefix(ch, "standalone")).To(BeEmpty())
+	})
+})
+
+var _ = Describe("helmReleaseStatus", func() {
+	newFakeCfg := func() *action.Configuration {
+		return &action.Configuration{
+			Releases:   storage.Init(driver.NewMemory()),
+			KubeClient: &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{}},
+		}
+	}
+
+	It("returns not-found when release does not exist", func() {
+		cfg := newFakeCfg()
+		status, desc, err := helmReleaseStatus(cfg, "no-such-release")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(status).To(Equal("not-found"))
+		Expect(desc).To(BeEmpty())
+	})
+
+	It("returns status and description for a deployed release", func() {
+		cfg := newFakeCfg()
+		rel := &releasev1.Release{
+			Name:      "my-release",
+			Namespace: "default",
+			Version:   1,
+			Info:      &releasev1.Info{Status: releasecommon.StatusDeployed, Description: "Install complete"},
+			Chart:     &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"}},
+		}
+		Expect(cfg.Releases.Create(rel)).To(Succeed())
+
+		status, desc, err := helmReleaseStatus(cfg, "my-release")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(status).To(Equal("deployed"))
+		Expect(desc).To(Equal("Install complete"))
+	})
+
+	It("returns empty description when Info.Description is not set", func() {
+		cfg := newFakeCfg()
+		rel := &releasev1.Release{
+			Name:      "no-desc-release",
+			Namespace: "default",
+			Version:   1,
+			Info:      &releasev1.Info{Status: releasecommon.StatusPendingInstall},
+			Chart:     &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"}},
+		}
+		Expect(cfg.Releases.Create(rel)).To(Succeed())
+
+		status, desc, err := helmReleaseStatus(cfg, "no-desc-release")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(status).To(Equal("pending-install"))
+		Expect(desc).To(BeEmpty())
+	})
+})
+
+var _ = Describe("helmInstallOrUpgrade", func() {
+	newFakeCfg := func() *action.Configuration {
+		return &action.Configuration{
+			Releases:   storage.Init(driver.NewMemory()),
+			KubeClient: &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{}},
+		}
+	}
+
+	It("returns an error when the chart has no version in metadata", func() {
+		cfg := newFakeCfg()
+		ch := &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test"}} // no Version field
+		err := helmInstallOrUpgrade(context.Background(), cfg, "default", "my-release", ch, nil)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("no version in metadata"))
 	})
 })

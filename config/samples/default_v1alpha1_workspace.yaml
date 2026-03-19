@@ -34,7 +34,7 @@ spec:
       state: Running
       chart:
         repository: services/mlflow
-        tag: "0.0.4"
+        tag: "0.0.7"
       credentials:
         secretName: mlflow-creds
         paths:
@@ -43,4 +43,5 @@ spec:
       values: {}
       computedValues:
         mlflow.backendStore.postgres.host: "{{.ReleaseName}}-mlflow-db"
+        mlflow.extraVolumes[0].persistentVolumeClaim.claimName: "{{.ReleaseName}}-artifacts"
       connectionInfoTemplate: "http://{{.ReleaseName}}.{{.Namespace}}"

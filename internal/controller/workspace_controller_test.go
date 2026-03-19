@@ -596,17 +596,23 @@ var _ = Describe("WorkspaceReconciler", func() {
 
 var _ = Describe("dotNotationToNestedMap", func() {
 	It("converts a simple key", func() {
-		Expect(dotNotationToNestedMap("password", "secret")).To(Equal(map[string]interface{}{"password": "secret"}))
+		result, err := dotNotationToNestedMap("password", "secret")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(map[string]interface{}{"password": "secret"}))
 	})
 
 	It("converts a two-level key", func() {
-		Expect(dotNotationToNestedMap("auth.password", "secret")).To(Equal(map[string]interface{}{
+		result, err := dotNotationToNestedMap("auth.password", "secret")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(map[string]interface{}{
 			"auth": map[string]interface{}{"password": "secret"},
 		}))
 	})
 
 	It("converts a three-level key", func() {
-		Expect(dotNotationToNestedMap("settings.auth.password", "secret")).To(Equal(map[string]interface{}{
+		result, err := dotNotationToNestedMap("settings.auth.password", "secret")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(map[string]interface{}{
 			"settings": map[string]interface{}{
 				"auth": map[string]interface{}{"password": "secret"},
 			},

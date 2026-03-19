@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -22,12 +24,15 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/registry"
-	"helm.sh/helm/v3/pkg/storage/driver"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/chart"
+	"helm.sh/helm/v4/pkg/chart/loader"
+	"helm.sh/helm/v4/pkg/cli"
+	"helm.sh/helm/v4/pkg/kube"
+	"helm.sh/helm/v4/pkg/registry"
+	"helm.sh/helm/v4/pkg/release"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
+	"helm.sh/helm/v4/pkg/storage/driver"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -76,13 +81,10 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 		return nil, fmt.Errorf("creating Helm registry client: %w", err)
 	}
 
-	cfg := new(action.Configuration)
+	cfg := action.NewConfiguration(action.ConfigurationSetLogger(logr.ToSlogHandler(logger.V(1))))
 	cfg.RegistryClient = registryClient
 
-	helmLog := func(format string, v ...interface{}) {
-		logger.V(1).Info(fmt.Sprintf(format, v...))
-	}
-	if err := cfg.Init(getter, namespace, "secret", helmLog); err != nil {
+	if err := cfg.Init(getter, namespace, "secret"); err != nil {
 		return nil, fmt.Errorf("initializing Helm action config: %w", err)
 	}
 
@@ -95,7 +97,7 @@ func newHelmConfig(namespace string, restConfig *rest.Config, logger logr.Logger
 //
 // Use NewInstall to locate the chart — its constructor propagates cfg.RegistryClient
 // into ChartPathOptions.registryClient (unexported), which LocateChart needs for OCI.
-func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, namespace string) (*chart.Chart, error) {
+func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, namespace string) (chart.Charter, error) {
 	settings := cli.New()
 	settings.SetNamespace(namespace)
 	locator := action.NewInstall(cfg)
@@ -123,8 +125,9 @@ func locateAndLoadChart(cfg *action.Configuration, chartRef, chartVersion, names
 // If a future chart has multiple dependencies but only one is a "real" subchart (e.g. the
 // others are library or utility charts), this heuristic will incorrectly skip wrapping.
 // In that case, revisit and extend this function with a more targeted detection strategy.
-func autoValuesPrefix(ch *chart.Chart, repoLastSegment string) string {
-	if len(ch.Metadata.Dependencies) == 1 {
+func autoValuesPrefix(ch chart.Charter, repoLastSegment string) string {
+	acc, err := chart.NewAccessor(ch)
+	if err == nil && len(acc.MetaDependencies()) == 1 {
 		return repoLastSegment
 	}
 	return ""
@@ -136,13 +139,21 @@ func autoValuesPrefix(ch *chart.Chart, repoLastSegment string) string {
 // Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
 // missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
 // with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
-func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch *chart.Chart, values map[string]interface{}) error {
+func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch chart.Charter, values map[string]interface{}) error {
+	chAcc, err := chart.NewAccessor(ch)
+	if err != nil {
+		return fmt.Errorf("reading chart metadata: %w", err)
+	}
+	chVersion, ok := chAcc.MetadataAsMap()["version"].(string)
+	if !ok || chVersion == "" {
+		return fmt.Errorf("chart loaded for release %s has no version in metadata", releaseName)
+	}
+
 	newInstall := func() error {
 		a := action.NewInstall(cfg)
 		a.Namespace = namespace
 		a.ReleaseName = releaseName
-		a.Wait = false
-		a.Atomic = false
+		a.WaitStrategy = kube.HookOnlyStrategy
 		_, err := a.RunWithContext(ctx, ch, values)
 		return err
 	}
@@ -150,10 +161,9 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	newUpgrade := func() error {
 		a := action.NewUpgrade(cfg)
 		a.Namespace = namespace
-		a.Wait = false
-		a.Atomic = false
+		a.WaitStrategy = kube.HookOnlyStrategy
 		a.MaxHistory = 10
-		a.ChartPathOptions.Version = ch.Metadata.Version
+		a.ChartPathOptions.Version = chVersion
 		_, err := a.RunWithContext(ctx, releaseName, ch, values)
 		return err
 	}
@@ -167,10 +177,24 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 			return fmt.Errorf("checking release %s: %w", releaseName, err)
 		}
 	} else {
-		releaseStatus = string(rel.Info.Status)
+		relAcc, err := release.NewAccessor(rel)
+		if err != nil {
+			return fmt.Errorf("reading release status: %w", err)
+		}
+		releaseStatus = relAcc.Status()
 		// Skip upgrade when already deployed with the same chart version and values.
-		if releaseStatus == "deployed" && rel.Chart.Metadata.Version == ch.Metadata.Version && releaseValuesMatch(rel.Config, values) {
-			return nil
+		// We can only read the deployed user-values via the concrete *releasev1.Release type;
+		// if the assertion fails (future release schema), skip the optimisation and upgrade.
+		if releaseStatus == "deployed" {
+			if relV1, ok := rel.(*releasev1.Release); ok {
+				relChartAcc, err := chart.NewAccessor(relAcc.Chart())
+				if err == nil {
+					relChartVersion, _ := relChartAcc.MetadataAsMap()["version"].(string)
+					if relChartVersion == chVersion && releaseValuesMatch(relV1.Config, values) {
+						return nil
+					}
+				}
+			}
 		}
 	}
 
@@ -217,7 +241,7 @@ func releaseValuesMatch(deployed, desired map[string]interface{}) bool {
 func helmUninstall(cfg *action.Configuration, releaseName string) (bool, error) {
 	uninstallAction := action.NewUninstall(cfg)
 	uninstallAction.KeepHistory = false
-	uninstallAction.Wait = false
+	uninstallAction.WaitStrategy = kube.HookOnlyStrategy
 
 	if _, err := uninstallAction.Run(releaseName); err != nil {
 		if strings.Contains(err.Error(), driver.ErrReleaseNotFound.Error()) {
@@ -239,7 +263,19 @@ func helmReleaseStatus(cfg *action.Configuration, releaseName string) (string, s
 		}
 		return "", "", err
 	}
-	return string(rel.Info.Status), rel.Info.Description, nil
+	relAcc, err := release.NewAccessor(rel)
+	if err != nil {
+		return "", "", fmt.Errorf("reading release status: %w", err)
+	}
+	// Description is a cosmetic field; fall back to empty string for future release schema versions.
+	// Note: Helm's own Accessor panics if Info is nil, so the relV1.Info != nil guard is purely
+	// defensive — in practice Info is always set for releases returned by the status action.
+	relV1, ok := rel.(*releasev1.Release)
+	description := ""
+	if ok && relV1.Info != nil {
+		description = relV1.Info.Description
+	}
+	return relAcc.Status(), description, nil
 }
 
 // deleteReleasePVCs deletes all PVCs labeled with the Helm release instance name.
@@ -367,28 +403,76 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 			return nil, fmt.Errorf("credential secret %s is missing expected key %q", creds.SecretName, secretKey)
 		}
 		for _, helmPath := range helmPaths {
-			helmValues = mergeMaps(helmValues, dotNotationToNestedMap(helmPath, string(val)))
+			nested, err := dotNotationToNestedMap(helmPath, string(val))
+			if err != nil {
+				return nil, fmt.Errorf("credential path %q: %w", helmPath, err)
+			}
+			helmValues = mergeMaps(helmValues, nested)
 		}
 	}
 
 	return helmValues, nil
 }
 
+// arrayIndexRe matches a path segment with a single array index, e.g. "extraVolumes[0]".
+// The key group uses [^\[]+ (no square brackets allowed) so that nested indices such as
+// "a[0][1]" do not match at all — they are rejected rather than partially parsed.
+var arrayIndexRe = regexp.MustCompile(`^([^\[]+)\[(\d+)\]$`)
+
+// maxArrayIndex is the largest array index accepted in a dot-notation path.
+// Indices beyond this would allocate unreasonably large slices.
+const maxArrayIndex = 1000
+
 // dotNotationToNestedMap converts "a.b.c" → {"a": {"b": {"c": value}}}.
-func dotNotationToNestedMap(key, value string) map[string]interface{} {
-	parts := strings.Split(key, ".")
+// Array index notation is also supported: "a.b[0].c" → {"a": {"b": [{"c": value}]}}.
+// Returns an error if any array index exceeds maxArrayIndex.
+func dotNotationToNestedMap(key, value string) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-	current := result
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			current[part] = value
-		} else {
-			next := make(map[string]interface{})
-			current[part] = next
-			current = next
-		}
+	if err := buildAtPath(result, strings.Split(key, "."), value); err != nil {
+		return nil, err
 	}
-	return result
+	return result, nil
+}
+
+// buildAtPath recursively sets value at the given path segments inside m.
+// It merges with any existing slice or map at each key rather than overwriting,
+// so it is safe to call multiple times on the same map.
+// Returns an error if any array index exceeds maxArrayIndex.
+func buildAtPath(m map[string]interface{}, parts []string, value string) error {
+	part := parts[0]
+	rest := parts[1:]
+	if matches := arrayIndexRe.FindStringSubmatch(part); matches != nil {
+		mapKey := matches[1]
+		idx, _ := strconv.Atoi(matches[2]) // error impossible: regex guarantees \d+
+		if idx > maxArrayIndex {
+			return fmt.Errorf("array index %d exceeds maximum allowed value of %d", idx, maxArrayIndex)
+		}
+		slice := make([]interface{}, idx+1)
+		if len(rest) == 0 {
+			slice[idx] = value
+		} else {
+			elem := make(map[string]interface{})
+			if err := buildAtPath(elem, rest, value); err != nil {
+				return err
+			}
+			slice[idx] = elem
+		}
+		if existing, ok := m[mapKey].([]interface{}); ok {
+			m[mapKey] = mergeSlices(existing, slice)
+		} else {
+			m[mapKey] = slice
+		}
+	} else if len(rest) == 0 {
+		m[part] = value
+	} else {
+		if existing, ok := m[part].(map[string]interface{}); ok {
+			return buildAtPath(existing, rest, value)
+		}
+		next := make(map[string]interface{})
+		m[part] = next
+		return buildAtPath(next, rest, value)
+	}
+	return nil
 }
 
 // wrapWithPrefix wraps values under a single top-level key, mirroring the Helm
@@ -403,6 +487,7 @@ func wrapWithPrefix(values map[string]interface{}, prefix string) map[string]int
 }
 
 // mergeMaps merges override into base recursively. Override values take precedence.
+// Maps are merged recursively; slices are merged element-wise (see mergeSlices).
 func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	for k, v := range base {
@@ -416,8 +501,48 @@ func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 					continue
 				}
 			}
+			if baseSlice, ok := baseVal.([]interface{}); ok {
+				if overrideSlice, ok := v.([]interface{}); ok {
+					result[k] = mergeSlices(baseSlice, overrideSlice)
+					continue
+				}
+			}
 		}
 		result[k] = v
+	}
+	return result
+}
+
+// mergeSlices merges two slices element-wise. The result has length max(len(base), len(override)).
+// Elements present in both slices are merged recursively if both are maps; otherwise override wins.
+// Elements present in only one slice are taken as-is.
+// A nil override element is treated as absent, so the base element is kept — explicitly setting an
+// element to nil via override is not supported. This is intentional for Helm values merging.
+func mergeSlices(base, override []interface{}) []interface{} {
+	length := len(base)
+	if len(override) > length {
+		length = len(override)
+	}
+	result := make([]interface{}, length)
+	for i := range result {
+		var baseElem, overrideElem interface{}
+		if i < len(base) {
+			baseElem = base[i]
+		}
+		if i < len(override) {
+			overrideElem = override[i]
+		}
+		if baseMap, ok := baseElem.(map[string]interface{}); ok {
+			if overrideMap, ok := overrideElem.(map[string]interface{}); ok {
+				result[i] = mergeMaps(baseMap, overrideMap)
+				continue
+			}
+		}
+		if overrideElem != nil {
+			result[i] = overrideElem
+		} else {
+			result[i] = baseElem
+		}
 	}
 	return result
 }
@@ -529,7 +654,11 @@ func evaluateComputedValues(computedValues map[string]string, releaseName, names
 		if strings.Contains(resolved, "{{.") {
 			return nil, fmt.Errorf("computedValues[%q]: unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", path, resolved)
 		}
-		result = mergeMaps(result, dotNotationToNestedMap(path, resolved))
+		nested, err := dotNotationToNestedMap(path, resolved)
+		if err != nil {
+			return nil, fmt.Errorf("computedValues[%q]: %w", path, err)
+		}
+		result = mergeMaps(result, nested)
 	}
 	return result, nil
 }
