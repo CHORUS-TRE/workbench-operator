@@ -144,7 +144,10 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 	if err != nil {
 		return fmt.Errorf("reading chart metadata: %w", err)
 	}
-	chVersion, _ := chAcc.MetadataAsMap()["version"].(string)
+	chVersion, ok := chAcc.MetadataAsMap()["version"].(string)
+	if !ok || chVersion == "" {
+		return fmt.Errorf("chart loaded for release %s has no version in metadata", releaseName)
+	}
 
 	newInstall := func() error {
 		a := action.NewInstall(cfg)
@@ -180,16 +183,16 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 		}
 		releaseStatus = relAcc.Status()
 		// Skip upgrade when already deployed with the same chart version and values.
+		// We can only read the deployed user-values via the concrete *releasev1.Release type;
+		// if the assertion fails (future release schema), skip the optimisation and upgrade.
 		if releaseStatus == "deployed" {
-			relChartAcc, err := chart.NewAccessor(relAcc.Chart())
-			if err == nil {
-				relChartVersion, _ := relChartAcc.MetadataAsMap()["version"].(string)
-				var relConfig map[string]interface{}
-				if relV1, ok := rel.(*releasev1.Release); ok {
-					relConfig = relV1.Config
-				}
-				if relChartVersion == chVersion && releaseValuesMatch(relConfig, values) {
-					return nil
+			if relV1, ok := rel.(*releasev1.Release); ok {
+				relChartAcc, err := chart.NewAccessor(relAcc.Chart())
+				if err == nil {
+					relChartVersion, _ := relChartAcc.MetadataAsMap()["version"].(string)
+					if relChartVersion == chVersion && releaseValuesMatch(relV1.Config, values) {
+						return nil
+					}
 				}
 			}
 		}
@@ -264,6 +267,9 @@ func helmReleaseStatus(cfg *action.Configuration, releaseName string) (string, s
 	if err != nil {
 		return "", "", fmt.Errorf("reading release status: %w", err)
 	}
+	// Description is a cosmetic field; fall back to empty string for future release schema versions.
+	// Note: Helm's own Accessor panics if Info is nil, so the relV1.Info != nil guard is purely
+	// defensive — in practice Info is always set for releases returned by the status action.
 	relV1, ok := rel.(*releasev1.Release)
 	description := ""
 	if ok && relV1.Info != nil {
@@ -408,10 +414,9 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 	return helmValues, nil
 }
 
-// arrayIndexRe matches a path segment with an array index, e.g. "extraVolumes[0]".
-// [^\[]+ (non-greedy key) is used instead of .+ so that a hypothetical "a[0][1]"
-// matches key="a[0]", index=1 rather than silently producing an unexpected key.
-// Nested array indices (e.g. "a[0][1]") are not a supported use case.
+// arrayIndexRe matches a path segment with a single array index, e.g. "extraVolumes[0]".
+// The key group uses [^\[]+ (no square brackets allowed) so that nested indices such as
+// "a[0][1]" do not match at all — they are rejected rather than partially parsed.
 var arrayIndexRe = regexp.MustCompile(`^([^\[]+)\[(\d+)\]$`)
 
 // maxArrayIndex is the largest array index accepted in a dot-notation path.
@@ -511,6 +516,8 @@ func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 // mergeSlices merges two slices element-wise. The result has length max(len(base), len(override)).
 // Elements present in both slices are merged recursively if both are maps; otherwise override wins.
 // Elements present in only one slice are taken as-is.
+// A nil override element is treated as absent, so the base element is kept — explicitly setting an
+// element to nil via override is not supported. This is intentional for Helm values merging.
 func mergeSlices(base, override []interface{}) []interface{} {
 	length := len(base)
 	if len(override) > length {

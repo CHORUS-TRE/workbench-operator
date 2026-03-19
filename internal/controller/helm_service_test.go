@@ -971,8 +971,8 @@ var _ = Describe("dotNotationToNestedMap", func() {
 var _ = Describe("buildAtPath", func() {
 	It("merges two calls sharing an array key on the same map", func() {
 		m := make(map[string]interface{})
-		buildAtPath(m, []string{"extraVolumes[0]", "name"}, "artifacts")
-		buildAtPath(m, []string{"extraVolumes[1]", "name"}, "config")
+		Expect(buildAtPath(m, []string{"extraVolumes[0]", "name"}, "artifacts")).To(Succeed())
+		Expect(buildAtPath(m, []string{"extraVolumes[1]", "name"}, "config")).To(Succeed())
 		slice, ok := m["extraVolumes"].([]interface{})
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(2))
@@ -982,8 +982,8 @@ var _ = Describe("buildAtPath", func() {
 
 	It("merges two calls sharing a map key on the same map", func() {
 		m := make(map[string]interface{})
-		buildAtPath(m, []string{"postgres", "host"}, "db-host")
-		buildAtPath(m, []string{"postgres", "port"}, "5432")
+		Expect(buildAtPath(m, []string{"postgres", "host"}, "db-host")).To(Succeed())
+		Expect(buildAtPath(m, []string{"postgres", "port"}, "5432")).To(Succeed())
 		pg, ok := m["postgres"].(map[string]interface{})
 		Expect(ok).To(BeTrue())
 		Expect(pg).To(HaveKeyWithValue("host", "db-host"))
@@ -1171,10 +1171,10 @@ var _ = Describe("helmReleaseStatus", func() {
 		Expect(desc).To(Equal("Install complete"))
 	})
 
-	It("returns status with empty description when Info is nil", func() {
+	It("returns empty description when Info.Description is not set", func() {
 		cfg := newFakeCfg()
 		rel := &releasev1.Release{
-			Name:      "no-info-release",
+			Name:      "no-desc-release",
 			Namespace: "default",
 			Version:   1,
 			Info:      &releasev1.Info{Status: releasecommon.StatusPendingInstall},
@@ -1182,8 +1182,26 @@ var _ = Describe("helmReleaseStatus", func() {
 		}
 		Expect(cfg.Releases.Create(rel)).To(Succeed())
 
-		status, _, err := helmReleaseStatus(cfg, "no-info-release")
+		status, desc, err := helmReleaseStatus(cfg, "no-desc-release")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(status).To(Equal("pending-install"))
+		Expect(desc).To(BeEmpty())
+	})
+})
+
+var _ = Describe("helmInstallOrUpgrade", func() {
+	newFakeCfg := func() *action.Configuration {
+		return &action.Configuration{
+			Releases:   storage.Init(driver.NewMemory()),
+			KubeClient: &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{}},
+		}
+	}
+
+	It("returns an error when the chart has no version in metadata", func() {
+		cfg := newFakeCfg()
+		ch := &chartv2.Chart{Metadata: &chartv2.Metadata{Name: "test"}} // no Version field
+		err := helmInstallOrUpgrade(context.Background(), cfg, "default", "my-release", ch, nil)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("no version in metadata"))
 	})
 })
