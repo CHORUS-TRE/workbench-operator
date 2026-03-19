@@ -34,13 +34,16 @@ spec:
       state: Running
       chart:
         repository: services/mlflow
-        tag: "0.0.7"
+        tag: "0.0.8"
       credentials:
         secretName: mlflow-creds
         paths:
           - postgres.settings.superuserPassword.value
           - postgres.userDatabase.password.value|mlflow.backendStore.postgres.password
-      values: {}
+      values:
+        mlflow:
+          extraVolumes:
+            - name: artifacts
       computedValues:
         mlflow.backendStore.postgres.host: "{{.ReleaseName}}-mlflow-db"
         mlflow.extraVolumes[0].persistentVolumeClaim.claimName: "{{.ReleaseName}}-artifacts"
