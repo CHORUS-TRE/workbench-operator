@@ -369,7 +369,11 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 			return nil, fmt.Errorf("credential secret %s is missing expected key %q", creds.SecretName, secretKey)
 		}
 		for _, helmPath := range helmPaths {
-			helmValues = mergeMaps(helmValues, dotNotationToNestedMap(helmPath, string(val)))
+			nested, err := dotNotationToNestedMap(helmPath, string(val))
+			if err != nil {
+				return nil, fmt.Errorf("credential path %q: %w", helmPath, err)
+			}
+			helmValues = mergeMaps(helmValues, nested)
 		}
 	}
 
@@ -377,39 +381,65 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 }
 
 // arrayIndexRe matches a path segment with an array index, e.g. "extraVolumes[0]".
-var arrayIndexRe = regexp.MustCompile(`^(.+)\[(\d+)\]$`)
+// [^\[]+ (non-greedy key) is used instead of .+ so that a hypothetical "a[0][1]"
+// matches key="a[0]", index=1 rather than silently producing an unexpected key.
+// Nested array indices (e.g. "a[0][1]") are not a supported use case.
+var arrayIndexRe = regexp.MustCompile(`^([^\[]+)\[(\d+)\]$`)
+
+// maxArrayIndex is the largest array index accepted in a dot-notation path.
+// Indices beyond this would allocate unreasonably large slices.
+const maxArrayIndex = 1000
 
 // dotNotationToNestedMap converts "a.b.c" → {"a": {"b": {"c": value}}}.
 // Array index notation is also supported: "a.b[0].c" → {"a": {"b": [{"c": value}]}}.
-func dotNotationToNestedMap(key, value string) map[string]interface{} {
+// Returns an error if any array index exceeds maxArrayIndex.
+func dotNotationToNestedMap(key, value string) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-	buildAtPath(result, strings.Split(key, "."), value)
-	return result
+	if err := buildAtPath(result, strings.Split(key, "."), value); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // buildAtPath recursively sets value at the given path segments inside m.
-func buildAtPath(m map[string]interface{}, parts []string, value string) {
+// It merges with any existing slice or map at each key rather than overwriting,
+// so it is safe to call multiple times on the same map.
+// Returns an error if any array index exceeds maxArrayIndex.
+func buildAtPath(m map[string]interface{}, parts []string, value string) error {
 	part := parts[0]
 	rest := parts[1:]
 	if matches := arrayIndexRe.FindStringSubmatch(part); matches != nil {
 		mapKey := matches[1]
-		idx, _ := strconv.Atoi(matches[2])
+		idx, _ := strconv.Atoi(matches[2]) // error impossible: regex guarantees \d+
+		if idx > maxArrayIndex {
+			return fmt.Errorf("array index %d exceeds maximum allowed value of %d", idx, maxArrayIndex)
+		}
 		slice := make([]interface{}, idx+1)
 		if len(rest) == 0 {
 			slice[idx] = value
 		} else {
 			elem := make(map[string]interface{})
-			buildAtPath(elem, rest, value)
+			if err := buildAtPath(elem, rest, value); err != nil {
+				return err
+			}
 			slice[idx] = elem
 		}
-		m[mapKey] = slice
+		if existing, ok := m[mapKey].([]interface{}); ok {
+			m[mapKey] = mergeSlices(existing, slice)
+		} else {
+			m[mapKey] = slice
+		}
 	} else if len(rest) == 0 {
 		m[part] = value
 	} else {
+		if existing, ok := m[part].(map[string]interface{}); ok {
+			return buildAtPath(existing, rest, value)
+		}
 		next := make(map[string]interface{})
 		m[part] = next
-		buildAtPath(next, rest, value)
+		return buildAtPath(next, rest, value)
 	}
+	return nil
 }
 
 // wrapWithPrefix wraps values under a single top-level key, mirroring the Helm
@@ -424,6 +454,7 @@ func wrapWithPrefix(values map[string]interface{}, prefix string) map[string]int
 }
 
 // mergeMaps merges override into base recursively. Override values take precedence.
+// Maps are merged recursively; slices are merged element-wise (see mergeSlices).
 func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	for k, v := range base {
@@ -437,8 +468,46 @@ func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 					continue
 				}
 			}
+			if baseSlice, ok := baseVal.([]interface{}); ok {
+				if overrideSlice, ok := v.([]interface{}); ok {
+					result[k] = mergeSlices(baseSlice, overrideSlice)
+					continue
+				}
+			}
 		}
 		result[k] = v
+	}
+	return result
+}
+
+// mergeSlices merges two slices element-wise. The result has length max(len(base), len(override)).
+// Elements present in both slices are merged recursively if both are maps; otherwise override wins.
+// Elements present in only one slice are taken as-is.
+func mergeSlices(base, override []interface{}) []interface{} {
+	length := len(base)
+	if len(override) > length {
+		length = len(override)
+	}
+	result := make([]interface{}, length)
+	for i := range result {
+		var baseElem, overrideElem interface{}
+		if i < len(base) {
+			baseElem = base[i]
+		}
+		if i < len(override) {
+			overrideElem = override[i]
+		}
+		if baseMap, ok := baseElem.(map[string]interface{}); ok {
+			if overrideMap, ok := overrideElem.(map[string]interface{}); ok {
+				result[i] = mergeMaps(baseMap, overrideMap)
+				continue
+			}
+		}
+		if overrideElem != nil {
+			result[i] = overrideElem
+		} else {
+			result[i] = baseElem
+		}
 	}
 	return result
 }
@@ -550,7 +619,11 @@ func evaluateComputedValues(computedValues map[string]string, releaseName, names
 		if strings.Contains(resolved, "{{.") {
 			return nil, fmt.Errorf("computedValues[%q]: unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", path, resolved)
 		}
-		result = mergeMaps(result, dotNotationToNestedMap(path, resolved))
+		nested, err := dotNotationToNestedMap(path, resolved)
+		if err != nil {
+			return nil, fmt.Errorf("computedValues[%q]: %w", path, err)
+		}
+		result = mergeMaps(result, nested)
 	}
 	return result, nil
 }
