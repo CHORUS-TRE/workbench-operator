@@ -109,13 +109,27 @@ func validateFQDNs(entries []string) error {
 	return nil
 }
 
+// InternalService describes a platform-internal service that workspace pods should always
+// be able to reach, regardless of the workspace's network isolation mode.
+// The FQDN must be validated against the cluster (Ingress host or LoadBalancer Service hostname)
+// before being added to the network policy.
+type InternalService struct {
+	// FQDN is the fully-qualified domain name of the internal service (e.g. "gitlab.int.chorus-tre.ch").
+	FQDN string
+	// Ports is the list of TCP ports to allow (e.g. ["443", "22"]).
+	Ports []string
+}
+
 // buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
 // that enforces workspace-level egress and ingress policy.
 //
 // Egress policy mapping:
-//   - Open          → kube-dns + intra-namespace (pod + service) + full internet
-//   - FQDNAllowlist → kube-dns + intra-namespace (pod + service) + FQDN allowlist
-//   - Airgapped     → kube-dns + intra-namespace (pod + service) only
+//   - Open          → kube-dns + intra-namespace (pod + service) + internal services + full internet
+//   - FQDNAllowlist → kube-dns + intra-namespace (pod + service) + internal services + FQDN allowlist
+//   - Airgapped     → kube-dns + intra-namespace (pod + service) + internal services only
+//
+// Internal services are always allowed regardless of mode — they are validated at reconcile time
+// to ensure they correspond to cluster-internal resources (Ingress or LoadBalancer Service).
 //
 // Ingress policy: only pods within the same namespace may connect inbound.
 // This prevents pods in other workspaces from reaching services in this workspace.
@@ -128,7 +142,7 @@ func validateFQDNs(entries []string) error {
 //
 // IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
 // Returns an error if invalid FQDNs are detected.
-func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unstructured, error) {
+func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []InternalService) (*unstructured.Unstructured, error) {
 	// Defensive check: FQDNs must be validated before calling this function
 	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		return nil, fmt.Errorf("buildNetworkPolicy called with invalid FQDNs: %w", err)
@@ -205,6 +219,16 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 		},
 	}
 
+	// Internal platform services: always allowed in all modes (Open, Airgapped, FQDNAllowlist).
+	// Entries that were not found in the cluster during reconciliation are excluded (callers
+	// are expected to filter internalServices to only validated entries before calling here).
+	for _, svc := range internalServices {
+		egressRules = append(egressRules, map[string]any{
+			"toFQDNs": []map[string]any{{"matchName": normalizeFQDNEntry(svc.FQDN)}},
+			"toPorts": internalServicePortRules(svc.Ports),
+		})
+	}
+
 	switch workspace.Spec.NetworkPolicy {
 	case defaultv1alpha1.NetworkPolicyOpen:
 		// Allow all internet on HTTP/HTTPS.
@@ -268,6 +292,14 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace) (*unstructured.Unst
 			},
 		},
 	}, nil
+}
+
+func internalServicePortRules(ports []string) []map[string]any {
+	portList := make([]map[string]any, 0, len(ports))
+	for _, p := range ports {
+		portList = append(portList, map[string]any{"port": p, "protocol": "TCP"})
+	}
+	return []map[string]any{{"ports": portList}}
 }
 
 func httpPortRules() []map[string]any {

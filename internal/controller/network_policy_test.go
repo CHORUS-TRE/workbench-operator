@@ -26,7 +26,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 	It("builds kube-dns + intra-namespace egress and intra-namespace ingress for Airgapped workspace", func() {
 		ws := baseWorkspace()
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp).NotTo(BeNil())
 		Expect(cnp.GetName()).To(Equal("workspace-netpol"))
@@ -69,7 +69,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyFQDNAllowlist
 		ws.Spec.AllowedFQDNs = []string{"example.com", "*.corp.internal"}
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
@@ -91,7 +91,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws := baseWorkspace()
 		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyOpen
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
@@ -109,7 +109,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 	It("uses empty endpoint selector (all pods in namespace)", func() {
 		ws := baseWorkspace()
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		spec := cnp.Object["spec"].(map[string]any)
@@ -123,7 +123,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyFQDNAllowlist
 		ws.Spec.AllowedFQDNs = []string{"invalid domain with spaces"}
 
-		_, err := buildNetworkPolicy(ws)
+		_, err := buildNetworkPolicy(ws, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid FQDNs"))
 	})
@@ -132,11 +132,112 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws := baseWorkspace()
 		ws.Name = strings.Repeat("a", 253)
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp.GetName()).To(Equal(cnpNameForWorkspace(ws.Name)))
 		Expect(len(cnp.GetName())).To(BeNumerically("<=", 253))
 		Expect(cnp.GetName()).To(ContainSubstring("-netpol-"))
+	})
+})
+
+var _ = Describe("buildNetworkPolicy with internal services", func() {
+	baseWorkspace := func(policy string) defaultv1alpha1.Workspace {
+		return defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "workspace",
+				Namespace: "workspace-ns",
+			},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: policy,
+			},
+		}
+	}
+
+	internalSvcs := []InternalService{
+		{FQDN: "gitlab.int.chorus-tre.ch", Ports: []string{"443", "22"}},
+		{FQDN: "i2b2.int.chorus-tre.ch", Ports: []string{"443"}},
+	}
+
+	It("emits internal service egress rules in Airgapped mode", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, internalSvcs)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base rules + 2 internal service rules
+		Expect(egress).To(HaveLen(5))
+
+		gitlabRule := egress[3]
+		toFQDNs := gitlabRule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.int.chorus-tre.ch")))
+		toPorts := gitlabRule["toPorts"].([]map[string]any)
+		ports := toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "22")))
+
+		i2b2Rule := egress[4]
+		toFQDNs2 := i2b2Rule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs2).To(ContainElement(HaveKeyWithValue("matchName", "i2b2.int.chorus-tre.ch")))
+	})
+
+	It("emits internal service egress rules in Open mode", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyOpen)
+		cnp, err := buildNetworkPolicy(ws, internalSvcs)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 2 internal + 1 open-internet = 6
+		Expect(egress).To(HaveLen(6))
+
+		gitlabRule := egress[3]
+		toFQDNs := gitlabRule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.int.chorus-tre.ch")))
+	})
+
+	It("emits internal service egress rules in FQDNAllowlist mode", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyFQDNAllowlist)
+		ws.Spec.AllowedFQDNs = []string{"example.com"}
+		cnp, err := buildNetworkPolicy(ws, internalSvcs)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 2 internal + 1 allowlist = 6
+		Expect(egress).To(HaveLen(6))
+
+		gitlabRule := egress[3]
+		toFQDNs := gitlabRule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.int.chorus-tre.ch")))
+	})
+
+	It("emits no extra rules when internal services list is empty", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, []InternalService{})
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		Expect(egress).To(HaveLen(3))
+	})
+
+	It("emits no extra rules when internal services list is nil", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		Expect(egress).To(HaveLen(3))
+	})
+
+	It("normalizes FQDN case in internal service rules", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, []InternalService{
+			{FQDN: "GitLab.Int.Chorus-TRE.ch", Ports: []string{"443"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		rule := egress[3]
+		toFQDNs := rule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.int.chorus-tre.ch")))
 	})
 })
 

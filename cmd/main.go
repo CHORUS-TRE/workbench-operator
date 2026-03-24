@@ -32,6 +32,36 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+// internalServiceFlag is a repeated flag that accumulates fqdn:port[,port...] entries.
+type internalServiceFlag []controller.InternalService
+
+func (f internalServiceFlag) String() string {
+	parts := make([]string, 0, len(f))
+	for _, svc := range f {
+		parts = append(parts, svc.FQDN+":"+strings.Join(svc.Ports, ","))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (f *internalServiceFlag) Set(s string) error {
+	idx := strings.LastIndex(s, ":")
+	if idx < 1 {
+		return fmt.Errorf("global-internal-service %q must be in fqdn:port[,port...] format", s)
+	}
+	fqdn := s[:idx]
+	rawPorts := strings.Split(s[idx+1:], ",")
+	ports := make([]string, 0, len(rawPorts))
+	for _, p := range rawPorts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return fmt.Errorf("global-internal-service %q contains empty port", s)
+		}
+		ports = append(ports, p)
+	}
+	*f = append(*f, controller.InternalService{FQDN: fqdn, Ports: ports})
+	return nil
+}
+
 // labelFlag is a repeated flag that accumulates key=value pairs into a map.
 type labelFlag map[string]string
 
@@ -87,6 +117,7 @@ func main() {
 	var workbenchCPURequest string
 	var workbenchMemoryRequest string
 	pvcLabels := labelFlag{}
+	globalInternalServices := internalServiceFlag{}
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -119,6 +150,7 @@ func main() {
 	flag.StringVar(&workbenchCPURequest, "workbench-cpu-request", "", "Default CPU request for the workbench server container (e.g. 100m)")
 	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
 	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
+	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in fqdn:port[,port...] format (can be repeated)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -241,12 +273,13 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controller.WorkspaceReconciler{
-		Client:             mgr.GetClient(),
-		Scheme:             mgr.GetScheme(),
-		Recorder:           mgr.GetEventRecorderFor("workspace-controller"),
-		RestConfig:         mgr.GetConfig(),
-		Registry:           registry,
-		ServicesRepository: servicesRepository,
+		Client:                 mgr.GetClient(),
+		Scheme:                 mgr.GetScheme(),
+		Recorder:               mgr.GetEventRecorderFor("workspace-controller"),
+		RestConfig:             mgr.GetConfig(),
+		Registry:               registry,
+		ServicesRepository:     servicesRepository,
+		GlobalInternalServices: []controller.InternalService(globalInternalServices),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)

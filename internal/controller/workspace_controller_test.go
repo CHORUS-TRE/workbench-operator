@@ -145,7 +145,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
 
 			// Pre-create a CNP with the expected name but a different controller owner reference.
-			cnp, err := buildNetworkPolicy(*workspace)
+			cnp, err := buildNetworkPolicy(*workspace, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			t := true
