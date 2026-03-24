@@ -71,7 +71,7 @@ func cnpNameForWorkspace(workspaceName string) string {
 // validateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
 // or wildcard pattern. Returns nil on success or an error describing the first
 // invalid entry. Enforces RFC 1035 limits: max 63 chars per label, max 253 chars total.
-func validateFQDNs(entries []string) error {
+func ValidateFQDNs(entries []string) error {
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
 		normalized := normalizeFQDNEntry(entry)
@@ -147,7 +147,7 @@ type InternalService struct {
 // Returns an error if invalid FQDNs are detected.
 func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []InternalService) (*unstructured.Unstructured, error) {
 	// Defensive check: FQDNs must be validated before calling this function
-	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
+	if err := ValidateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		return nil, fmt.Errorf("buildNetworkPolicy called with invalid FQDNs: %w", err)
 	}
 	labels := map[string]any{
@@ -227,7 +227,7 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 	// are expected to filter internalServices to only validated entries before calling here).
 	for _, svc := range internalServices {
 		egressRules = append(egressRules, map[string]any{
-			"toFQDNs": []map[string]any{{"matchName": normalizeFQDNEntry(svc.FQDN)}},
+			"toFQDNs": []map[string]any{{"matchName": svc.FQDN}},
 			"toPorts": internalServicePortRules(svc.Ports),
 		})
 	}
@@ -326,7 +326,7 @@ func toFQDNSelectors(entries []string) []map[string]any {
 	var selectors []map[string]any
 
 	for _, entry := range entries {
-		// Canonicalize output. validateFQDNs() also normalizes for checking, but
+		// Canonicalize output. ValidateFQDNs() also normalizes for checking, but
 		// does not mutate the original slice.
 		entry = normalizeFQDNEntry(entry)
 

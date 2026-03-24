@@ -88,7 +88,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Validate FQDNs before attempting reconciliation.
-	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
+	if err := ValidateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		log.V(1).Info("Invalid FQDN in workspace spec", "error", err)
 		condition := metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
@@ -283,7 +283,6 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 // Returns an error if any entry is not found. Called at operator startup — caller must exit on error.
 func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
 	for _, svc := range services {
-		fqdn := normalizeFQDNEntry(svc.FQDN)
 		found := false
 
 		ingressList := &networkingv1.IngressList{}
@@ -292,7 +291,7 @@ func ValidateInternalServices(ctx context.Context, c client.Client, services []I
 		}
 		for _, ing := range ingressList.Items {
 			for _, rule := range ing.Spec.Rules {
-				if strings.EqualFold(rule.Host, fqdn) {
+				if strings.EqualFold(rule.Host, svc.FQDN) {
 					found = true
 					break
 				}
@@ -312,7 +311,7 @@ func ValidateInternalServices(ctx context.Context, c client.Client, services []I
 					continue
 				}
 				for _, lbIng := range ks.Status.LoadBalancer.Ingress {
-					if strings.EqualFold(lbIng.Hostname, fqdn) {
+					if strings.EqualFold(lbIng.Hostname, svc.FQDN) {
 						found = true
 						break
 					}

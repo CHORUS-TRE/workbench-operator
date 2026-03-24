@@ -59,6 +59,9 @@ func (f *internalServiceFlag) Set(s string) error {
 		return fmt.Errorf("global-internal-service %q must be in namespace/fqdn:port[,port...] format", s)
 	}
 	fqdn := strings.ToLower(strings.TrimSpace(rest[:idx]))
+	if err := controller.ValidateFQDNs([]string{fqdn}); err != nil {
+		return fmt.Errorf("global-internal-service %q contains invalid FQDN %q: %w", s, fqdn, err)
+	}
 	rawPorts := strings.Split(rest[idx+1:], ",")
 	ports := make([]string, 0, len(rawPorts))
 	for _, p := range rawPorts {
@@ -164,7 +167,7 @@ func main() {
 	flag.StringVar(&workbenchCPURequest, "workbench-cpu-request", "", "Default CPU request for the workbench server container (e.g. 100m)")
 	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
 	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
-	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in fqdn:port[,port...] format (can be repeated)")
+	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in namespace/fqdn:port[,port...] format (can be repeated)")
 	opts := zap.Options{
 		Development: true,
 	}

@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
@@ -1112,5 +1116,149 @@ var _ = Describe("reconcileServices", func() {
 		Expect(err).NotTo(HaveOccurred())
 		// Helm install fails (no real registry) — status should be Failed
 		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+	})
+})
+
+var _ = Describe("ValidateInternalServices", func() {
+	ctx := context.Background()
+
+	newFakeClient := func(objs ...client.Object) client.Client {
+		return fake.NewClientBuilder().
+			WithScheme(k8sClient.Scheme()).
+			WithObjects(objs...).
+			Build()
+	}
+
+	It("returns nil for an empty list", func() {
+		err := ValidateInternalServices(ctx, newFakeClient(), nil)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("succeeds when FQDN matches an Ingress host in the declared namespace", func() {
+		ing := &networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{Host: "gitlab.chorus-tre.ch"},
+				},
+			},
+		}
+		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("succeeds when FQDN matches a LoadBalancer Service hostname in the declared namespace", func() {
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-lb", Namespace: "gitlab"},
+			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
+			Status: corev1.ServiceStatus{
+				LoadBalancer: corev1.LoadBalancerStatus{
+					Ingress: []corev1.LoadBalancerIngress{
+						{Hostname: "gitlab.chorus-tre.ch"},
+					},
+				},
+			},
+		}
+		err := ValidateInternalServices(ctx, newFakeClient(svc), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("is case-insensitive when matching FQDN", func() {
+		ing := &networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{Host: "GITLAB.CHORUS-TRE.CH"},
+				},
+			},
+		}
+		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when FQDN is present in a different namespace (namespace scoping)", func() {
+		ing := &networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "other-ns"},
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{Host: "gitlab.chorus-tre.ch"},
+				},
+			},
+		}
+		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
+		Expect(err.Error()).To(ContainSubstring("gitlab"))
+	})
+
+	It("returns an error when FQDN is not found anywhere", func() {
+		err := ValidateInternalServices(ctx, newFakeClient(), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
+	})
+
+	It("returns an error when Ingress listing fails", func() {
+		c := fake.NewClientBuilder().
+			WithScheme(k8sClient.Scheme()).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if _, ok := list.(*networkingv1.IngressList); ok {
+						return fmt.Errorf("ingress list error")
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).
+			Build()
+		err := ValidateInternalServices(ctx, c, []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("ingress list error"))
+	})
+
+	It("returns an error when Service listing fails (Ingress not found)", func() {
+		c := fake.NewClientBuilder().
+			WithScheme(k8sClient.Scheme()).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if _, ok := list.(*corev1.ServiceList); ok {
+						return fmt.Errorf("service list error")
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).
+			Build()
+		err := ValidateInternalServices(ctx, c, []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("service list error"))
+	})
+
+	It("returns an error on the first failing entry when multiple services are configured", func() {
+		ing := &networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{Host: "gitlab.chorus-tre.ch"},
+				},
+			},
+		}
+		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{Namespace: "i2b2", FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("i2b2.chorus-tre.ch"))
 	})
 })
