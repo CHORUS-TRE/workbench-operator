@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -17,6 +19,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -32,33 +35,44 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-// internalServiceFlag is a repeated flag that accumulates fqdn:port[,port...] entries.
+// internalServiceFlag is a repeated flag that accumulates namespace/fqdn:port[,port...] entries.
 type internalServiceFlag []controller.InternalService
 
 func (f internalServiceFlag) String() string {
 	parts := make([]string, 0, len(f))
 	for _, svc := range f {
-		parts = append(parts, svc.FQDN+":"+strings.Join(svc.Ports, ","))
+		parts = append(parts, svc.Namespace+"/"+svc.FQDN+":"+strings.Join(svc.Ports, ","))
 	}
 	return strings.Join(parts, " ")
 }
 
 func (f *internalServiceFlag) Set(s string) error {
-	idx := strings.LastIndex(s, ":")
-	if idx < 1 {
-		return fmt.Errorf("global-internal-service %q must be in fqdn:port[,port...] format", s)
+	slashIdx := strings.Index(s, "/")
+	if slashIdx < 1 {
+		return fmt.Errorf("global-internal-service %q must be in namespace/fqdn:port[,port...] format", s)
 	}
-	fqdn := s[:idx]
-	rawPorts := strings.Split(s[idx+1:], ",")
+	namespace := s[:slashIdx]
+	rest := s[slashIdx+1:]
+
+	idx := strings.LastIndex(rest, ":")
+	if idx < 1 {
+		return fmt.Errorf("global-internal-service %q must be in namespace/fqdn:port[,port...] format", s)
+	}
+	fqdn := strings.ToLower(strings.TrimSpace(rest[:idx]))
+	rawPorts := strings.Split(rest[idx+1:], ",")
 	ports := make([]string, 0, len(rawPorts))
 	for _, p := range rawPorts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			return fmt.Errorf("global-internal-service %q contains empty port", s)
 		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("global-internal-service %q contains invalid port %q: must be a number between 1 and 65535", s, p)
+		}
 		ports = append(ports, p)
 	}
-	*f = append(*f, controller.InternalService{FQDN: fqdn, Ports: ports})
+	*f = append(*f, controller.InternalService{Namespace: namespace, FQDN: fqdn, Ports: ports})
 	return nil
 }
 
@@ -218,6 +232,20 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
+	}
+
+	// Validate internal services against the cluster before starting.
+	// Uses a direct (non-cached) client so it works before mgr.Start().
+	if len(globalInternalServices) > 0 {
+		directClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: scheme})
+		if err != nil {
+			setupLog.Error(err, "unable to create client for internal service validation")
+			os.Exit(1)
+		}
+		if err := controller.ValidateInternalServices(context.Background(), directClient, []controller.InternalService(globalInternalServices)); err != nil {
+			setupLog.Error(err, "internal service validation failed")
+			os.Exit(1)
+		}
 	}
 
 	// Build default workbench resources from flags (nil if no flags are set)

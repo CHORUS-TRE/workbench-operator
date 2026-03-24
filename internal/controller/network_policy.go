@@ -114,6 +114,9 @@ func validateFQDNs(entries []string) error {
 // The FQDN must be validated against the cluster (Ingress host or LoadBalancer Service hostname)
 // before being added to the network policy.
 type InternalService struct {
+	// Namespace is the trusted Kubernetes namespace where the Ingress or LoadBalancer Service lives.
+	// Validation is scoped to this namespace to prevent tenant bypass.
+	Namespace string
 	// FQDN is the fully-qualified domain name of the internal service (e.g. "gitlab.int.chorus-tre.ch").
 	FQDN string
 	// Ports is the list of TCP ports to allow (e.g. ["443", "22"]).

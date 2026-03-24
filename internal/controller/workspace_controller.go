@@ -204,8 +204,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // workspace. The CNP is owned by the Workspace so garbage collection handles
 // deletion automatically.
 func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
-	validatedServices := r.validateInternalServices(ctx)
-	cnp, err := buildNetworkPolicy(*workspace, validatedServices)
+	cnp, err := buildNetworkPolicy(*workspace, r.GlobalInternalServices)
 	if err != nil {
 		return err
 	}
@@ -278,33 +277,19 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 	return nil
 }
 
-// validateInternalServices checks each configured internal service against the cluster.
-// Entries whose FQDN is found as an Ingress host or LoadBalancer Service hostname are returned.
-// Entries not found are skipped and an error is logged — workspace reconciliation continues.
-func (r *WorkspaceReconciler) validateInternalServices(ctx context.Context) []InternalService {
-	if len(r.GlobalInternalServices) == 0 {
-		return nil
-	}
-
-	log := log.FromContext(ctx)
-
-	ingressList := &networkingv1.IngressList{}
-	if err := r.List(ctx, ingressList); err != nil {
-		log.Error(err, "Failed to list Ingresses for internal service validation; skipping all internal services")
-		return nil
-	}
-
-	svcList := &corev1.ServiceList{}
-	if err := r.List(ctx, svcList); err != nil {
-		log.Error(err, "Failed to list Services for internal service validation; skipping all internal services")
-		return nil
-	}
-
-	var validated []InternalService
-	for _, svc := range r.GlobalInternalServices {
+// ValidateInternalServices checks each service's FQDN against the live cluster.
+// Lookups are scoped to the trusted namespace declared per entry, preventing a tenant
+// from bypassing validation by creating an Ingress with the same hostname in their namespace.
+// Returns an error if any entry is not found. Called at operator startup — caller must exit on error.
+func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
+	for _, svc := range services {
 		fqdn := normalizeFQDNEntry(svc.FQDN)
 		found := false
 
+		ingressList := &networkingv1.IngressList{}
+		if err := c.List(ctx, ingressList, client.InNamespace(svc.Namespace)); err != nil {
+			return fmt.Errorf("failed to list Ingresses in namespace %q: %w", svc.Namespace, err)
+		}
 		for _, ing := range ingressList.Items {
 			for _, rule := range ing.Spec.Rules {
 				if strings.EqualFold(rule.Host, fqdn) {
@@ -318,6 +303,10 @@ func (r *WorkspaceReconciler) validateInternalServices(ctx context.Context) []In
 		}
 
 		if !found {
+			svcList := &corev1.ServiceList{}
+			if err := c.List(ctx, svcList, client.InNamespace(svc.Namespace)); err != nil {
+				return fmt.Errorf("failed to list Services in namespace %q: %w", svc.Namespace, err)
+			}
 			for _, ks := range svcList.Items {
 				if ks.Spec.Type != corev1.ServiceTypeLoadBalancer {
 					continue
@@ -334,14 +323,12 @@ func (r *WorkspaceReconciler) validateInternalServices(ctx context.Context) []In
 			}
 		}
 
-		if found {
-			validated = append(validated, svc)
-		} else {
-			log.Error(nil, "Internal service not found as Ingress host or LoadBalancer Service hostname in cluster; skipping", "fqdn", svc.FQDN)
+		if !found {
+			return fmt.Errorf("internal service %q (namespace: %q) does not resolve to a cluster-internal address: no Ingress rule or LoadBalancer Service with this hostname was found", svc.FQDN, svc.Namespace)
 		}
 	}
 
-	return validated
+	return nil
 }
 
 func (r *WorkspaceReconciler) ensureWorkspaceControllerRef(workspace *defaultv1alpha1.Workspace, obj metav1.Object) (bool, error) {

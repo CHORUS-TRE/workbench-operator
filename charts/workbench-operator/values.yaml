@@ -1,11 +1,14 @@
 
 # Platform-internal services always reachable from workspace pods in all network modes.
-# Each entry must correspond to an Ingress host or LoadBalancer Service hostname in the cluster.
-# Format per flag: --global-internal-service=fqdn:port[,port...]
+# Each entry must correspond to an Ingress host or LoadBalancer Service hostname in the declared namespace.
 # globalInternalServices:
-# - --global-internal-service=gitlab.int.chorus-tre.ch:443,22
-# - --global-internal-service=i2b2.int.chorus-tre.ch:443
-# - --global-internal-service=didata.int.chorus-tre.ch:443
+# - namespace: gitlab-system
+#   fqdn: gitlab.int.chorus-tre.ch
+#   ports: ["443", "22"]
+# - namespace: i2b2
+#   fqdn: i2b2.int.chorus-tre.ch
+#   ports: ["443"]
+globalInternalServices: []
 
 # Storage configuration
 storage:
