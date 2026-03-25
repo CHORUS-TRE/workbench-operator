@@ -344,6 +344,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 						if err := r.deleteJob(ctx, foundJob); err != nil {
 							log.V(1).Error(err, "Unable to delete timed-out job", "job", foundJob.Name)
 						}
+						annotationUpdated = false // job is being deleted, skip annotation persist
 					}
 				}
 			}
