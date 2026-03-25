@@ -32,6 +32,12 @@ spec:
         {{- range .Values.globalInternalServices }}
         - --global-internal-service={{ .namespace }}/{{ .fqdn }}:{{ join "," .ports }}
         {{- end }}
+        {{- range .Values.networkPolicy.allowedIngressNamespaces }}
+        - --allowed-ingress-namespace={{ . }}
+        {{- end }}
+        {{- range .Values.networkPolicy.allowedEgressNamespaces }}
+        - --allowed-egress-namespace={{ . }}
+        {{- end }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
         {{- if .Values.licenseSecretName }}

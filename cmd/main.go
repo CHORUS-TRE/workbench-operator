@@ -79,6 +79,23 @@ func (f *internalServiceFlag) Set(s string) error {
 	return nil
 }
 
+// stringSliceFlag is a repeated flag that accumulates string values into a slice.
+type stringSliceFlag []string
+
+func (f stringSliceFlag) String() string      { return strings.Join(f, ",") }
+func (f *stringSliceFlag) Set(s string) error { *f = append(*f, s); return nil }
+
+// defaultIfEmpty returns def when v is empty (length zero).
+// Note: a Helm values.yaml with an explicit empty list (e.g. allowedIngressNamespaces: [])
+// renders no flags, which is indistinguishable from "flag not passed". Both cases
+// result in the defaults being applied. To use custom namespaces, provide at least one value.
+func defaultIfEmpty(v, def []string) []string {
+	if len(v) > 0 {
+		return v
+	}
+	return def
+}
+
 // labelFlag is a repeated flag that accumulates key=value pairs into a map.
 type labelFlag map[string]string
 
@@ -134,6 +151,8 @@ func main() {
 	var workbenchCPURequest string
 	var workbenchMemoryRequest string
 	var licenseSecretName string
+	allowedIngressNamespaces := stringSliceFlag{}
+	allowedEgressNamespaces := stringSliceFlag{}
 	pvcLabels := labelFlag{}
 	globalInternalServices := internalServiceFlag{}
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -169,6 +188,8 @@ func main() {
 	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
 	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
 	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in namespace/fqdn:port[,port...] format (can be repeated)")
+	flag.Var(&allowedIngressNamespaces, "allowed-ingress-namespace", "Namespace allowed to initiate connections into workspace pods (can be repeated, default: backend, prometheus)")
+	flag.Var(&allowedEgressNamespaces, "allowed-egress-namespace", "Namespace that workspace pods may connect to for internal services post-DNAT (can be repeated, default: ingress-nginx)")
 	flag.StringVar(&licenseSecretName, "license-secret-name", "", "Name of the license Secret (empty = no license injection)")
 	opts := zap.Options{
 		Development: true,
@@ -314,6 +335,10 @@ func main() {
 		Registry:               registry,
 		ServicesRepository:     servicesRepository,
 		GlobalInternalServices: []controller.InternalService(globalInternalServices),
+		NetworkPolicyNamespaces: controller.NetworkPolicyNamespaces{
+			AllowedIngress: defaultIfEmpty([]string(allowedIngressNamespaces), []string{"backend", "prometheus"}),
+			AllowedEgress:  defaultIfEmpty([]string(allowedEgressNamespaces), []string{"ingress-nginx"}),
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)

@@ -50,10 +50,6 @@ func cnpNameForWorkspace(workspaceName string) string {
 	suffix := cnpLongNameSuffix + hash
 
 	maxPrefixLen := maxK8sNameLength - len(suffix)
-	if maxPrefixLen < 1 {
-		// Extremely defensive: fallback to something valid and stable.
-		return "egress-" + hash
-	}
 
 	prefix := workspaceName
 	if len(prefix) > maxPrefixLen {
@@ -68,7 +64,7 @@ func cnpNameForWorkspace(workspaceName string) string {
 	return prefix + suffix
 }
 
-// validateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
+// ValidateFQDNs checks that every AllowedFQDNs entry is a plausible DNS name
 // or wildcard pattern. Returns nil on success or an error describing the first
 // invalid entry. Enforces RFC 1035 limits: max 63 chars per label, max 253 chars total.
 func ValidateFQDNs(entries []string) error {
@@ -111,16 +107,30 @@ func ValidateFQDNs(entries []string) error {
 
 // InternalService describes a platform-internal service that workspace pods should always
 // be able to reach, regardless of the workspace's network isolation mode.
-// The FQDN must be validated against the cluster (Ingress host or LoadBalancer Service hostname)
-// before being added to the network policy.
+// The FQDN must be validated against the cluster (Ingress host) before being added to the network policy.
 type InternalService struct {
-	// Namespace is the trusted Kubernetes namespace where the Ingress or LoadBalancer Service lives.
-	// Validation is scoped to this namespace to prevent tenant bypass.
+	// Namespace is the trusted Kubernetes namespace where the Ingress lives.
+	// Used only at startup to validate that an Ingress with the matching FQDN exists here.
+	// It does NOT appear in the generated CiliumNetworkPolicy — the actual egress target
+	// is always the ingress controller namespace declared in NetworkPolicyNamespaces.AllowedEgress.
 	Namespace string
 	// FQDN is the fully-qualified domain name of the internal service (e.g. "gitlab.int.chorus-tre.ch").
 	FQDN string
-	// Ports is the list of TCP ports to allow (e.g. ["443", "22"]).
+	// Ports is the list of TCP ports declared for this service (e.g. ["443", "22"]).
+	// Currently only port 443 is enforced in the egress rule (SNI filtering via ingress-nginx).
+	// Non-443 ports (e.g. SSH/22) require a separate egress path and are not yet implemented.
 	Ports []string
+}
+
+// NetworkPolicyNamespaces holds the platform namespace names used in CNP rules.
+// These are configurable to support different cluster topologies.
+type NetworkPolicyNamespaces struct {
+	// AllowedIngress is the list of namespaces whose pods may initiate connections INTO workspace pods
+	// (e.g. backend, prometheus). No port restriction is applied.
+	AllowedIngress []string
+	// AllowedEgress is the list of namespaces that workspace pods may connect OUT TO
+	// (e.g. ingress-nginx, reached post-DNAT when accessing internal services).
+	AllowedEgress []string
 }
 
 // buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
@@ -131,11 +141,13 @@ type InternalService struct {
 //   - FQDNAllowlist → kube-dns + intra-namespace (pod + service) + internal services + FQDN allowlist
 //   - Airgapped     → kube-dns + intra-namespace (pod + service) + internal services only
 //
-// Internal services are always allowed regardless of mode — they are validated at startup time
-// to ensure they correspond to cluster-internal resources (Ingress or LoadBalancer Service).
+// Internal services are always allowed regardless of mode. They are reached via the
+// cluster's Ingress controller (post-DNAT destination). A single toEndpoints rule
+// for ns.AllowedEgress namespaces is emitted (when internalServices is non-empty),
+// with Cilium TLS SNI L7 rules restricting access to only the listed FQDNs.
 //
-// Ingress policy: only pods within the same namespace may connect inbound.
-// This prevents pods in other workspaces from reaching services in this workspace.
+// Ingress policy: pods from ns.AllowedIngress namespaces and the workspace namespace
+// may connect inbound. This prevents pods in other workspaces from reaching services here.
 //
 // Note: toServices is required alongside toEndpoints because in clusters running
 // kube-proxy alongside Cilium, iptables DNAT (ClusterIP → pod IP) happens after
@@ -145,7 +157,7 @@ type InternalService struct {
 //
 // IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via ValidateFQDNs.
 // Returns an error if invalid FQDNs are detected.
-func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []InternalService) (*unstructured.Unstructured, error) {
+func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []InternalService, ns NetworkPolicyNamespaces) (*unstructured.Unstructured, error) {
 	// Defensive check: FQDNs must be validated before calling this function
 	if err := ValidateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		return nil, fmt.Errorf("buildNetworkPolicy called with invalid FQDNs: %w", err)
@@ -212,12 +224,44 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 	}
 
 	// Internal platform services: always allowed in all modes (Open, Airgapped, FQDNAllowlist).
-	// Entries that were not found in the cluster during reconciliation are excluded (callers
-	// are expected to filter internalServices to only validated entries before calling here).
-	for _, svc := range internalServices {
+	// A single egress rule targets the Ingress controller namespace (post-DNAT destination)
+	// with Cilium TLS SNI L7 rules restricting access to only the declared FQDNs.
+	//
+	// Why toEndpoints instead of toFQDNs: Cilium's eBPF performs service DNAT (LoadBalancer
+	// IP → ingress-nginx pod IP) before the policy check. toFQDNs generates a CIDR for the
+	// resolved IP but after DNAT the destination is a Cilium endpoint — CIDRs do not match
+	// endpoints. toEndpoints matches the post-DNAT pod IP directly.
+	//
+	// Why SNI: toEndpoints alone would allow access to ALL services behind the shared ingress.
+	// The SNI rule (l7proto: tls) restricts to only the listed FQDNs by inspecting the
+	// plaintext TLS ClientHello, preventing intra-CHORUS data exfiltration.
+	//
+	// Why Open mode (toCIDR: 0.0.0.0/0) does not bypass SNI: Cilium classifies pod IPs as
+	// endpoints, not world. After service DNAT the destination is the ingress-nginx pod IP —
+	// a Cilium endpoint — which is never matched by a CIDR rule. The toEndpoints+SNI rule
+	// therefore remains the only path to ingress-nginx regardless of the workspace's network mode.
+	if len(internalServices) > 0 && len(ns.AllowedEgress) > 0 {
+		egressEndpoints := make([]map[string]any, 0, len(ns.AllowedEgress))
+		for _, egressNS := range ns.AllowedEgress {
+			egressEndpoints = append(egressEndpoints, map[string]any{
+				"matchLabels": map[string]any{
+					"k8s:io.kubernetes.pod.namespace": egressNS,
+				},
+			})
+		}
 		egressRules = append(egressRules, map[string]any{
-			"toFQDNs": []map[string]any{{"matchName": svc.FQDN}},
-			"toPorts": internalServicePortRules(svc.Ports),
+			"toEndpoints": egressEndpoints,
+			"toPorts": []map[string]any{
+				{
+					"ports": []map[string]any{
+						{"port": "443", "protocol": "TCP"},
+					},
+					"rules": map[string]any{
+						"l7proto": "tls",
+						"l7":      sniSelectors(internalServices),
+					},
+				},
+			},
 		})
 	}
 
@@ -238,31 +282,25 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		// Airgapped: no external traffic beyond kube-dns and intra-namespace.
 	}
 
-	// Ingress: allow connections from:
-	//   - same namespace (intra-workspace: workbench pods, service pods)
-	//   - backend namespace (reverse-proxy to Xpra server on port 8080)
-	//   - prometheus namespace (Prometheus scrapes metrics directly from pods via HTTP)
+	// Ingress: allow connections from the workspace namespace itself (intra-workspace pod
+	// traffic) and from all ns.AllowedIngress namespaces (e.g. backend, prometheus).
 	// No toPorts restriction — workbench pods use arbitrary ports internally.
-	ingressRules := []map[string]any{
+	ingressEndpoints := []map[string]any{
 		{
-			"fromEndpoints": []map[string]any{
-				{
-					"matchLabels": map[string]any{
-						"k8s:io.kubernetes.pod.namespace": workspace.Namespace,
-					},
-				},
-				{
-					"matchLabels": map[string]any{
-						"k8s:io.kubernetes.pod.namespace": "backend",
-					},
-				},
-				{
-					"matchLabels": map[string]any{
-						"k8s:io.kubernetes.pod.namespace": "prometheus",
-					},
-				},
+			"matchLabels": map[string]any{
+				"k8s:io.kubernetes.pod.namespace": workspace.Namespace,
 			},
 		},
+	}
+	for _, n := range ns.AllowedIngress {
+		ingressEndpoints = append(ingressEndpoints, map[string]any{
+			"matchLabels": map[string]any{
+				"k8s:io.kubernetes.pod.namespace": n,
+			},
+		})
+	}
+	ingressRules := []map[string]any{
+		{"fromEndpoints": ingressEndpoints},
 	}
 
 	return &unstructured.Unstructured{
@@ -286,12 +324,14 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 	}, nil
 }
 
-func internalServicePortRules(ports []string) []map[string]any {
-	portList := make([]map[string]any, 0, len(ports))
-	for _, p := range ports {
-		portList = append(portList, map[string]any{"port": p, "protocol": "TCP"})
+// sniSelectors converts internal services to Cilium l7 TLS SNI selectors.
+// Produces [{sni: "fqdn"}, ...] for use with l7proto: tls in CNP toPorts rules.
+func sniSelectors(services []InternalService) []map[string]any {
+	selectors := make([]map[string]any, 0, len(services))
+	for _, svc := range services {
+		selectors = append(selectors, map[string]any{"sni": svc.FQDN})
 	}
-	return []map[string]any{{"ports": portList}}
+	return selectors
 }
 
 func httpPortRules() []map[string]any {
@@ -306,7 +346,7 @@ func httpPortRules() []map[string]any {
 }
 
 // toFQDNSelectors converts validated FQDN entries into Cilium toFQDNs selectors.
-// Assumes entries have been pre-validated via validateFQDNs (no trimming needed).
+// Assumes entries have been pre-validated via ValidateFQDNs (no trimming needed).
 // Deduplicates entries and generates:
 //   - matchName for exact domains (e.g. "example.com")
 //   - matchPattern for explicit wildcard domains only (e.g. "*.example.com")

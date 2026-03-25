@@ -29,12 +29,13 @@ import (
 // WorkspaceReconciler reconciles a Workspace object
 type WorkspaceReconciler struct {
 	client.Client
-	Scheme                 *runtime.Scheme
-	Recorder               record.EventRecorder
-	RestConfig             *rest.Config
-	Registry               string
-	ServicesRepository     string
-	GlobalInternalServices []InternalService
+	Scheme                  *runtime.Scheme
+	Recorder                record.EventRecorder
+	RestConfig              *rest.Config
+	Registry                string
+	ServicesRepository      string
+	GlobalInternalServices  []InternalService
+	NetworkPolicyNamespaces NetworkPolicyNamespaces
 }
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces,verbs=get;list;watch
@@ -202,7 +203,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // workspace. The CNP is owned by the Workspace so garbage collection handles
 // deletion automatically.
 func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
-	cnp, err := buildNetworkPolicy(*workspace, r.GlobalInternalServices)
+	cnp, err := buildNetworkPolicy(*workspace, r.GlobalInternalServices, r.NetworkPolicyNamespaces)
 	if err != nil {
 		return err
 	}
@@ -277,9 +278,16 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 
 // ValidateInternalServices checks each service's FQDN against the live cluster.
 // Verifies an Ingress with the matching hostname exists in the declared namespace.
-// Returns an error if any entry is not found. Called at operator startup — caller must exit on error.
+// Returns an error if any entry is not found or if duplicate FQDNs are declared.
+// Called at operator startup — caller must exit on error.
 func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
+	seen := map[string]struct{}{}
 	for _, svc := range services {
+		key := strings.ToLower(svc.FQDN)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate internal service FQDN: %q", svc.FQDN)
+		}
+		seen[key] = struct{}{}
 		ingressList := &networkingv1.IngressList{}
 		if err := c.List(ctx, ingressList, client.InNamespace(svc.Namespace)); err != nil {
 			return fmt.Errorf("failed to list Ingresses in namespace %q: %w", svc.Namespace, err)
