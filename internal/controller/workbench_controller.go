@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,6 +39,21 @@ const finalizer = "default.k8s.chorus-tre.ch/finalizer"
 const matchingLabel = "workbench"
 
 var ErrSuspendedJob = errors.New("suspended job")
+
+// patchStatus sends the full workbench status as a merge-patch.
+// Unlike Status().Update(), a merge-patch does not require a matching
+// resourceVersion, so it cannot fail with a conflict error when the
+// object has been modified between reads and writes within a single
+// reconcile loop.
+func (r *WorkbenchReconciler) patchStatus(ctx context.Context, workbench *defaultv1alpha1.Workbench) error {
+	data, err := json.Marshal(struct {
+		Status defaultv1alpha1.WorkbenchStatus `json:"status"`
+	}{Status: workbench.Status})
+	if err != nil {
+		return err
+	}
+	return r.Status().Patch(ctx, workbench, client.RawPatch(types.MergePatchType, data))
+}
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/status,verbs=get;update;patch
@@ -142,7 +158,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		statusUpdated = statusUpdated || serverHealthUpdated
 
 		if statusUpdated {
-			if err := r.Status().Update(ctx, &workbench); err != nil {
+			if err := r.patchStatus(ctx, &workbench); err != nil {
 				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
 			}
 		}
@@ -238,7 +254,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			// Set app status to Failed and continue with other apps
 			errorMessage := fmt.Sprintf("Failed to initialize job: %s", err.Error())
 			if workbench.SetAppStatusFailed(uid, errorMessage) {
-				if err := r.Status().Update(ctx, &workbench); err != nil {
+				if err := r.patchStatus(ctx, &workbench); err != nil {
 					log.V(1).Error(err, "Unable to update app status to Failed", "app", app.Name)
 				}
 			}
@@ -337,7 +353,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
 		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob, message)
 		if statusUpdated {
-			if err := r.Status().Update(ctx, &workbench); err != nil {
+			if err := r.patchStatus(ctx, &workbench); err != nil {
 				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
 			}
 		}
@@ -364,19 +380,20 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Clean up orphaned status entries for apps that were removed from spec
-	if workbench.CleanOrphanedAppStatuses() {
+	orphansCleaned := workbench.CleanOrphanedAppStatuses()
+	if orphansCleaned {
 		log.V(1).Info("Cleaned up orphaned app status entries")
-		if err := r.Status().Update(ctx, &workbench); err != nil {
-			log.V(1).Error(err, "Unable to update WorkbenchStatus after cleanup")
-			return ctrl.Result{}, err
-		}
 	}
 
 	// ---------- OBSERVED GENERATION ---------------
-	if workbench.UpdateObservedGeneration() {
+	generationUpdated := workbench.UpdateObservedGeneration()
+	if generationUpdated {
 		log.V(1).Info("Updated observed generation", "generation", workbench.Status.ObservedGeneration)
-		if err := r.Status().Update(ctx, &workbench); err != nil {
-			log.V(1).Error(err, "Unable to update observed generation in WorkbenchStatus")
+	}
+
+	if orphansCleaned || generationUpdated {
+		if err := r.patchStatus(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to patch WorkbenchStatus")
 			return ctrl.Result{}, err
 		}
 	}
