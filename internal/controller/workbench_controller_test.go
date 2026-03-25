@@ -1496,3 +1496,142 @@ var _ = Describe("createDeployment / createService / createJob (already-exists p
 		Expect(found.Name).To(Equal("already-exists-job"))
 	})
 })
+
+var _ = Describe("Workbench Controller License Integration", func() {
+	const namespace = "default"
+	ctx := context.Background()
+
+	reconcileWorkbench := func(name, licenseSecretName string) {
+		nn := types.NamespacedName{Name: name, Namespace: namespace}
+		reconciler := &WorkbenchReconciler{
+			Client:   k8sClient,
+			Scheme:   k8sClient.Scheme(),
+			Recorder: record.NewFakeRecorder(3),
+			Config: Config{
+				Registry:          "my-registry",
+				AppsRepository:    "applications",
+				XpraServerImage:   "my-registry/server/xpra-server",
+				LicenseSecretName: licenseSecretName,
+			},
+		}
+
+		pod := createMockPod(name+"-server-pod", namespace, createReadyContainerStatus(), nil)
+		pod.Labels = map[string]string{"workbench": name}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		pod.Status = corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{
+				createMockContainerStatus("xpra-server-bind", corev1.ContainerState{
+					Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()},
+				}, true, 0),
+			},
+			ContainerStatuses: []corev1.ContainerStatus{createReadyContainerStatus()},
+			PodIP:             "10.0.0.1",
+		}
+		Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	It("injects license env var into job when license secret exists", func() {
+		const resourceName = "license-with-secret"
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "app-licenses-int",
+				Namespace: namespace,
+			},
+			Data: map[string][]byte{
+				"config.yaml": []byte(`licenses:
+  freesurfer:
+    type: platform-file
+    envVar: FREESURFER_LICENSE
+    secretKey: freesurfer
+`),
+			},
+		}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
+
+		wb := &defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      resourceName,
+				Namespace: namespace,
+			},
+			Spec: defaultv1alpha1.WorkbenchSpec{
+				Server: defaultv1alpha1.WorkbenchServer{User: "chorus"},
+				Apps: map[string]defaultv1alpha1.WorkbenchApp{
+					"uid0": {
+						Name: "freesurfer",
+						Image: defaultv1alpha1.Image{
+							Registry:   "my-registry",
+							Repository: "applications/freesurfer",
+							Tag:        "latest",
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, wb)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, wb) })
+
+		reconcileWorkbench(resourceName, "app-licenses-int")
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name:      resourceName + "-uid0-freesurfer",
+			Namespace: namespace,
+		}, job)).To(Succeed())
+
+		var found bool
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "FREESURFER_LICENSE" {
+				Expect(env.ValueFrom).NotTo(BeNil())
+				Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("app-licenses-int"))
+				Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("freesurfer"))
+				found = true
+				break
+			}
+		}
+		Expect(found).To(BeTrue(), "expected FREESURFER_LICENSE env var in job container")
+	})
+
+	It("reconciles without license env vars when no license secret exists", func() {
+		const resourceName = "license-no-secret"
+
+		wb := &defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      resourceName,
+				Namespace: namespace,
+			},
+			Spec: defaultv1alpha1.WorkbenchSpec{
+				Server: defaultv1alpha1.WorkbenchServer{User: "chorus"},
+				Apps: map[string]defaultv1alpha1.WorkbenchApp{
+					"uid0": {
+						Name: "freesurfer",
+						Image: defaultv1alpha1.Image{
+							Registry:   "my-registry",
+							Repository: "applications/freesurfer",
+							Tag:        "latest",
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, wb)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, wb) })
+
+		reconcileWorkbench(resourceName, "nonexistent-secret")
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name:      resourceName + "-uid0-freesurfer",
+			Namespace: namespace,
+		}, job)).To(Succeed())
+
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			Expect(env.Name).NotTo(Equal("FREESURFER_LICENSE"),
+				"expected no FREESURFER_LICENSE env var when license secret is missing")
+		}
+	})
+})

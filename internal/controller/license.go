@@ -75,6 +75,12 @@ func injectLicenseEnv(ctx context.Context, appName string, licenseConfig *Licens
 		return nil
 	}
 
+	if entry.EnvVar == "" {
+		log.FromContext(ctx).Info("License entry has empty envVar, skipping",
+			"app", appName, "type", entry.Type)
+		return nil
+	}
+
 	switch entry.Type {
 	case "platform-file", "license-server":
 		// Both types: value lives in the same license Secret.

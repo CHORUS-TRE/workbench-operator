@@ -79,6 +79,16 @@ var _ = Describe("injectLicenseEnv", func() {
 		Expect(result).To(BeNil())
 	})
 
+	It("returns nil when envVar is empty", func() {
+		lc := &LicenseConfig{
+			Licenses: map[string]LicenseEntry{
+				"freesurfer": {Type: "platform-file", EnvVar: "", SecretKey: "freesurfer"},
+			},
+		}
+		result := injectLicenseEnv(ctx, "freesurfer", lc, secretName)
+		Expect(result).To(BeNil())
+	})
+
 	It("returns nil for unknown license type", func() {
 		lc := &LicenseConfig{
 			Licenses: map[string]LicenseEntry{
