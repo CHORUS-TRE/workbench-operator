@@ -34,6 +34,9 @@ spec:
         {{- end }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
+        {{- if .Values.licenseSecretName }}
+        - --license-secret-name={{ .Values.licenseSecretName }}
+        {{- end }}
         {{- with .Values.workbench.serverResources }}
         {{- if .limits }}
         {{- if .limits.cpu }}

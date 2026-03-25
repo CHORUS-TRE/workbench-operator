@@ -42,4 +42,7 @@ type Config struct {
 	WorkbenchDefaultResources *corev1.ResourceRequirements
 	// PVCLabels is an optional set of labels to add to every PVC created by the operator.
 	PVCLabels map[string]string
+	// LicenseSecretName is the name of the Secret holding license configuration and values.
+	// Empty means license injection is disabled.
+	LicenseSecretName string
 }

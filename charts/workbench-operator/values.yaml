@@ -62,7 +62,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.46
+      tag: 0.4.47
     resources:
       limits:
         cpu: 500m
@@ -77,6 +77,11 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+# Name of an externally-managed Secret holding license configuration and values.
+# The Secret must be created in the workbench namespace (not managed by this chart).
+# Set to empty string to disable license injection.
+licenseSecretName: ""
+
 serviceMonitor:
   enabled: true
 metricsService:
