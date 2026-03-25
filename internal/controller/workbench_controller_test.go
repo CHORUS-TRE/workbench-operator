@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -1633,5 +1634,38 @@ var _ = Describe("Workbench Controller License Integration", func() {
 			Expect(env.Name).NotTo(Equal("FREESURFER_LICENSE"),
 				"expected no FREESURFER_LICENSE env var when license secret is missing")
 		}
+	})
+})
+
+var _ = Describe("patchStatus serialization", func() {
+	It("does not include resourceVersion in the patch body", func() {
+		wb := &defaultv1alpha1.Workbench{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "test-wb",
+				Namespace:       "default",
+				ResourceVersion: "99999",
+			},
+			Status: defaultv1alpha1.WorkbenchStatus{
+				Apps: map[string]defaultv1alpha1.WorkbenchStatusApp{
+					"uid1": {Status: "Running"},
+				},
+			},
+		}
+
+		// Replicate the exact marshal logic from patchStatus.
+		data, err := json.Marshal(struct {
+			Status defaultv1alpha1.WorkbenchStatus `json:"status"`
+		}{Status: wb.Status})
+		Expect(err).NotTo(HaveOccurred())
+
+		// The patch body must contain only {"status": ...} with no
+		// metadata.resourceVersion. If resourceVersion ever appears,
+		// Kubernetes will enforce optimistic concurrency and the
+		// conflict bug will return.
+		var raw map[string]interface{}
+		Expect(json.Unmarshal(data, &raw)).To(Succeed())
+		Expect(raw).NotTo(HaveKey("metadata"))
+		Expect(raw).To(HaveKey("status"))
+		Expect(string(data)).NotTo(ContainSubstring("resourceVersion"))
 	})
 })
