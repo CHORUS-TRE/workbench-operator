@@ -114,6 +114,7 @@ run-local: manifests generate fmt vet ## Run a controller from your host with lo
 	go run ./cmd/main.go \
 		--local-storage-enabled=true \
 		--local-storage-host-path=/tmp/workbench-local-storage \
+		--license-secret-name=app-licenses
 
 .PHONY: run-local-debug
 run-local-debug: manifests generate fmt vet ## Run a controller from your host with local storage and debug mode enabled for development.
@@ -121,7 +122,8 @@ run-local-debug: manifests generate fmt vet ## Run a controller from your host w
 	go run ./cmd/main.go \
 		--local-storage-enabled=true \
 		--local-storage-host-path=/tmp/workbench-local-storage \
-		--debug-mode-enabled=true
+		--debug-mode-enabled=true \
+		--license-secret-name=app-licenses
 
 # NOTE: When switching between debug mode (root) and non-debug mode (user), you may need to clean
 # local storage to avoid permission issues: rm -rf /tmp/workbench-local-storage

@@ -133,6 +133,7 @@ func main() {
 	var workbenchMemoryLimit string
 	var workbenchCPURequest string
 	var workbenchMemoryRequest string
+	var licenseSecretName string
 	pvcLabels := labelFlag{}
 	globalInternalServices := internalServiceFlag{}
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -168,6 +169,7 @@ func main() {
 	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
 	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
 	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in namespace/fqdn:port[,port...] format (can be repeated)")
+	flag.StringVar(&licenseSecretName, "license-secret-name", "", "Name of the license Secret (empty = no license injection)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -298,6 +300,7 @@ func main() {
 			ApplicationStartupTimeout:    applicationStartupTimeout,
 			WorkbenchDefaultResources:    workbenchDefaultResources,
 			PVCLabels:                    map[string]string(pvcLabels),
+			LicenseSecretName:            licenseSecretName,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbench")

@@ -77,6 +77,11 @@ controllerManager:
     annotations: {}
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+# Name of an externally-managed Secret holding license configuration and values.
+# The Secret must be created in the workbench namespace (not managed by this chart).
+# Set to empty string to disable license injection.
+licenseSecretName: ""
+
 serviceMonitor:
   enabled: true
 metricsService:

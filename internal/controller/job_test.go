@@ -60,7 +60,7 @@ var _ = Describe("initJob", func() {
 	It("returns an error when app has no image (appName empty)", func() {
 		app := defaultv1alpha1.WorkbenchApp{Name: "myapp"} // no image set
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("app.Image is required"))
 		Expect(job).To(BeNil())
@@ -69,7 +69,7 @@ var _ = Describe("initJob", func() {
 	It("sets image pull policy to PullAlways when tag is empty", func() {
 		app := makeApp("myapp", "apps/myapp", "")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.Containers[0].ImagePullPolicy).To(Equal(corev1.PullAlways))
 		Expect(job.Spec.Template.Spec.Containers[0].Image).To(ContainSubstring(":latest"))
@@ -78,7 +78,7 @@ var _ = Describe("initJob", func() {
 	It("sets image pull policy to PullIfNotPresent when tag is set", func() {
 		app := makeApp("myapp", "apps/myapp", "v1.2.3")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.Containers[0].ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
 		Expect(job.Spec.Template.Spec.Containers[0].Image).To(ContainSubstring("v1.2.3"))
@@ -88,7 +88,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		cfg := Config{Registry: "registry.example.com"}
 		sm := newTestStorageManager(cfg)
-		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("registry.example.com/"))
 	})
@@ -98,7 +98,7 @@ var _ = Describe("initJob", func() {
 		app.Image.Registry = "custom.registry.io"
 		cfg := Config{Registry: "should-not-be-used.io"}
 		sm := newTestStorageManager(cfg)
-		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.Containers[0].Image).To(HavePrefix("custom.registry.io/"))
 	})
@@ -111,7 +111,7 @@ var _ = Describe("initJob", func() {
 		}
 		cfg := Config{AppsRepository: "harbor.example.com/apps"}
 		sm := newTestStorageManager(cfg)
-		_, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		_, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("app.Image is required"))
 	})
@@ -121,7 +121,7 @@ var _ = Describe("initJob", func() {
 		shmSize := resource.MustParse("256Mi")
 		app.ShmSize = &shmSize
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		// Check shm volume exists
 		var shmVol *corev1.Volume
@@ -148,7 +148,7 @@ var _ = Describe("initJob", func() {
 	It("does not add shm volume when ShmSize is nil", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		for _, vol := range job.Spec.Template.Spec.Volumes {
 			Expect(vol.Name).NotTo(Equal("shm"))
@@ -160,7 +160,7 @@ var _ = Describe("initJob", func() {
 		wbWithSA := makeWorkbench("ns1", "wb1")
 		wbWithSA.Spec.ServiceAccount = "my-sa"
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wbWithSA, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wbWithSA, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("my-sa"))
 	})
@@ -168,7 +168,7 @@ var _ = Describe("initJob", func() {
 	It("does not set service account name when empty", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.ServiceAccountName).To(BeEmpty())
 	})
@@ -177,7 +177,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		cfg := Config{ApplicationPriorityClassName: "high-priority"}
 		sm := newTestStorageManager(cfg)
-		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.PriorityClassName).To(Equal("high-priority"))
 	})
@@ -186,7 +186,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		cfg := Config{DebugModeEnabled: true}
 		sm := newTestStorageManager(cfg)
-		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Annotations).To(HaveKey("chorus-tre.ch/debug-mode"))
 		Expect(job.Spec.Template.Annotations).To(HaveKey("chorus-tre.ch/debug-warning"))
@@ -196,7 +196,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		app.State = "Stopped"
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Suspend).NotTo(BeNil())
 		Expect(*job.Spec.Suspend).To(BeTrue())
@@ -206,7 +206,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		app.State = "Running"
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Suspend).NotTo(BeNil())
 		Expect(*job.Spec.Suspend).To(BeFalse())
@@ -215,7 +215,7 @@ var _ = Describe("initJob", func() {
 	It("does not suspend the job when app.State is empty (defaults to Running)", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(*job.Spec.Suspend).To(BeFalse())
 	})
@@ -230,7 +230,7 @@ var _ = Describe("initJob", func() {
 			Limits: customLimits,
 		}
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.Containers[0].Resources.Limits.Cpu().String()).To(Equal("2"))
 	})
@@ -245,7 +245,7 @@ var _ = Describe("initJob", func() {
 			Requests: customReqs,
 		}
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		// When only requests given, limits should equal requests
 		Expect(job.Spec.Template.Spec.Containers[0].Resources.Limits.Cpu().String()).To(Equal("500m"))
@@ -256,7 +256,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		cfg := Config{InitContainerImage: "my.registry.io/init-container"}
 		sm := newTestStorageManager(cfg)
-		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		initContainerImage := job.Spec.Template.Spec.InitContainers[0].Image
 		Expect(initContainerImage).To(HavePrefix("my.registry.io/init-container:"))
@@ -266,7 +266,7 @@ var _ = Describe("initJob", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		cfg := Config{Registry: "registry.example.com"}
 		sm := newTestStorageManager(cfg)
-		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		initContainerImage := job.Spec.Template.Spec.InitContainers[0].Image
 		Expect(initContainerImage).To(HavePrefix("registry.example.com/apps/app-init:"))
@@ -275,7 +275,7 @@ var _ = Describe("initJob", func() {
 	It("sets init container pull policy to PullAlways when version is latest", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		// Default initContainerVersion is "latest" → PullAlways
 		Expect(job.Spec.Template.Spec.InitContainers[0].ImagePullPolicy).To(Equal(corev1.PullAlways))
@@ -286,7 +286,7 @@ var _ = Describe("initJob", func() {
 		wbWithInit := makeWorkbench("ns1", "wb1")
 		wbWithInit.Spec.InitContainer = &defaultv1alpha1.InitContainerConfig{Version: "v2.3.4"}
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wbWithInit, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wbWithInit, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.InitContainers[0].ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
 	})
@@ -296,7 +296,7 @@ var _ = Describe("initJob", func() {
 		wbWithSecrets := makeWorkbench("ns1", "wb1")
 		wbWithSecrets.Spec.ImagePullSecrets = []string{"regcred", "harbor-creds"}
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wbWithSecrets, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wbWithSecrets, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 		Expect(job.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("regcred"))
@@ -306,7 +306,7 @@ var _ = Describe("initJob", func() {
 	It("sets TTLSecondsAfterFinished to 1 day", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.TTLSecondsAfterFinished).NotTo(BeNil())
 		Expect(*job.Spec.TTLSecondsAfterFinished).To(Equal(int32(24 * 3600)))
@@ -318,7 +318,7 @@ var _ = Describe("initJob", func() {
 			URL: "https://example.com",
 		}
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		var found bool
 		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
@@ -341,7 +341,7 @@ var _ = Describe("initJob", func() {
 			JWTToken: &jwtToken,
 		}
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		envMap := make(map[string]string)
 		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
@@ -356,7 +356,7 @@ var _ = Describe("initJob", func() {
 	It("sets HOME and USER env vars from workbench spec", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		envMap := make(map[string]string)
 		for _, e := range job.Spec.Template.Spec.Containers[0].Env {
@@ -369,7 +369,7 @@ var _ = Describe("initJob", func() {
 	It("sets DISPLAY env var using service name and namespace", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		envMap := make(map[string]string)
 		for _, e := range job.Spec.Template.Spec.Containers[0].Env {
@@ -381,7 +381,7 @@ var _ = Describe("initJob", func() {
 	It("sets RestartPolicy to OnFailure", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
 	})
@@ -389,7 +389,7 @@ var _ = Describe("initJob", func() {
 	It("sets pod SecurityContext with FSGroup and SeccompProfile", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		sc := job.Spec.Template.Spec.SecurityContext
 		Expect(sc).NotTo(BeNil())
@@ -401,7 +401,7 @@ var _ = Describe("initJob", func() {
 	It("sets pod Hostname to app name", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.Hostname).To(Equal("myapp"))
 	})
@@ -409,9 +409,125 @@ var _ = Describe("initJob", func() {
 	It("sets init container command to /docker-entrypoint.sh", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
 		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm)
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(job.Spec.Template.Spec.InitContainers[0].Command).To(Equal([]string{"/docker-entrypoint.sh"}))
+	})
+
+	It("does not inject license env vars when licenseConfig is nil", func() {
+		app := makeApp("freesurfer", "apps/freesurfer", "v1")
+		sm := newTestStorageManager(Config{})
+		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
+		Expect(err).NotTo(HaveOccurred())
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			Expect(env.Name).NotTo(Equal("FREESURFER_LICENSE"))
+		}
+	})
+
+	It("injects platform-file license as SecretKeyRef", func() {
+		app := makeApp("freesurfer", "apps/freesurfer", "v1")
+		cfg := Config{LicenseSecretName: "app-licenses"}
+		sm := newTestStorageManager(cfg)
+		lc := &LicenseConfig{
+			Licenses: map[string]LicenseEntry{
+				"freesurfer": {
+					Type:      "platform-file",
+					EnvVar:    "FREESURFER_LICENSE",
+					SecretKey: "freesurfer",
+				},
+			},
+		}
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, lc)
+		Expect(err).NotTo(HaveOccurred())
+		var found bool
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "FREESURFER_LICENSE" {
+				Expect(env.ValueFrom).NotTo(BeNil())
+				Expect(env.ValueFrom.SecretKeyRef).NotTo(BeNil())
+				Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("app-licenses"))
+				Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("freesurfer"))
+				Expect(*env.ValueFrom.SecretKeyRef.Optional).To(BeTrue())
+				found = true
+				break
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
+	It("injects license-server license as SecretKeyRef", func() {
+		app := makeApp("matlab", "apps/matlab", "v1")
+		cfg := Config{LicenseSecretName: "app-licenses"}
+		sm := newTestStorageManager(cfg)
+		lc := &LicenseConfig{
+			Licenses: map[string]LicenseEntry{
+				"matlab": {
+					Type:      "license-server",
+					EnvVar:    "MLM_LICENSE_FILE",
+					SecretKey: "matlab",
+				},
+			},
+		}
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, lc)
+		Expect(err).NotTo(HaveOccurred())
+		var found bool
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "MLM_LICENSE_FILE" {
+				Expect(env.ValueFrom).NotTo(BeNil())
+				Expect(env.ValueFrom.SecretKeyRef).NotTo(BeNil())
+				Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("app-licenses"))
+				Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("matlab"))
+				found = true
+				break
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
+	It("injects user-provided license as plain env var with mountPath", func() {
+		app := makeApp("someapp", "apps/someapp", "v1")
+		cfg := Config{LicenseSecretName: "app-licenses"}
+		sm := newTestStorageManager(cfg)
+		lc := &LicenseConfig{
+			Licenses: map[string]LicenseEntry{
+				"someapp": {
+					Type:      "user-provided",
+					EnvVar:    "APP_LICENSE",
+					MountPath: "/mnt/app_data/license.txt",
+				},
+			},
+		}
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, lc)
+		Expect(err).NotTo(HaveOccurred())
+		var found bool
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == "APP_LICENSE" {
+				Expect(env.Value).To(Equal("/mnt/app_data/license.txt"))
+				Expect(env.ValueFrom).To(BeNil())
+				found = true
+				break
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
+	It("does not inject license env vars when app is not in license config", func() {
+		app := makeApp("unlicensed", "apps/unlicensed", "v1")
+		cfg := Config{LicenseSecretName: "app-licenses"}
+		sm := newTestStorageManager(cfg)
+		lc := &LicenseConfig{
+			Licenses: map[string]LicenseEntry{
+				"freesurfer": {
+					Type:      "platform-file",
+					EnvVar:    "FREESURFER_LICENSE",
+					SecretKey: "freesurfer",
+				},
+			},
+		}
+		job, err := initJob(ctx, wb, cfg, "uid1", app, svc, sm, lc)
+		Expect(err).NotTo(HaveOccurred())
+		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+			Expect(env.Name).NotTo(Equal("FREESURFER_LICENSE"))
+		}
 	})
 })
 

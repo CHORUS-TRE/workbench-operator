@@ -183,7 +183,7 @@ func validateAppImage(ctx context.Context, appImage string) error {
 	return nil
 }
 
-func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager) (*batchv1.Job, error) {
+func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Config, uid string, app defaultv1alpha1.WorkbenchApp, service corev1.Service, storageManager *StorageManager, licenseConfig *LicenseConfig) (*batchv1.Job, error) {
 	job := &batchv1.Job{}
 
 	// The name of the app is there for human consumption.
@@ -353,6 +353,13 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 
 	// Configure security context based on debug mode
 	appContainer.SecurityContext = buildAppSecurityContext(config.DebugModeEnabled, userID, groupID)
+
+	// Inject license env var if configured for this app
+	if licenseEnvVars := injectLicenseEnv(appName, licenseConfig, config.LicenseSecretName); licenseEnvVars != nil {
+		log := log.FromContext(ctx)
+		log.V(1).Info("Injecting license", "app", appName, "count", len(licenseEnvVars))
+		appContainer.Env = append(appContainer.Env, licenseEnvVars...)
+	}
 
 	// Add kiosk configuration if this is a kiosk app and has kiosk config
 	if strings.Contains(appContainer.Image, "apps/kiosk") && app.KioskConfig != nil {

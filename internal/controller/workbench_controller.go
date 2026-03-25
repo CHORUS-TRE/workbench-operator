@@ -203,6 +203,15 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	// ---------- LICENSE CONFIG ---------------
+
+	// Load license config once per reconcile (cached client, not per-app).
+	licenseConfig, err := getLicenseConfig(ctx, r.Client, r.Config.LicenseSecretName, workbench.Namespace)
+	if err != nil {
+		log.Error(err, "Error loading license config")
+		licenseConfig = nil // Non-fatal, continue without licenses
+	}
+
 	// ---------- APPS ---------------
 
 	// List of jobs that were either found or created, the others will be deleted.
@@ -223,7 +232,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	for uid, app := range workbench.Spec.Apps {
-		job, err := initJob(ctx, workbench, r.Config, uid, app, service, storageManager)
+		job, err := initJob(ctx, workbench, r.Config, uid, app, service, storageManager, licenseConfig)
 		if err != nil {
 			log.Error(err, "Failed to initialize job", "app", app.Name)
 			// Set app status to Failed and continue with other apps
