@@ -355,7 +355,7 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 	appContainer.SecurityContext = buildAppSecurityContext(config.DebugModeEnabled, userID, groupID)
 
 	// Inject license env var if configured for this app
-	if licenseEnvVars := injectLicenseEnv(appName, licenseConfig, config.LicenseSecretName); licenseEnvVars != nil {
+	if licenseEnvVars := injectLicenseEnv(ctx, appName, licenseConfig, config.LicenseSecretName); licenseEnvVars != nil {
 		log := log.FromContext(ctx)
 		log.V(1).Info("Injecting license", "app", appName, "count", len(licenseEnvVars))
 		appContainer.Env = append(appContainer.Env, licenseEnvVars...)

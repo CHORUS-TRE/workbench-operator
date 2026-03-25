@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,8 +22,8 @@ type LicenseConfig struct {
 type LicenseEntry struct {
 	Type      string `json:"type"`      // "platform-file" | "license-server" | "user-provided"
 	EnvVar    string `json:"envVar"`    // env var name injected into the app container
-	SecretKey string `json:"secretKey"` // key in the same Secret holding the license value (platform-file, license-server)
-	MountPath string `json:"mountPath"` // absolute container path to license file (user-provided)
+	SecretKey string `json:"secretKey"` // key in the same Secret holding the license value (used by platform-file and license-server only; ignored for user-provided)
+	MountPath string `json:"mountPath"` // absolute container path to license file (user-provided only); the file must be mounted by the storage manager
 }
 
 // getLicenseConfig reads the license Secret and parses its config.yaml key.
@@ -41,8 +42,11 @@ func getLicenseConfig(ctx context.Context, k8sClient client.Client, secretName s
 		Namespace: namespace,
 	}, &secret)
 	if err != nil {
-		log.V(1).Info("License Secret not found, skipping license injection", "secret", secretName, "error", err)
-		return nil, nil
+		if apierrors.IsNotFound(err) {
+			log.V(1).Info("License Secret not found, skipping license injection", "secret", secretName)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get license Secret %q: %w", secretName, err)
 	}
 
 	data, ok := secret.Data["config.yaml"]
@@ -61,7 +65,7 @@ func getLicenseConfig(ctx context.Context, k8sClient client.Client, secretName s
 
 // injectLicenseEnv returns the env var(s) to inject for a given app, or nil if no license is configured.
 // Each app only receives its own license — no cross-contamination between apps.
-func injectLicenseEnv(appName string, licenseConfig *LicenseConfig, secretName string) []corev1.EnvVar {
+func injectLicenseEnv(ctx context.Context, appName string, licenseConfig *LicenseConfig, secretName string) []corev1.EnvVar {
 	if licenseConfig == nil {
 		return nil
 	}
@@ -103,6 +107,9 @@ func injectLicenseEnv(appName string, licenseConfig *LicenseConfig, secretName s
 				Value: entry.MountPath,
 			},
 		}
+	default:
+		log.FromContext(ctx).Info("Unknown license type, skipping license injection",
+			"app", appName, "type", entry.Type)
 	}
 
 	return nil
