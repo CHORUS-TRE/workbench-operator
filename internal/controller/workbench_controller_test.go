@@ -15,9 +15,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
@@ -1639,6 +1642,11 @@ var _ = Describe("Workbench Controller License Integration", func() {
 
 var _ = Describe("patchStatus serialization", func() {
 	It("does not include resourceVersion in the patch body", func() {
+		var capturedPatch []byte
+
+		scheme := runtime.NewScheme()
+		Expect(defaultv1alpha1.AddToScheme(scheme)).To(Succeed())
+
 		wb := &defaultv1alpha1.Workbench{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            "test-wb",
@@ -1652,20 +1660,36 @@ var _ = Describe("patchStatus serialization", func() {
 			},
 		}
 
-		// Replicate the exact marshal logic from patchStatus.
-		data, err := json.Marshal(struct {
-			Status defaultv1alpha1.WorkbenchStatus `json:"status"`
-		}{Status: wb.Status})
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(wb).
+			WithObjects(wb).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					capturedPatch, _ = patch.Data(obj)
+					return c.Status().Patch(ctx, obj, patch, opts...)
+				},
+			}).
+			Build()
+
+		reconciler := &WorkbenchReconciler{
+			Client: c,
+			Scheme: scheme,
+		}
+
+		// Call the actual patchStatus — not a copy of its logic.
+		err := reconciler.patchStatus(context.Background(), wb)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(capturedPatch).NotTo(BeEmpty())
 
 		// The patch body must contain only {"status": ...} with no
 		// metadata.resourceVersion. If resourceVersion ever appears,
 		// Kubernetes will enforce optimistic concurrency and the
 		// conflict bug will return.
 		var raw map[string]interface{}
-		Expect(json.Unmarshal(data, &raw)).To(Succeed())
+		Expect(json.Unmarshal(capturedPatch, &raw)).To(Succeed())
 		Expect(raw).NotTo(HaveKey("metadata"))
 		Expect(raw).To(HaveKey("status"))
-		Expect(string(data)).NotTo(ContainSubstring("resourceVersion"))
+		Expect(string(capturedPatch)).NotTo(ContainSubstring("resourceVersion"))
 	})
 })
