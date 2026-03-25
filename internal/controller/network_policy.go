@@ -131,7 +131,7 @@ type InternalService struct {
 //   - FQDNAllowlist → kube-dns + intra-namespace (pod + service) + internal services + FQDN allowlist
 //   - Airgapped     → kube-dns + intra-namespace (pod + service) + internal services only
 //
-// Internal services are always allowed regardless of mode — they are validated at reconcile time
+// Internal services are always allowed regardless of mode — they are validated at startup time
 // to ensure they correspond to cluster-internal resources (Ingress or LoadBalancer Service).
 //
 // Ingress policy: only pods within the same namespace may connect inbound.
@@ -143,7 +143,7 @@ type InternalService struct {
 // direct pod-to-pod traffic; toServices matches the ClusterIP identity (pre-DNAT)
 // and covers traffic routed through Kubernetes services.
 //
-// IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via validateFQDNs.
+// IMPORTANT: Expects workspace.Spec.AllowedFQDNs to be pre-validated via ValidateFQDNs.
 // Returns an error if invalid FQDNs are detected.
 func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []InternalService) (*unstructured.Unstructured, error) {
 	// Defensive check: FQDNs must be validated before calling this function

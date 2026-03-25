@@ -420,7 +420,7 @@ var _ = Describe("normalizeFQDNEntry", func() {
 	})
 })
 
-var _ = Describe("validateFQDNs (whitespace edge cases)", func() {
+var _ = Describe("ValidateFQDNs (whitespace edge cases)", func() {
 	It("accepts FQDN with surrounding whitespace as valid after trimming", func() {
 		err := ValidateFQDNs([]string{"  example.com  "})
 		Expect(err).NotTo(HaveOccurred())
