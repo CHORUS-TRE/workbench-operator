@@ -341,7 +341,9 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					timeout := time.Duration(r.Config.ApplicationStartupTimeout) * time.Second
 					if time.Since(notReadySince) > timeout {
 						message = fmt.Sprintf("Startup timeout: app did not become ready within %s (%s)", timeout, message)
-						r.deleteJob(ctx, foundJob)
+						if err := r.deleteJob(ctx, foundJob); err != nil {
+							log.V(1).Error(err, "Unable to delete timed-out job", "job", foundJob.Name)
+						}
 					}
 				}
 			}
@@ -526,7 +528,7 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 
 		// Do no create a job in the suspended state. It's a feature to have things in the
 		// Workbench definitions that do not exist yet.
-		if job.Spec.Suspend != nil && *job.Spec.Suspend == true {
+		if job.Spec.Suspend != nil && *job.Spec.Suspend {
 			log.V(1).Info("Skip suspended job", "job", job.Name)
 			return nil, fmt.Errorf("skipping job %q: %w", job.Name, ErrSuspendedJob)
 		}
@@ -789,10 +791,7 @@ func (r *WorkbenchReconciler) updateAppPodHealth(
 			return "Job failed"
 		}
 		// Job is not suspended and has no succeeded/failed pods — starting up
-		if job.Spec.Suspend == nil || !*job.Spec.Suspend {
-			return "Job starting"
-		}
-		return "Job inactive"
+		return "Job starting"
 	}
 
 	// Find pods for this job using the standard job-name label
