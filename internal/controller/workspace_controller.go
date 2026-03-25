@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,11 +30,12 @@ import (
 // WorkspaceReconciler reconciles a Workspace object
 type WorkspaceReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	Recorder           record.EventRecorder
-	RestConfig         *rest.Config
-	Registry           string
-	ServicesRepository string
+	Scheme                 *runtime.Scheme
+	Recorder               record.EventRecorder
+	RestConfig             *rest.Config
+	Registry               string
+	ServicesRepository     string
+	GlobalInternalServices []InternalService
 }
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workspaces,verbs=get;list;watch
@@ -43,8 +46,10 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch
 
 // Reconcile ensures the CiliumNetworkPolicy for this Workspace matches the
 // desired state derived from the WorkspaceSpec.
@@ -83,7 +88,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Validate FQDNs before attempting reconciliation.
-	if err := validateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
+	if err := ValidateFQDNs(workspace.Spec.AllowedFQDNs); err != nil {
 		log.V(1).Info("Invalid FQDN in workspace spec", "error", err)
 		condition := metav1.Condition{
 			Type:               defaultv1alpha1.ConditionNetworkPolicyReady,
@@ -199,7 +204,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // workspace. The CNP is owned by the Workspace so garbage collection handles
 // deletion automatically.
 func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
-	cnp, err := buildNetworkPolicy(*workspace)
+	cnp, err := buildNetworkPolicy(*workspace, r.GlobalInternalServices)
 	if err != nil {
 		return err
 	}
@@ -267,6 +272,59 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 
 	if updated {
 		return r.Update(ctx, &existing)
+	}
+
+	return nil
+}
+
+// ValidateInternalServices checks each service's FQDN against the live cluster.
+// Lookups are scoped to the trusted namespace declared per entry, preventing a tenant
+// from bypassing validation by creating an Ingress with the same hostname in their namespace.
+// Returns an error if any entry is not found. Called at operator startup — caller must exit on error.
+func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
+	for _, svc := range services {
+		found := false
+
+		ingressList := &networkingv1.IngressList{}
+		if err := c.List(ctx, ingressList, client.InNamespace(svc.Namespace)); err != nil {
+			return fmt.Errorf("failed to list Ingresses in namespace %q: %w", svc.Namespace, err)
+		}
+		for _, ing := range ingressList.Items {
+			for _, rule := range ing.Spec.Rules {
+				if strings.EqualFold(rule.Host, svc.FQDN) {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+
+		if !found {
+			svcList := &corev1.ServiceList{}
+			if err := c.List(ctx, svcList, client.InNamespace(svc.Namespace)); err != nil {
+				return fmt.Errorf("failed to list Services in namespace %q: %w", svc.Namespace, err)
+			}
+			for _, ks := range svcList.Items {
+				if ks.Spec.Type != corev1.ServiceTypeLoadBalancer {
+					continue
+				}
+				for _, lbIng := range ks.Status.LoadBalancer.Ingress {
+					if strings.EqualFold(lbIng.Hostname, svc.FQDN) {
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
+			}
+		}
+
+		if !found {
+			return fmt.Errorf("internal service %q (namespace: %q) does not resolve to a cluster-internal address: no Ingress rule or LoadBalancer Service with this hostname was found", svc.FQDN, svc.Namespace)
+		}
 	}
 
 	return nil

@@ -29,6 +29,9 @@ spec:
         {{- range $k, $v := .Values.storage.pvcLabels }}
         - --pvc-label={{ $k }}={{ $v }}
         {{- end }}
+        {{- range .Values.globalInternalServices }}
+        - --global-internal-service={{ .namespace }}/{{ .fqdn }}:{{ join "," .ports }}
+        {{- end }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
         {{- with .Values.workbench.serverResources }}

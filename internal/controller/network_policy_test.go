@@ -26,7 +26,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 	It("builds kube-dns + intra-namespace egress and intra-namespace ingress for Airgapped workspace", func() {
 		ws := baseWorkspace()
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp).NotTo(BeNil())
 		Expect(cnp.GetName()).To(Equal("workspace-netpol"))
@@ -69,7 +69,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyFQDNAllowlist
 		ws.Spec.AllowedFQDNs = []string{"example.com", "*.corp.internal"}
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
@@ -91,7 +91,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws := baseWorkspace()
 		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyOpen
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
@@ -109,7 +109,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 
 	It("uses empty endpoint selector (all pods in namespace)", func() {
 		ws := baseWorkspace()
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		spec := cnp.Object["spec"].(map[string]any)
@@ -123,7 +123,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws.Spec.NetworkPolicy = defaultv1alpha1.NetworkPolicyFQDNAllowlist
 		ws.Spec.AllowedFQDNs = []string{"invalid domain with spaces"}
 
-		_, err := buildNetworkPolicy(ws)
+		_, err := buildNetworkPolicy(ws, nil)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid FQDNs"))
 	})
@@ -132,7 +132,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		ws := baseWorkspace()
 		ws.Name = strings.Repeat("a", 253)
 
-		cnp, err := buildNetworkPolicy(ws)
+		cnp, err := buildNetworkPolicy(ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cnp.GetName()).To(Equal(cnpNameForWorkspace(ws.Name)))
 		Expect(len(cnp.GetName())).To(BeNumerically("<=", 253))
@@ -140,48 +140,149 @@ var _ = Describe("buildNetworkPolicy", func() {
 	})
 })
 
-var _ = Describe("validateFQDNs", func() {
+var _ = Describe("buildNetworkPolicy with internal services", func() {
+	baseWorkspace := func(policy string) defaultv1alpha1.Workspace {
+		return defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "workspace",
+				Namespace: "workspace-ns",
+			},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: policy,
+			},
+		}
+	}
+
+	internalSvcs := []InternalService{
+		{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443", "22"}},
+		{Namespace: "i2b2", FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
+	}
+
+	It("emits internal service egress rules in Airgapped mode", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, internalSvcs)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base rules + 2 internal service rules
+		Expect(egress).To(HaveLen(5))
+
+		gitlabRule := egress[3]
+		toFQDNs := gitlabRule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.chorus-tre.ch")))
+		toPorts := gitlabRule["toPorts"].([]map[string]any)
+		ports := toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "22")))
+
+		i2b2Rule := egress[4]
+		toFQDNs2 := i2b2Rule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs2).To(ContainElement(HaveKeyWithValue("matchName", "i2b2.chorus-tre.ch")))
+	})
+
+	It("emits internal service egress rules in Open mode", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyOpen)
+		cnp, err := buildNetworkPolicy(ws, internalSvcs)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 2 internal + 1 open-internet = 6
+		Expect(egress).To(HaveLen(6))
+
+		gitlabRule := egress[3]
+		toFQDNs := gitlabRule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.chorus-tre.ch")))
+	})
+
+	It("emits internal service egress rules in FQDNAllowlist mode", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyFQDNAllowlist)
+		ws.Spec.AllowedFQDNs = []string{"example.com"}
+		cnp, err := buildNetworkPolicy(ws, internalSvcs)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 2 internal + 1 allowlist = 6
+		Expect(egress).To(HaveLen(6))
+
+		gitlabRule := egress[3]
+		toFQDNs := gitlabRule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.chorus-tre.ch")))
+	})
+
+	It("emits no extra rules when internal services list is empty", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, []InternalService{})
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		Expect(egress).To(HaveLen(3))
+	})
+
+	It("emits no extra rules when internal services list is nil", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		Expect(egress).To(HaveLen(3))
+	})
+
+	It("uses the FQDN as-is (normalization happens at flag parse time)", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		cnp, err := buildNetworkPolicy(ws, []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		rule := egress[3]
+		toFQDNs := rule["toFQDNs"].([]map[string]any)
+		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "gitlab.chorus-tre.ch")))
+	})
+})
+
+var _ = Describe("ValidateFQDNs", func() {
 	It("accepts valid FQDNs", func() {
-		err := validateFQDNs([]string{"example.com", "sub.example.com", "a.b.c.d.com"})
+		err := ValidateFQDNs([]string{"example.com", "sub.example.com", "a.b.c.d.com"})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("accepts valid wildcard patterns", func() {
-		err := validateFQDNs([]string{"*.example.com", "*.corp.internal"})
+		err := ValidateFQDNs([]string{"*.example.com", "*.corp.internal"})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("rejects empty entries", func() {
-		err := validateFQDNs([]string{"example.com", "", "other.com"})
+		err := ValidateFQDNs([]string{"example.com", "", "other.com"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("empty FQDN"))
 	})
 
 	It("rejects entries with spaces", func() {
-		err := validateFQDNs([]string{"not a domain"})
+		err := ValidateFQDNs([]string{"not a domain"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
 	})
 
 	It("rejects entries with invalid characters", func() {
-		err := validateFQDNs([]string{"exam!ple.com"})
+		err := ValidateFQDNs([]string{"exam!ple.com"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
 	})
 
 	It("rejects single-label names (must contain at least one dot)", func() {
-		err := validateFQDNs([]string{"localhost"})
+		err := ValidateFQDNs([]string{"localhost"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid FQDN"))
 	})
 
 	It("accepts an empty list", func() {
-		err := validateFQDNs([]string{})
+		err := ValidateFQDNs([]string{})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("accepts nil", func() {
-		err := validateFQDNs(nil)
+		err := ValidateFQDNs(nil)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -190,7 +291,7 @@ var _ = Describe("validateFQDNs", func() {
 		// 63 + 1 + 63 + 1 + 63 + 1 + 63 = 255 chars
 		longFQDN := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 63)
 		Expect(len(longFQDN)).To(Equal(255))
-		err := validateFQDNs([]string{longFQDN})
+		err := ValidateFQDNs([]string{longFQDN})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("exceeds maximum length of 253"))
 	})
@@ -202,7 +303,7 @@ var _ = Describe("validateFQDNs", func() {
 		label61 := strings.Repeat("b", 61)
 		fqdn253 := label63 + "." + label63 + "." + label63 + "." + label61
 		Expect(len(fqdn253)).To(Equal(253))
-		err := validateFQDNs([]string{fqdn253})
+		err := ValidateFQDNs([]string{fqdn253})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -210,7 +311,7 @@ var _ = Describe("validateFQDNs", func() {
 		// Create a label with 64 characters (exceeds max)
 		longLabel := strings.Repeat("x", 64)
 		fqdn := longLabel + ".example.com"
-		err := validateFQDNs([]string{fqdn})
+		err := ValidateFQDNs([]string{fqdn})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
 	})
@@ -219,7 +320,7 @@ var _ = Describe("validateFQDNs", func() {
 		// Create a label with exactly 63 characters
 		label63 := strings.Repeat("a", 63)
 		fqdn := label63 + ".example.com"
-		err := validateFQDNs([]string{fqdn})
+		err := ValidateFQDNs([]string{fqdn})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -227,7 +328,7 @@ var _ = Describe("validateFQDNs", func() {
 		// Wildcard should not count toward label length, but the domain after it should be validated
 		longLabel := strings.Repeat("y", 64)
 		fqdn := "*." + longLabel + ".example.com"
-		err := validateFQDNs([]string{fqdn})
+		err := ValidateFQDNs([]string{fqdn})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
 	})
@@ -235,19 +336,19 @@ var _ = Describe("validateFQDNs", func() {
 	It("accepts wildcard FQDN with valid label lengths", func() {
 		label63 := strings.Repeat("a", 63)
 		fqdn := "*." + label63 + ".com"
-		err := validateFQDNs([]string{fqdn})
+		err := ValidateFQDNs([]string{fqdn})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("rejects case-insensitive duplicate FQDNs", func() {
-		err := validateFQDNs([]string{"example.com", "EXAMPLE.COM"})
+		err := ValidateFQDNs([]string{"example.com", "EXAMPLE.COM"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("duplicate FQDN entry"))
 	})
 
 	It("rejects multiple FQDNs when one exceeds label length", func() {
 		longLabel := strings.Repeat("z", 64)
-		err := validateFQDNs([]string{"valid.example.com", longLabel + ".bad.com", "another.valid.com"})
+		err := ValidateFQDNs([]string{"valid.example.com", longLabel + ".bad.com", "another.valid.com"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("label exceeding maximum length of 63"))
 	})
@@ -319,20 +420,20 @@ var _ = Describe("normalizeFQDNEntry", func() {
 	})
 })
 
-var _ = Describe("validateFQDNs (whitespace edge cases)", func() {
+var _ = Describe("ValidateFQDNs (whitespace edge cases)", func() {
 	It("accepts FQDN with surrounding whitespace as valid after trimming", func() {
-		err := validateFQDNs([]string{"  example.com  "})
+		err := ValidateFQDNs([]string{"  example.com  "})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("rejects whitespace-only entry (normalizes to empty)", func() {
-		err := validateFQDNs([]string{"   "})
+		err := ValidateFQDNs([]string{"   "})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("empty FQDN"))
 	})
 
 	It("detects duplicates across mixed-case and whitespace variants", func() {
-		err := validateFQDNs([]string{" EXAMPLE.COM ", "example.com"})
+		err := ValidateFQDNs([]string{" EXAMPLE.COM ", "example.com"})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("duplicate FQDN entry"))
 	})
