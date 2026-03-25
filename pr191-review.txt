@@ -1,0 +1,136 @@
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║          PR #191 REVIEW — feat(operator): add license injection              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+  Overall the design is clean and well-structured. The code is readable and
+  the test coverage for the happy paths is solid. A few issues worth
+  addressing:
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [BUG] getLicenseConfig silently swallows all k8s errors                      │
+│       internal/controller/license.go:42-45                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  The current code:
+
+      if err != nil {
+          log.V(1).Info("License Secret not found, skipping license injection", ...)
+          return nil, nil
+      }
+
+  returns (nil, nil) for ANY error from k8sClient.Get — not just NotFound.
+  A transient API server error, a permission denial, or a network timeout
+  will silently disable all license injection with a misleading "not found"
+  log at V(1) (essentially invisible in production). The reconcile won't be
+  retried because no error is returned.
+
+  Fix: use apierrors.IsNotFound(err) to distinguish the expected
+  "Secret doesn't exist yet" case from real errors:
+
+      if apierrors.IsNotFound(err) {
+          log.V(1).Info("License Secret not found, skipping license injection",
+              "secret", secretName)
+          return nil, nil
+      }
+      return nil, fmt.Errorf("failed to get license Secret %q: %w", secretName, err)
+
+  The caller in workbench_controller.go:209-212 already handles errors
+  gracefully (logs + continues without licenses), so propagating the error
+  is safe and allows the reconcile loop to retry on transient failures.
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [MEDIUM] Silent misconfiguration: unknown license type produces no warning   │
+│          internal/controller/license.go:93-95                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  If an admin typos the type (e.g. "platfrom-file", "platform_file"),
+  injectLicenseEnv returns nil with zero indication anything is wrong.
+  The app starts without its license and the operator gives no clue why.
+
+  Fix: add a log warning before the final `return nil`. This requires
+  threading ctx into injectLicenseEnv, which is a small but worthwhile
+  change.
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [DESIGN GAP] user-provided mount path is not validated                       │
+│              internal/controller/license.go:80-87                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  The "user-provided" case sets an env var to MountPath and trusts it is
+  already mounted "via the storage manager." But there is no check that the
+  path is actually mounted in the container — if the storage manager doesn't
+  mount it, the env var points to a nonexistent path and the app silently
+  gets a bad license path.
+
+  Worth at minimum a comment documenting which storage mechanism is expected
+  to provide the mount, and ideally a validation step or an integration test
+  that exercises this path end-to-end.
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [MINOR] Dead field: SecretKey on user-provided entries                       │
+│         internal/controller/license.go:28                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  LicenseEntry.SecretKey is parsed from YAML for all entry types but only
+  used for "platform-file" and "license-server". An admin configuring a
+  "user-provided" entry can set secretKey: something and it will be silently
+  ignored. A comment on the struct field clarifying which types use it would
+  help avoid confusion.
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [COVERAGE] getLicenseConfig has no unit tests                                │
+│            internal/controller/license_test.go                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  There are thorough tests for injectLicenseEnv and integration tests for
+  initJob, but getLicenseConfig itself has no tests. Key missing cases:
+
+    - Secret exists with valid config.yaml        → returns parsed config
+    - Secret exists but missing config.yaml key   → returns nil
+    - Secret does not exist (NotFound)            → returns nil
+    - config.yaml contains invalid YAML           → returns error
+    - Transient k8s error                         → should return error
+                                                    (currently returns nil)
+
+  These can be covered with a fake client (no envtest needed).
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [COVERAGE] No controller-level license integration test                      │
+│            internal/controller/workbench_controller_test.go                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  workbench_controller_test.go has no cases exercising the license path
+  through reconcile. The job_test.go tests cover initJob directly (good),
+  but a controller-level test would catch wiring issues — e.g. getLicenseConfig
+  being called with the wrong namespace, or the env var not appearing in the
+  final reconciled Job.
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [OK] RBAC                                                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  The secrets RBAC marker was already present before this PR:
+    // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+  No change needed.
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  SUMMARY                                                                     ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Issue                                          Severity                     ║
+║  ─────────────────────────────────────────────  ────────────────────────    ║
+║  All k8s errors treated as NotFound             Bug                          ║
+║  Unknown license type silently ignored          Medium                       ║
+║  user-provided mount path not validated         Design gap                   ║
+║  SecretKey misleading for user-provided         Minor / docs                 ║
+║  getLicenseConfig has no unit tests             Coverage gap                 ║
+║  No controller-level license integration test   Coverage gap                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝

@@ -52,8 +52,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		toServices := intraServiceRule["toServices"].([]map[string]any)
 		Expect(toServices).To(HaveLen(1))
 		svcSelector := toServices[0]["k8sServiceSelector"].(map[string]any)
-		nsSel := svcSelector["namespaceSelector"].(map[string]any)
-		Expect(nsSel["matchLabels"]).To(HaveKeyWithValue("kubernetes.io/metadata.name", "workspace-ns"))
+		Expect(svcSelector).To(HaveKey("selector"))
+		Expect(svcSelector).NotTo(HaveKey("namespaceSelector"))
 
 		ingress := spec["ingress"].([]map[string]any)
 		Expect(ingress).To(HaveLen(1))
