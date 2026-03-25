@@ -154,19 +154,6 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		"workspace": workspace.Name,
 	}
 
-	// namespaceLabelSelector targets a Kubernetes Namespace object by its auto-assigned
-	// metadata label. Used in toServices.k8sServiceSelector.namespaceSelector, which
-	// selects namespace resources — not pods.
-	//
-	// toEndpoints/fromEndpoints rules use the Cilium-synthetic label
-	// "k8s:io.kubernetes.pod.namespace" instead, which is stamped on pod identities
-	// (not namespace objects) by Cilium's policy engine.
-	namespaceLabelSelector := map[string]any{
-		"matchLabels": map[string]any{
-			"kubernetes.io/metadata.name": workspace.Namespace,
-		},
-	}
-
 	// Note: no fromEndpoints/fromServices filter is needed on any rule below.
 	// The top-level endpointSelector (empty matchLabels) already scopes this entire
 	// policy to pods in the workspace namespace — Cilium only applies these egress
@@ -210,12 +197,14 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		// The empty selector matches all services in the namespace. This is intentional:
 		// each workspace owns its namespace exclusively — no external services
 		// (monitoring, mesh proxies, etc.) are deployed here by design.
+		// Note: namespaceSelector is intentionally omitted — Cilium does not support it
+		// in k8sServiceSelector (unknown field, stripped on apply causing reconcile loops).
+		// Scoping to the local namespace is implicit for namespaced CiliumNetworkPolicies.
 		{
 			"toServices": []map[string]any{
 				{
 					"k8sServiceSelector": map[string]any{
-						"selector":          map[string]any{"matchLabels": map[string]any{}},
-						"namespaceSelector": namespaceLabelSelector,
+						"selector": map[string]any{"matchLabels": map[string]any{}},
 					},
 				},
 			},

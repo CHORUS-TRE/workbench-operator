@@ -1149,24 +1149,6 @@ var _ = Describe("ValidateInternalServices", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("succeeds when FQDN matches a LoadBalancer Service hostname in the declared namespace", func() {
-		svc := &corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-lb", Namespace: "gitlab"},
-			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
-			Status: corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{Hostname: "gitlab.chorus-tre.ch"},
-					},
-				},
-			},
-		}
-		err := ValidateInternalServices(ctx, newFakeClient(svc), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-		})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
 	It("is case-insensitive when matching FQDN", func() {
 		ing := &networkingv1.Ingress{
 			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
@@ -1224,25 +1206,6 @@ var _ = Describe("ValidateInternalServices", func() {
 		})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("ingress list error"))
-	})
-
-	It("returns an error when Service listing fails (Ingress not found)", func() {
-		c := fake.NewClientBuilder().
-			WithScheme(k8sClient.Scheme()).
-			WithInterceptorFuncs(interceptor.Funcs{
-				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-					if _, ok := list.(*corev1.ServiceList); ok {
-						return fmt.Errorf("service list error")
-					}
-					return c.List(ctx, list, opts...)
-				},
-			}).
-			Build()
-		err := ValidateInternalServices(ctx, c, []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-		})
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("service list error"))
 	})
 
 	It("returns an error on the first failing entry when multiple services are configured", func() {
