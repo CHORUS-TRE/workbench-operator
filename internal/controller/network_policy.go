@@ -142,9 +142,9 @@ type NetworkPolicyNamespaces struct {
 //   - Airgapped     → kube-dns + intra-namespace (pod + service) + internal services only
 //
 // Internal services are always allowed regardless of mode. They are reached via the
-// cluster's Ingress controller (post-DNAT destination). A single toEndpoints rule
+// cluster's ingress controller (post-DNAT destination). A single toEndpoints rule
 // for ns.AllowedEgress namespaces is emitted (when internalServices is non-empty),
-// with Cilium TLS SNI L7 rules restricting access to only the listed FQDNs.
+// restricted to port 443 only.
 //
 // Ingress policy: pods from ns.AllowedIngress namespaces and the workspace namespace
 // may connect inbound. This prevents pods in other workspaces from reaching services here.
@@ -224,22 +224,25 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 	}
 
 	// Internal platform services: always allowed in all modes (Open, Airgapped, FQDNAllowlist).
-	// A single egress rule targets the Ingress controller namespace (post-DNAT destination)
-	// with Cilium TLS SNI L7 rules restricting access to only the declared FQDNs.
+	// A single egress rule targets the ingress controller namespace (post-DNAT destination)
+	// on port 443 only.
 	//
 	// Why toEndpoints instead of toFQDNs: Cilium's eBPF performs service DNAT (LoadBalancer
-	// IP → ingress-nginx pod IP) before the policy check. toFQDNs generates a CIDR for the
-	// resolved IP but after DNAT the destination is a Cilium endpoint — CIDRs do not match
+	// IP → ingress controller pod IP) before the policy check. toFQDNs generates a CIDR for
+	// the resolved IP but after DNAT the destination is a Cilium endpoint — CIDRs do not match
 	// endpoints. toEndpoints matches the post-DNAT pod IP directly.
 	//
-	// Why SNI: toEndpoints alone would allow access to ALL services behind the shared ingress.
-	// The SNI rule (l7proto: tls) restricts to only the listed FQDNs by inspecting the
-	// plaintext TLS ClientHello, preventing intra-CHORUS data exfiltration.
+	// Why no SNI filtering: Cilium's l7proto:tls routes connections through the egress-cluster-tls
+	// Envoy upstream, which attempts to re-establish TLS to the backend rather than passing the
+	// original stream through. The upstream TLS handshake fails (no trusted CA for internal certs),
+	// tearing down all connections with zero bytes transferred. Per-FQDN filtering is deferred to
+	// a dedicated ingress controller (Envoy Gateway) with a separate LoadBalancer IP — see
+	// charts/chorus-internal-gateway in chorus-tre. Until then, all services behind the shared
+	// ingress are reachable on port 443 from workspace pods (interim security gap).
 	//
-	// Why Open mode (toCIDR: 0.0.0.0/0) does not bypass SNI: Cilium classifies pod IPs as
-	// endpoints, not world. After service DNAT the destination is the ingress-nginx pod IP —
-	// a Cilium endpoint — which is never matched by a CIDR rule. The toEndpoints+SNI rule
-	// therefore remains the only path to ingress-nginx regardless of the workspace's network mode.
+	// Why Open mode (toCIDR: 0.0.0.0/0) does not bypass this rule: Cilium classifies pod IPs as
+	// endpoints, not world. After service DNAT the destination is the ingress controller pod IP —
+	// a Cilium endpoint — which is never matched by a CIDR rule.
 	if len(internalServices) > 0 && len(ns.AllowedEgress) > 0 {
 		egressEndpoints := make([]map[string]any, 0, len(ns.AllowedEgress))
 		for _, egressNS := range ns.AllowedEgress {
@@ -255,10 +258,6 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 				{
 					"ports": []map[string]any{
 						{"port": "443", "protocol": "TCP"},
-					},
-					"rules": map[string]any{
-						"l7proto": "tls",
-						"l7":      sniSelectors(internalServices),
 					},
 				},
 			},
@@ -322,16 +321,6 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 			},
 		},
 	}, nil
-}
-
-// sniSelectors converts internal services to Cilium l7 TLS SNI selectors.
-// Produces [{sni: "fqdn"}, ...] for use with l7proto: tls in CNP toPorts rules.
-func sniSelectors(services []InternalService) []map[string]any {
-	selectors := make([]map[string]any, 0, len(services))
-	for _, svc := range services {
-		selectors = append(selectors, map[string]any{"sni": svc.FQDN})
-	}
-	return selectors
 }
 
 func httpPortRules() []map[string]any {

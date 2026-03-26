@@ -215,13 +215,13 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		{Namespace: "i2b2", FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
 	}
 
-	It("emits a single ingress-nginx toEndpoints rule with SNI selectors in Airgapped mode", func() {
+	It("emits a single toEndpoints rule for the egress namespace on port 443 in Airgapped mode", func() {
 		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
 		cnp, err := buildNetworkPolicy(ws, internalSvcs, netpolTestNS)
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base rules + 1 ingress-nginx rule (replaces per-service toFQDNs)
+		// 3 base rules + 1 ingress-nginx rule
 		Expect(egress).To(HaveLen(4))
 
 		ingressNginxRule := egress[3]
@@ -234,12 +234,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		ports := toPorts[0]["ports"].([]map[string]any)
 		Expect(ports).To(HaveLen(1))
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
-
-		rules := toPorts[0]["rules"].(map[string]any)
-		Expect(rules["l7proto"]).To(Equal("tls"))
-		l7 := rules["l7"].([]map[string]any)
-		Expect(l7).To(ContainElement(HaveKeyWithValue("sni", "gitlab.chorus-tre.ch")))
-		Expect(l7).To(ContainElement(HaveKeyWithValue("sni", "i2b2.chorus-tre.ch")))
+		Expect(toPorts[0]).NotTo(HaveKey("rules"))
 	})
 
 	It("emits internal service rule in Open mode (before internet rule)", func() {
@@ -505,6 +500,15 @@ var _ = Describe("cnpNameForWorkspace", func() {
 		name := cnpNameForWorkspace(long)
 		Expect(len(name)).To(BeNumerically("<=", 253))
 		Expect(name).To(ContainSubstring("-netpol-"))
+	})
+
+	It("falls back to 'ws' prefix when truncation leaves only dashes", func() {
+		// A name of 247+ dashes triggers the long path; after truncating to maxPrefixLen
+		// and TrimRight("-"), the prefix is empty — must fall back to "ws".
+		allDashes := strings.Repeat("-", 247)
+		name := cnpNameForWorkspace(allDashes)
+		Expect(name).To(HavePrefix("ws-netpol-"))
+		Expect(len(name)).To(BeNumerically("<=", 253))
 	})
 
 	It("uses short form at the exact boundary (246 chars fits, 247 does not)", func() {
