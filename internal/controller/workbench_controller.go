@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,6 +39,21 @@ const finalizer = "default.k8s.chorus-tre.ch/finalizer"
 const matchingLabel = "workbench"
 
 var ErrSuspendedJob = errors.New("suspended job")
+
+// patchStatus sends the full workbench status as a merge-patch.
+// Because the patch body does not include metadata.resourceVersion, the
+// server performs no optimistic concurrency check, so it cannot fail with
+// a conflict error when the object has been modified between reads and
+// writes within a single reconcile loop.
+func (r *WorkbenchReconciler) patchStatus(ctx context.Context, workbench *defaultv1alpha1.Workbench) error {
+	data, err := json.Marshal(struct {
+		Status defaultv1alpha1.WorkbenchStatus `json:"status"`
+	}{Status: workbench.Status})
+	if err != nil {
+		return err
+	}
+	return r.Status().Patch(ctx, workbench, client.RawPatch(types.MergePatchType, data))
+}
 
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=default.chorus-tre.ch,resources=workbenches/status,verbs=get;update;patch
@@ -112,6 +128,10 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// statusDirty tracks whether any status field was modified during this
+	// reconcile. A single patchStatus call is issued at the end if true.
+	statusDirty := false
+
 	// -------- SERVER ---------------
 
 	// The deployment of Xpra server
@@ -141,11 +161,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		serverHealthUpdated := r.updateServerPodHealth(ctx, &workbench, *foundDeployment)
 		statusUpdated = statusUpdated || serverHealthUpdated
 
-		if statusUpdated {
-			if err := r.Status().Update(ctx, &workbench); err != nil {
-				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
-			}
-		}
+		statusDirty = statusDirty || statusUpdated
 
 		// -------- SERVER UPDATES ------
 
@@ -227,7 +243,12 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if !xpraReady {
 		log.V(1).Info("Xpra server not ready yet, skipping app job creation")
-		// Requeue to check again later
+		if statusDirty {
+			if err := r.patchStatus(ctx, &workbench); err != nil {
+				log.V(1).Error(err, "Unable to patch WorkbenchStatus")
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -238,9 +259,7 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			// Set app status to Failed and continue with other apps
 			errorMessage := fmt.Sprintf("Failed to initialize job: %s", err.Error())
 			if workbench.SetAppStatusFailed(uid, errorMessage) {
-				if err := r.Status().Update(ctx, &workbench); err != nil {
-					log.V(1).Error(err, "Unable to update app status to Failed", "app", app.Name)
-				}
+				statusDirty = true
 			}
 			continue
 		}
@@ -322,7 +341,10 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					timeout := time.Duration(r.Config.ApplicationStartupTimeout) * time.Second
 					if time.Since(notReadySince) > timeout {
 						message = fmt.Sprintf("Startup timeout: app did not become ready within %s (%s)", timeout, message)
-						r.deleteJob(ctx, foundJob)
+						if err := r.deleteJob(ctx, foundJob); err != nil {
+							log.V(1).Error(err, "Unable to delete timed-out job", "job", foundJob.Name)
+						}
+						annotationUpdated = false // job is being deleted, skip annotation persist
 					}
 				}
 			}
@@ -335,11 +357,8 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		// TODO: we could follow the pod as well by following the batch.kubernetes.io/job-name
-		statusUpdated := (&workbench).UpdateStatusFromJob(uid, *foundJob, message)
-		if statusUpdated {
-			if err := r.Status().Update(ctx, &workbench); err != nil {
-				log.V(1).Error(err, "Unable to update the WorkbenchStatus")
-			}
+		if (&workbench).UpdateStatusFromJob(uid, *foundJob, message) {
+			statusDirty = true
 		}
 	}
 
@@ -364,19 +383,25 @@ func (r *WorkbenchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Clean up orphaned status entries for apps that were removed from spec
-	if workbench.CleanOrphanedAppStatuses() {
+	orphansCleaned := workbench.CleanOrphanedAppStatuses()
+	if orphansCleaned {
 		log.V(1).Info("Cleaned up orphaned app status entries")
-		if err := r.Status().Update(ctx, &workbench); err != nil {
-			log.V(1).Error(err, "Unable to update WorkbenchStatus after cleanup")
-			return ctrl.Result{}, err
-		}
 	}
 
 	// ---------- OBSERVED GENERATION ---------------
-	if workbench.UpdateObservedGeneration() {
+	generationUpdated := workbench.UpdateObservedGeneration()
+	if generationUpdated {
 		log.V(1).Info("Updated observed generation", "generation", workbench.Status.ObservedGeneration)
-		if err := r.Status().Update(ctx, &workbench); err != nil {
-			log.V(1).Error(err, "Unable to update observed generation in WorkbenchStatus")
+	}
+
+	statusDirty = statusDirty || orphansCleaned || generationUpdated
+
+	// ---------- FLUSH STATUS ---------------
+
+	// Issue a single status patch for all accumulated changes.
+	if statusDirty {
+		if err := r.patchStatus(ctx, &workbench); err != nil {
+			log.V(1).Error(err, "Unable to patch WorkbenchStatus")
 			return ctrl.Result{}, err
 		}
 	}
@@ -504,7 +529,7 @@ func (r *WorkbenchReconciler) createJob(ctx context.Context, job batchv1.Job) (*
 
 		// Do no create a job in the suspended state. It's a feature to have things in the
 		// Workbench definitions that do not exist yet.
-		if job.Spec.Suspend != nil && *job.Spec.Suspend == true {
+		if job.Spec.Suspend != nil && *job.Spec.Suspend {
 			log.V(1).Info("Skip suspended job", "job", job.Name)
 			return nil, fmt.Errorf("skipping job %q: %w", job.Name, ErrSuspendedJob)
 		}
@@ -767,10 +792,7 @@ func (r *WorkbenchReconciler) updateAppPodHealth(
 			return "Job failed"
 		}
 		// Job is not suspended and has no succeeded/failed pods — starting up
-		if job.Spec.Suspend == nil || !*job.Spec.Suspend {
-			return "Job starting"
-		}
-		return "Job inactive"
+		return "Job starting"
 	}
 
 	// Find pods for this job using the standard job-name label
