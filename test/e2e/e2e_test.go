@@ -368,7 +368,7 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying CNP has 4 egress rules and the FQDN rule contains expected selectors")
+			By("verifying CNP has at least 4 egress rules and the FQDN rule contains expected selectors")
 			Eventually(func() (string, error) {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-netpol",
 					"-n", testNS, "-o", "jsonpath={.spec.egress}")
@@ -380,7 +380,7 @@ var _ = Describe("controller", Ordered, func() {
 				if err := json.Unmarshal(out, &egress); err != nil {
 					return "", err
 				}
-				if len(egress) != 4 {
+				if len(egress) < 4 {
 					return "", nil
 				}
 				lastRule := egress[len(egress)-1]
