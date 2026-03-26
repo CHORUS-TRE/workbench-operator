@@ -368,28 +368,31 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying CNP is created with 4 egress rules")
-			Eventually(func() (int, error) {
+			By("verifying CNP has at least 4 egress rules and the FQDN rule contains expected selectors")
+			Eventually(func() (string, error) {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-netpol",
 					"-n", testNS, "-o", "jsonpath={.spec.egress}")
 				out, err := utils.Run(cmd)
 				if err != nil {
-					return 0, err
+					return "", err
 				}
 				var egress []map[string]any
 				if err := json.Unmarshal(out, &egress); err != nil {
-					return 0, err
+					return "", err
 				}
-				return len(egress), nil
-			}, 60*time.Second, time.Second).Should(Equal(4))
-
-			By("verifying the FQDN rule contains expected selectors")
-			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-netpol",
-				"-n", testNS, "-o", "jsonpath={.spec.egress[3].toFQDNs}")
-			out, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(string(out)).To(ContainSubstring("example.com"))
-			Expect(string(out)).To(ContainSubstring("*.corp.internal"))
+				if len(egress) < 4 {
+					return "", nil
+				}
+				lastRule := egress[len(egress)-1]
+				toFQDNsBytes, err := json.Marshal(lastRule["toFQDNs"])
+				if err != nil {
+					return "", err
+				}
+				return string(toFQDNsBytes), nil
+			}, 60*time.Second, time.Second).Should(And(
+				ContainSubstring("example.com"),
+				ContainSubstring("*.corp.internal"),
+			))
 		})
 
 		It("creates a CiliumNetworkPolicy allowing full internet for Open workspace", func() {
@@ -399,16 +402,29 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying CNP has toCIDR rule for internet access")
+			By("verifying CNP has toCIDR rule covering 0.0.0.0/0 for internet access")
 			Eventually(func() (string, error) {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "open-ws-netpol",
-					"-n", testNS, "-o", "jsonpath={.spec.egress[3].toCIDR}")
+					"-n", testNS, "-o", "jsonpath={.spec.egress}")
 				out, err := utils.Run(cmd)
 				if err != nil {
 					return "", err
 				}
-				return string(out), nil
-			}, 60*time.Second, time.Second).ShouldNot(BeEmpty())
+				var openEgress []map[string]any
+				if err := json.Unmarshal(out, &openEgress); err != nil {
+					return "", err
+				}
+				lastRule := openEgress[len(openEgress)-1]
+				cidrs, ok := lastRule["toCIDR"].([]any)
+				if !ok {
+					return "", nil
+				}
+				cidrBytes, err := json.Marshal(cidrs)
+				if err != nil {
+					return "", err
+				}
+				return string(cidrBytes), nil
+			}, 60*time.Second, time.Second).Should(ContainSubstring("0.0.0.0/0"))
 		})
 
 		It("sets owner reference so CNP is garbage-collected with workspace", func() {

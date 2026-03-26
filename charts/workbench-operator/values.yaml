@@ -1,14 +1,30 @@
 
 # Platform-internal services always reachable from workspace pods in all network modes.
-# Each entry must correspond to an Ingress host or LoadBalancer Service hostname in the declared namespace.
+# Each entry must correspond to an Ingress host in the declared namespace.
+# Because all internal services share the same ingress controller, access is restricted to
+# only the listed FQDNs via Cilium L7 TLS SNI inspection, blocking other URLs served by
+# the same ingress controller.
 # globalInternalServices:
-# - namespace: gitlab-system
-#   fqdn: gitlab.int.chorus-tre.ch
-#   ports: ["443", "22"]
+# - namespace: gitlab
+#   fqdn: gitlab.local.chorus-tre.ch
+#   ports: ["443"]
 # - namespace: i2b2
-#   fqdn: i2b2.int.chorus-tre.ch
+#   fqdn: i2b2.local.chorus-tre.ch
 #   ports: ["443"]
 globalInternalServices: []
+
+# Network policy namespace configuration.
+networkPolicy:
+  # Namespaces whose pods may initiate connections INTO workspace pods (e.g. backend, prometheus).
+  allowedIngressNamespaces:
+    - backend
+    - prometheus
+  # Namespaces that workspace pods may connect OUT TO.
+  # ingress-nginx is required because Cilium performs service DNAT before the policy check:
+  # traffic to internal service FQDNs is load-balanced to ingress-nginx controller pod IPs before
+  # evaluation, so toEndpoints for the ingress-nginx namespace is needed to match the post-DNAT destination.
+  allowedEgressNamespaces:
+    - ingress-nginx
 
 # Storage configuration
 storage:
@@ -62,7 +78,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.48
+      tag: 0.4.49
     resources:
       limits:
         cpu: 500m

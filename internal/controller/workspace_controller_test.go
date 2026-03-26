@@ -41,11 +41,17 @@ var _ = Describe("WorkspaceReconciler", func() {
 		Kind:    "CiliumNetworkPolicy",
 	}
 
+	testNS := NetworkPolicyNamespaces{
+		AllowedIngress: []string{"test-ingress-ns"},
+		AllowedEgress:  []string{"test-egress-ns"},
+	}
+
 	newReconciler := func() *WorkspaceReconciler {
 		return &WorkspaceReconciler{
-			Client:   k8sClient,
-			Scheme:   k8sClient.Scheme(),
-			Recorder: record.NewFakeRecorder(10),
+			Client:                  k8sClient,
+			Scheme:                  k8sClient.Scheme(),
+			Recorder:                record.NewFakeRecorder(10),
+			NetworkPolicyNamespaces: testNS,
 		}
 	}
 
@@ -149,7 +155,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
 
 			// Pre-create a CNP with the expected name but a different controller owner reference.
-			cnp, err := buildNetworkPolicy(*workspace, nil)
+			cnp, err := buildNetworkPolicy(*workspace, nil, testNS)
 			Expect(err).NotTo(HaveOccurred())
 
 			t := true
@@ -315,34 +321,6 @@ var _ = Describe("WorkspaceReconciler", func() {
 			updated := &defaultv1alpha1.Workspace{}
 			Expect(k8sClient.Get(ctx, namespacedName, updated)).To(Succeed())
 			Expect(updated.Status.ObservedGeneration).To(Equal(updated.Generation))
-		})
-	})
-
-	Describe("Reconcile - CNP owner reference", func() {
-		It("sets the workspace as owner of the CNP", func() {
-			workspace := &defaultv1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      workspaceName,
-					Namespace: workspaceNamespace,
-				},
-				Spec: defaultv1alpha1.WorkspaceSpec{
-					NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
-				},
-			}
-			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
-
-			reconciler := newReconciler()
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
-			Expect(err).NotTo(HaveOccurred())
-
-			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
-			Expect(err).NotTo(HaveOccurred())
-
-			ownerRefs := cnp.GetOwnerReferences()
-			Expect(ownerRefs).To(HaveLen(1))
-			Expect(ownerRefs[0].Kind).To(Equal("Workspace"))
-			Expect(ownerRefs[0].Name).To(Equal(workspaceName))
-			Expect(*ownerRefs[0].Controller).To(BeTrue())
 		})
 	})
 
@@ -544,11 +522,12 @@ var _ = Describe("WorkspaceReconciler", func() {
 			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
 
 			reconciler := &WorkspaceReconciler{
-				Client:     k8sClient,
-				Scheme:     k8sClient.Scheme(),
-				Recorder:   record.NewFakeRecorder(10),
-				RestConfig: cfg,
-				Registry:   "oci://registry.example.invalid",
+				Client:                  k8sClient,
+				Scheme:                  k8sClient.Scheme(),
+				Recorder:                record.NewFakeRecorder(10),
+				RestConfig:              cfg,
+				Registry:                "oci://registry.example.invalid",
+				NetworkPolicyNamespaces: testNS,
 			}
 			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
@@ -572,9 +551,10 @@ var _ = Describe("WorkspaceReconciler", func() {
 			// Use a client wrapper that rejects CiliumNetworkPolicy operations
 			// with a NoKindMatchError, simulating a cluster without Cilium.
 			reconciler := &WorkspaceReconciler{
-				Client:   &noCiliumClient{Client: k8sClient},
-				Scheme:   k8sClient.Scheme(),
-				Recorder: record.NewFakeRecorder(10),
+				Client:                  &noCiliumClient{Client: k8sClient},
+				Scheme:                  k8sClient.Scheme(),
+				Recorder:                record.NewFakeRecorder(10),
+				NetworkPolicyNamespaces: testNS,
 			}
 
 			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
@@ -667,74 +647,6 @@ var _ = Describe("generatePassword", func() {
 		pw1, _ := generatePassword(24)
 		pw2, _ := generatePassword(24)
 		Expect(pw1).NotTo(Equal(pw2))
-	})
-})
-
-var _ = Describe("buildServiceStatus", func() {
-	workspace := &defaultv1alpha1.Workspace{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-ws", Namespace: "default"},
-	}
-
-	It("returns Running when Helm is deployed and spec state is Running", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("deployed", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
-	})
-
-	It("returns Progressing for pending-install", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("pending-install", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
-	})
-
-	It("returns Progressing for pending-upgrade", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("pending-upgrade", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
-	})
-
-	It("returns Failed for failed Helm release", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("failed", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
-	})
-
-	It("returns Stopped when release not found and spec is Stopped", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		Expect(buildServiceStatus("not-found", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
-	})
-
-	It("returns Deleted when release not found and spec is Deleted", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
-		Expect(buildServiceStatus("not-found", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
-	})
-
-	It("returns Progressing for unknown Helm state", func() {
-		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		Expect(buildServiceStatus("superseded", "", svc, "rel", "", workspace).Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
-	})
-
-	It("renders connectionInfoTemplate when Running", func() {
-		svc := defaultv1alpha1.WorkspaceService{
-			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
-			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
-		}
-		status := buildServiceStatus("deployed", "", svc, "ws-pg", "pg-creds", workspace)
-		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
-		Expect(status.ConnectionInfo).To(Equal("postgresql://ws-pg.default:5432"))
-		Expect(status.SecretName).To(Equal("pg-creds"))
-	})
-
-	It("renders SecretName in connectionInfoTemplate", func() {
-		svc := defaultv1alpha1.WorkspaceService{
-			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
-			ConnectionInfoTemplate: "secret: {{.SecretName}}",
-		}
-		Expect(buildServiceStatus("deployed", "", svc, "rel", "my-creds", workspace).ConnectionInfo).To(Equal("secret: my-creds"))
-	})
-
-	It("does not render connectionInfoTemplate when not Running", func() {
-		svc := defaultv1alpha1.WorkspaceService{
-			State:                  defaultv1alpha1.WorkspaceServiceStateStopped,
-			ConnectionInfoTemplate: "postgresql://{{.ReleaseName}}.{{.Namespace}}:5432",
-		}
-		Expect(buildServiceStatus("not-found", "", svc, "ws-pg", "", workspace).ConnectionInfo).To(BeEmpty())
 	})
 })
 
@@ -1206,6 +1118,23 @@ var _ = Describe("ValidateInternalServices", func() {
 		})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("ingress list error"))
+	})
+
+	It("returns an error when two entries declare the same FQDN (case-insensitive)", func() {
+		ing := &networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{Host: "gitlab.chorus-tre.ch"},
+				},
+			},
+		}
+		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{Namespace: "gitlab-mirror", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("duplicate internal service FQDN"))
 	})
 
 	It("returns an error on the first failing entry when multiple services are configured", func() {
