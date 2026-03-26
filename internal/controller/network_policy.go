@@ -331,11 +331,20 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 
 // internalServiceFQDNs extracts the FQDN list from internal services for use
 // as Cilium serverNames in CNP toPorts rules (native Envoy TLS SNI filtering).
-// FQDNs are normalized (lowercased, trimmed) to match Cilium's case-sensitive SNI matching.
+// FQDNs are normalized (lowercased, trimmed), deduplicated, and empty entries are skipped.
 func internalServiceFQDNs(services []InternalService) []string {
+	seen := map[string]struct{}{}
 	fqdns := make([]string, 0, len(services))
 	for _, svc := range services {
-		fqdns = append(fqdns, normalizeFQDNEntry(svc.FQDN))
+		n := normalizeFQDNEntry(svc.FQDN)
+		if n == "" {
+			continue
+		}
+		if _, exists := seen[n]; exists {
+			continue
+		}
+		seen[n] = struct{}{}
+		fqdns = append(fqdns, n)
 	}
 	return fqdns
 }

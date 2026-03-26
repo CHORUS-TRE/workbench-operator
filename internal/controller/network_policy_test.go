@@ -332,6 +332,43 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 
 })
 
+var _ = Describe("internalServiceFQDNs", func() {
+	It("normalizes uppercase FQDNs to lowercase", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("trims whitespace from FQDNs", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "  gitlab.chorus-tre.ch  ", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("skips empty FQDNs", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{Namespace: "empty", FQDN: "", Ports: []string{"443"}},
+			{Namespace: "spaces", FQDN: "   ", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("deduplicates FQDNs (case-insensitive)", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{Namespace: "gitlab-mirror", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("returns empty slice for nil input", func() {
+		Expect(internalServiceFQDNs(nil)).To(BeEmpty())
+	})
+})
+
 var _ = Describe("ValidateFQDNs", func() {
 	It("accepts valid FQDNs", func() {
 		err := ValidateFQDNs([]string{"example.com", "sub.example.com", "a.b.c.d.com"})
