@@ -235,6 +235,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(ports).To(HaveLen(1))
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 
+		Expect(toPorts[0]).To(HaveKey("serverNames"))
 		serverNames := toPorts[0]["serverNames"].([]string)
 		Expect(serverNames).To(ContainElement("gitlab.chorus-tre.ch"))
 		Expect(serverNames).To(ContainElement("i2b2.chorus-tre.ch"))
