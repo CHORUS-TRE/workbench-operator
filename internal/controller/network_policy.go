@@ -117,7 +117,8 @@ type InternalService struct {
 	// FQDN is the fully-qualified domain name of the internal service (e.g. "gitlab.int.chorus-tre.ch").
 	FQDN string
 	// Ports is the list of TCP ports declared for this service (e.g. ["443", "22"]).
-	// Currently only port 443 is enforced in the egress rule (SNI filtering via ingress-nginx).
+	// RESERVED — this field has NO effect on the generated CiliumNetworkPolicy.
+	// buildNetworkPolicy always hardcodes port 443 in the egress rule.
 	// Non-443 ports (e.g. SSH/22) require a separate egress path and are not yet implemented.
 	Ports []string
 }
@@ -144,7 +145,7 @@ type NetworkPolicyNamespaces struct {
 // Internal services are always allowed regardless of mode. They are reached via the
 // cluster's Ingress controller (post-DNAT destination). A single toEndpoints rule
 // for ns.AllowedEgress namespaces is emitted (when internalServices is non-empty),
-// with Cilium TLS SNI L7 rules restricting access to only the listed FQDNs.
+// with Cilium native serverNames SNI filtering restricting access to only the listed FQDNs.
 //
 // Ingress policy: pods from ns.AllowedIngress namespaces and the workspace namespace
 // may connect inbound. This prevents pods in other workspaces from reaching services here.
@@ -225,21 +226,28 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 
 	// Internal platform services: always allowed in all modes (Open, Airgapped, FQDNAllowlist).
 	// A single egress rule targets the Ingress controller namespace (post-DNAT destination)
-	// with Cilium TLS SNI L7 rules restricting access to only the declared FQDNs.
+	// with Cilium native serverNames SNI filtering restricting access to only the declared FQDNs.
 	//
 	// Why toEndpoints instead of toFQDNs: Cilium's eBPF performs service DNAT (LoadBalancer
 	// IP → ingress-nginx pod IP) before the policy check. toFQDNs generates a CIDR for the
 	// resolved IP but after DNAT the destination is a Cilium endpoint — CIDRs do not match
 	// endpoints. toEndpoints matches the post-DNAT pod IP directly.
 	//
-	// Why SNI: toEndpoints alone would allow access to ALL services behind the shared ingress.
-	// The SNI rule (l7proto: tls) restricts to only the listed FQDNs by inspecting the
-	// plaintext TLS ClientHello, preventing intra-CHORUS data exfiltration.
+	// Why serverNames: toEndpoints alone would allow access to ALL services behind the shared
+	// ingress. The serverNames field triggers Cilium's native Envoy tls_inspector to extract
+	// the SNI from the TLS ClientHello, restricting access to only the listed FQDNs and
+	// preventing intra-CHORUS data exfiltration.
+	//
+	// Note: serverNames uses native Envoy TLS inspection, NOT the deprecated proxylib Go
+	// extension (l7proto: tls). Proxylib was deprecated in Cilium v1.16 and is non-functional
+	// in v1.18+ builds that ship without the Go parser (confirmed on v1.18.4: "Unknown parser").
+	// It was fully removed in v1.20.
 	//
 	// Why Open mode (toCIDR: 0.0.0.0/0) does not bypass SNI: Cilium classifies pod IPs as
 	// endpoints, not world. After service DNAT the destination is the ingress-nginx pod IP —
-	// a Cilium endpoint — which is never matched by a CIDR rule. The toEndpoints+SNI rule
-	// therefore remains the only path to ingress-nginx regardless of the workspace's network mode.
+	// a Cilium endpoint — which is never matched by a CIDR rule. The toEndpoints+serverNames
+	// rule therefore remains the only path to ingress-nginx regardless of the workspace's
+	// network mode.
 	if len(internalServices) > 0 && len(ns.AllowedEgress) > 0 {
 		egressEndpoints := make([]map[string]any, 0, len(ns.AllowedEgress))
 		for _, egressNS := range ns.AllowedEgress {
@@ -256,10 +264,7 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 					"ports": []map[string]any{
 						{"port": "443", "protocol": "TCP"},
 					},
-					"rules": map[string]any{
-						"l7proto": "tls",
-						"l7":      sniSelectors(internalServices),
-					},
+					"serverNames": internalServiceFQDNs(internalServices),
 				},
 			},
 		})
@@ -324,14 +329,24 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 	}, nil
 }
 
-// sniSelectors converts internal services to Cilium l7 TLS SNI selectors.
-// Produces [{sni: "fqdn"}, ...] for use with l7proto: tls in CNP toPorts rules.
-func sniSelectors(services []InternalService) []map[string]any {
-	selectors := make([]map[string]any, 0, len(services))
+// internalServiceFQDNs extracts the FQDN list from internal services for use
+// as Cilium serverNames in CNP toPorts rules (native Envoy TLS SNI filtering).
+// FQDNs are normalized (lowercased, trimmed), deduplicated, and empty entries are skipped.
+func internalServiceFQDNs(services []InternalService) []string {
+	seen := map[string]struct{}{}
+	fqdns := make([]string, 0, len(services))
 	for _, svc := range services {
-		selectors = append(selectors, map[string]any{"sni": svc.FQDN})
+		n := normalizeFQDNEntry(svc.FQDN)
+		if n == "" {
+			continue
+		}
+		if _, exists := seen[n]; exists {
+			continue
+		}
+		seen[n] = struct{}{}
+		fqdns = append(fqdns, n)
 	}
-	return selectors
+	return fqdns
 }
 
 func httpPortRules() []map[string]any {

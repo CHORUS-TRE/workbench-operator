@@ -235,11 +235,10 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(ports).To(HaveLen(1))
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
 
-		rules := toPorts[0]["rules"].(map[string]any)
-		Expect(rules["l7proto"]).To(Equal("tls"))
-		l7 := rules["l7"].([]map[string]any)
-		Expect(l7).To(ContainElement(HaveKeyWithValue("sni", "gitlab.chorus-tre.ch")))
-		Expect(l7).To(ContainElement(HaveKeyWithValue("sni", "i2b2.chorus-tre.ch")))
+		Expect(toPorts[0]).To(HaveKey("serverNames"))
+		serverNames := toPorts[0]["serverNames"].([]string)
+		Expect(serverNames).To(ContainElement("gitlab.chorus-tre.ch"))
+		Expect(serverNames).To(ContainElement("i2b2.chorus-tre.ch"))
 	})
 
 	It("emits internal service rule in Open mode (before internet rule)", func() {
@@ -331,6 +330,43 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(egress).To(HaveLen(3))
 	})
 
+})
+
+var _ = Describe("internalServiceFQDNs", func() {
+	It("normalizes uppercase FQDNs to lowercase", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("trims whitespace from FQDNs", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "  gitlab.chorus-tre.ch  ", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("skips empty FQDNs", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{Namespace: "empty", FQDN: "", Ports: []string{"443"}},
+			{Namespace: "spaces", FQDN: "   ", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("deduplicates FQDNs (case-insensitive)", func() {
+		svcs := []InternalService{
+			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{Namespace: "gitlab-mirror", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+		}
+		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
+	})
+
+	It("returns empty slice for nil input", func() {
+		Expect(internalServiceFQDNs(nil)).To(BeEmpty())
+	})
 })
 
 var _ = Describe("ValidateFQDNs", func() {
@@ -505,6 +541,15 @@ var _ = Describe("cnpNameForWorkspace", func() {
 		name := cnpNameForWorkspace(long)
 		Expect(len(name)).To(BeNumerically("<=", 253))
 		Expect(name).To(ContainSubstring("-netpol-"))
+	})
+
+	It("falls back to 'ws' prefix when truncation leaves only dashes", func() {
+		// A name of 247+ dashes triggers the long path; after truncating to maxPrefixLen
+		// and TrimRight("-"), the prefix is empty — must fall back to "ws".
+		allDashes := strings.Repeat("-", 247)
+		name := cnpNameForWorkspace(allDashes)
+		Expect(name).To(HavePrefix("ws-netpol-"))
+		Expect(len(name)).To(BeNumerically("<=", 253))
 	})
 
 	It("uses short form at the exact boundary (246 chars fits, 247 does not)", func() {
