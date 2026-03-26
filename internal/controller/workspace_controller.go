@@ -203,6 +203,9 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // workspace. The CNP is owned by the Workspace so garbage collection handles
 // deletion automatically.
 func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, workspace *defaultv1alpha1.Workspace) error {
+	if len(r.GlobalInternalServices) > 0 && len(r.NetworkPolicyNamespaces.AllowedEgress) == 0 {
+		log.FromContext(ctx).Info("WARNING: internal services are configured but AllowedEgress is empty — workspace pods will not be able to reach internal services")
+	}
 	cnp, err := buildNetworkPolicy(*workspace, r.GlobalInternalServices, r.NetworkPolicyNamespaces)
 	if err != nil {
 		return err
