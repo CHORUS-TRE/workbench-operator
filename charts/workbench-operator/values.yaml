@@ -6,10 +6,10 @@
 # served by the same ingress controller.
 # globalInternalServices:
 # - namespace: gitlab
-#   fqdn: gitlab.local.chorus-tre.ch
+#   fqdn: gitlab.internal.chorus-tre.local
 #   ports: ["443"]
 # - namespace: i2b2
-#   fqdn: i2b2.local.chorus-tre.ch
+#   fqdn: i2b2.internal.chorus-tre.local
 #   ports: ["443"]
 globalInternalServices: []
 
@@ -78,7 +78,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.50
+      tag: 0.4.51
     resources:
       limits:
         cpu: 500m
