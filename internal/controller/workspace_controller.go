@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -287,19 +288,8 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
 	seen := map[string]struct{}{}
 
-	httpRouteGVK := schema.GroupVersionKind{
-		Group:   "gateway.networking.k8s.io",
-		Version: "v1",
-		Kind:    "HTTPRoute",
-	}
-
-	httpRouteList := &unstructured.UnstructuredList{}
-	httpRouteList.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   httpRouteGVK.Group,
-		Version: httpRouteGVK.Version,
-		Kind:    "HTTPRouteList",
-	})
-	if err := c.List(ctx, httpRouteList); err != nil {
+	routeList := &gatewayv1.HTTPRouteList{}
+	if err := c.List(ctx, routeList); err != nil {
 		return fmt.Errorf("failed to list HTTPRoutes: %w", err)
 	}
 
@@ -311,10 +301,9 @@ func ValidateInternalServices(ctx context.Context, c client.Client, services []I
 		seen[key] = struct{}{}
 
 		found := false
-		for _, route := range httpRouteList.Items {
-			hostnames, _, _ := unstructured.NestedStringSlice(route.Object, "spec", "hostnames")
-			for _, h := range hostnames {
-				if strings.EqualFold(h, svc.FQDN) {
+		for _, route := range routeList.Items {
+			for _, h := range route.Spec.Hostnames {
+				if strings.EqualFold(string(h), svc.FQDN) {
 					found = true
 					break
 				}

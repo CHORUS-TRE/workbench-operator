@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -1033,23 +1034,11 @@ var _ = Describe("reconcileServices", func() {
 var _ = Describe("ValidateInternalServices", func() {
 	ctx := context.Background()
 
-	httpRouteGVK := schema.GroupVersionKind{
-		Group:   "gateway.networking.k8s.io",
-		Version: "v1",
-		Kind:    "HTTPRoute",
-	}
-
-	newHTTPRoute := func(name, namespace string, hostnames ...string) *unstructured.Unstructured {
-		obj := &unstructured.Unstructured{}
-		obj.SetGroupVersionKind(httpRouteGVK)
-		obj.SetName(name)
-		obj.SetNamespace(namespace)
-		hostnameSlice := make([]interface{}, len(hostnames))
-		for i, h := range hostnames {
-			hostnameSlice[i] = h
+	newHTTPRoute := func(name, namespace string, hostnames ...gatewayv1.Hostname) *gatewayv1.HTTPRoute {
+		return &gatewayv1.HTTPRoute{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec:       gatewayv1.HTTPRouteSpec{Hostnames: hostnames},
 		}
-		_ = unstructured.SetNestedSlice(obj.Object, hostnameSlice, "spec", "hostnames")
-		return obj
 	}
 
 	newFakeClient := func(objs ...client.Object) client.Client {
@@ -1102,7 +1091,7 @@ var _ = Describe("ValidateInternalServices", func() {
 			WithScheme(k8sClient.Scheme()).
 			WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-					if ul, ok := list.(*unstructured.UnstructuredList); ok && ul.GetKind() == "HTTPRouteList" {
+					if _, ok := list.(*gatewayv1.HTTPRouteList); ok {
 						return fmt.Errorf("httproute list error")
 					}
 					return c.List(ctx, list, opts...)
