@@ -269,8 +269,7 @@ func main() {
 			os.Exit(1)
 		}
 		if err := controller.ValidateInternalServices(context.Background(), directClient, []controller.InternalService(globalInternalServices)); err != nil {
-			setupLog.Error(err, "internal service validation failed")
-			os.Exit(1)
+			setupLog.Error(err, "internal service validation failed — continuing, but some services may be unreachable from workspaces")
 		}
 	}
 
