@@ -8,7 +8,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1034,6 +1033,25 @@ var _ = Describe("reconcileServices", func() {
 var _ = Describe("ValidateInternalServices", func() {
 	ctx := context.Background()
 
+	httpRouteGVK := schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1",
+		Kind:    "HTTPRoute",
+	}
+
+	newHTTPRoute := func(name, namespace string, hostnames ...string) *unstructured.Unstructured {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(httpRouteGVK)
+		obj.SetName(name)
+		obj.SetNamespace(namespace)
+		hostnameSlice := make([]interface{}, len(hostnames))
+		for i, h := range hostnames {
+			hostnameSlice[i] = h
+		}
+		_ = unstructured.SetNestedSlice(obj.Object, hostnameSlice, "spec", "hostnames")
+		return obj
+	}
+
 	newFakeClient := func(objs ...client.Object) client.Client {
 		return fake.NewClientBuilder().
 			WithScheme(k8sClient.Scheme()).
@@ -1046,51 +1064,29 @@ var _ = Describe("ValidateInternalServices", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("succeeds when FQDN matches an Ingress host in the declared namespace", func() {
-		ing := &networkingv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
-					{Host: "gitlab.chorus-tre.ch"},
-				},
-			},
-		}
-		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+	It("succeeds when FQDN matches an HTTPRoute hostname", func() {
+		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "gitlab.chorus-tre.ch")
+		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
 			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("is case-insensitive when matching FQDN", func() {
-		ing := &networkingv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
-					{Host: "GITLAB.CHORUS-TRE.CH"},
-				},
-			},
-		}
-		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "GITLAB.CHORUS-TRE.CH")
+		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
 			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("returns an error when FQDN is present in a different namespace (namespace scoping)", func() {
-		ing := &networkingv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "other-ns"},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
-					{Host: "gitlab.chorus-tre.ch"},
-				},
-			},
-		}
-		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+	It("succeeds when the HTTPRoute is in a namespace different from InternalService.Namespace", func() {
+		// Routes are searched cluster-wide — InternalService.Namespace is doc-only.
+		route := newHTTPRoute("gitlab-httproute", "other-ns", "gitlab.chorus-tre.ch")
+		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
 			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
-		Expect(err.Error()).To(ContainSubstring("gitlab"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("returns an error when FQDN is not found anywhere", func() {
@@ -1101,13 +1097,13 @@ var _ = Describe("ValidateInternalServices", func() {
 		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
 	})
 
-	It("returns an error when Ingress listing fails", func() {
+	It("returns an error when HTTPRoute listing fails", func() {
 		c := fake.NewClientBuilder().
 			WithScheme(k8sClient.Scheme()).
 			WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-					if _, ok := list.(*networkingv1.IngressList); ok {
-						return fmt.Errorf("ingress list error")
+					if ul, ok := list.(*unstructured.UnstructuredList); ok && ul.GetKind() == "HTTPRouteList" {
+						return fmt.Errorf("httproute list error")
 					}
 					return c.List(ctx, list, opts...)
 				},
@@ -1117,19 +1113,12 @@ var _ = Describe("ValidateInternalServices", func() {
 			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("ingress list error"))
+		Expect(err.Error()).To(ContainSubstring("httproute list error"))
 	})
 
 	It("returns an error when two entries declare the same FQDN (case-insensitive)", func() {
-		ing := &networkingv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
-					{Host: "gitlab.chorus-tre.ch"},
-				},
-			},
-		}
-		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "gitlab.chorus-tre.ch")
+		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
 			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 			{Namespace: "gitlab-mirror", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
 		})
@@ -1138,15 +1127,8 @@ var _ = Describe("ValidateInternalServices", func() {
 	})
 
 	It("returns an error on the first failing entry when multiple services are configured", func() {
-		ing := &networkingv1.Ingress{
-			ObjectMeta: metav1.ObjectMeta{Name: "gitlab-ingress", Namespace: "gitlab"},
-			Spec: networkingv1.IngressSpec{
-				Rules: []networkingv1.IngressRule{
-					{Host: "gitlab.chorus-tre.ch"},
-				},
-			},
-		}
-		err := ValidateInternalServices(ctx, newFakeClient(ing), []InternalService{
+		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "gitlab.chorus-tre.ch")
+		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
 			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 			{Namespace: "i2b2", FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
 		})
