@@ -148,6 +148,7 @@ func main() {
 	var licenseSecretName string
 	allowedIngressNamespaces := stringSliceFlag{}
 	allowedEgressNamespaces := stringSliceFlag{}
+	envoyGatewayNamespaces := stringSliceFlag{}
 	pvcLabels := labelFlag{}
 	globalInternalServices := internalServiceFlag{}
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -185,6 +186,7 @@ func main() {
 	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in fqdn:port[,port...] format (can be repeated)")
 	flag.Var(&allowedIngressNamespaces, "allowed-ingress-namespace", "Namespace allowed to initiate connections into workspace pods (can be repeated, default: backend, prometheus)")
 	flag.Var(&allowedEgressNamespaces, "allowed-egress-namespace", "Namespace that workspace pods may connect to for internal services post-DNAT (can be repeated, default: ingress-nginx)")
+	flag.Var(&envoyGatewayNamespaces, "envoy-gateway-namespace", "Subset of allowed-egress-namespace that runs Envoy Gateway (ports remapped: 443→10443, can be repeated, default: envoy-gateway-system)")
 	flag.StringVar(&licenseSecretName, "license-secret-name", "", "Name of the license Secret (empty = no license injection)")
 	opts := zap.Options{
 		Development: true,
@@ -330,8 +332,9 @@ func main() {
 		ServicesRepository:     servicesRepository,
 		GlobalInternalServices: []controller.InternalService(globalInternalServices),
 		NetworkPolicyNamespaces: controller.NetworkPolicyNamespaces{
-			AllowedIngress: defaultIfEmpty([]string(allowedIngressNamespaces), []string{"backend", "prometheus"}),
-			AllowedEgress:  defaultIfEmpty([]string(allowedEgressNamespaces), []string{"ingress-nginx"}),
+			AllowedIngress:         defaultIfEmpty([]string(allowedIngressNamespaces), []string{"backend", "prometheus"}),
+			AllowedEgress:          defaultIfEmpty([]string(allowedEgressNamespaces), []string{"ingress-nginx"}),
+			EnvoyGatewayNamespaces: defaultIfEmpty([]string(envoyGatewayNamespaces), []string{"envoy-gateway-system"}),
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")

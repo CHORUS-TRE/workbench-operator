@@ -38,6 +38,9 @@ spec:
         {{- range .Values.networkPolicy.allowedEgressNamespaces }}
         - --allowed-egress-namespace={{ . }}
         {{- end }}
+        {{- range .Values.networkPolicy.envoyGatewayNamespaces }}
+        - --envoy-gateway-namespace={{ . }}
+        {{- end }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
         {{- if .Values.licenseSecretName }}

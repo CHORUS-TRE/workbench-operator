@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -125,8 +126,13 @@ type NetworkPolicyNamespaces struct {
 	// (e.g. backend, prometheus). No port restriction is applied.
 	AllowedIngress []string
 	// AllowedEgress is the list of namespaces that workspace pods may connect OUT TO
-	// (e.g. ingress-nginx, reached post-DNAT when accessing internal services).
+	// (e.g. envoy-gateway-system, ingress-nginx — reached post-DNAT when accessing internal services).
 	AllowedEgress []string
+	// EnvoyGatewayNamespaces is the subset of AllowedEgress namespaces that run Envoy Gateway.
+	// Envoy Gateway internally remaps privileged ports by adding 10000 (e.g. 443 → 10443, 22 → 10022).
+	// Namespaces in this list get the remapped port in their CNP toPorts rule.
+	// Namespaces not in this list (e.g. ingress-nginx) use the original port.
+	EnvoyGatewayNamespaces []string
 }
 
 // buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
@@ -137,10 +143,9 @@ type NetworkPolicyNamespaces struct {
 //   - FQDNAllowlist → kube-dns + intra-namespace (pod + service) + internal services + FQDN allowlist
 //   - Airgapped     → kube-dns + intra-namespace (pod + service) + internal services only
 //
-// Internal services are always allowed regardless of mode. They are reached via the
-// cluster's Ingress controller (post-DNAT destination). A single toEndpoints rule
-// for ns.AllowedEgress namespaces is emitted (when internalServices is non-empty),
-// with Cilium native serverNames SNI filtering restricting access to only the listed FQDNs.
+// Internal services are always allowed regardless of mode. Separate toEndpoints rules are
+// emitted for Envoy Gateway namespaces (ports remapped: 443 → 10443) and regular namespaces
+// (ports unchanged), both with serverNames SNI filtering to restrict access to listed FQDNs only.
 //
 // Ingress policy: pods from ns.AllowedIngress namespaces and the workspace namespace
 // may connect inbound. This prevents pods in other workspaces from reaching services here.
@@ -244,25 +249,53 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 	// rule therefore remains the only path to ingress-nginx regardless of the workspace's
 	// network mode.
 	if len(internalServices) > 0 && len(ns.AllowedEgress) > 0 {
-		egressEndpoints := make([]map[string]any, 0, len(ns.AllowedEgress))
+		fqdns := internalServiceFQDNs(internalServices)
+
+		envoyNSSet := make(map[string]struct{}, len(ns.EnvoyGatewayNamespaces))
+		for _, envoyNS := range ns.EnvoyGatewayNamespaces {
+			envoyNSSet[envoyNS] = struct{}{}
+		}
+
+		var envoyEndpoints []map[string]any
+		var regularEndpoints []map[string]any
 		for _, egressNS := range ns.AllowedEgress {
-			egressEndpoints = append(egressEndpoints, map[string]any{
+			endpoint := map[string]any{
 				"matchLabels": map[string]any{
 					"k8s:io.kubernetes.pod.namespace": egressNS,
 				},
+			}
+			if _, ok := envoyNSSet[egressNS]; ok {
+				envoyEndpoints = append(envoyEndpoints, endpoint)
+			} else {
+				regularEndpoints = append(regularEndpoints, endpoint)
+			}
+		}
+
+		// Envoy Gateway namespaces remap privileged ports (443 → 10443).
+		if len(envoyEndpoints) > 0 {
+			egressRules = append(egressRules, map[string]any{
+				"toEndpoints": envoyEndpoints,
+				"toPorts": []map[string]any{
+					{
+						"ports":       []map[string]any{{"port": envoyRemapPort("443"), "protocol": "TCP"}},
+						"serverNames": fqdns,
+					},
+				},
 			})
 		}
-		egressRules = append(egressRules, map[string]any{
-			"toEndpoints": egressEndpoints,
-			"toPorts": []map[string]any{
-				{
-					"ports": []map[string]any{
-						{"port": "443", "protocol": "TCP"},
+
+		// Regular namespaces (e.g. ingress-nginx) use the original port.
+		if len(regularEndpoints) > 0 {
+			egressRules = append(egressRules, map[string]any{
+				"toEndpoints": regularEndpoints,
+				"toPorts": []map[string]any{
+					{
+						"ports":       []map[string]any{{"port": "443", "protocol": "TCP"}},
+						"serverNames": fqdns,
 					},
-					"serverNames": internalServiceFQDNs(internalServices),
 				},
-			},
-		})
+			})
+		}
 	}
 
 	switch workspace.Spec.NetworkPolicy {
@@ -342,6 +375,17 @@ func internalServiceFQDNs(services []InternalService) []string {
 		fqdns = append(fqdns, n)
 	}
 	return fqdns
+}
+
+// envoyRemapPort remaps privileged ports (< 1024) by adding 10000, matching
+// Envoy Gateway's internal port convention (e.g. 443 → 10443, 22 → 10022).
+// Ports >= 1024 are returned unchanged.
+func envoyRemapPort(port string) string {
+	n, err := strconv.Atoi(port)
+	if err != nil || n >= 1024 {
+		return port
+	}
+	return strconv.Itoa(n + 10000)
 }
 
 func httpPortRules() []map[string]any {
