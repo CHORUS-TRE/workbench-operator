@@ -4,11 +4,9 @@
 # Access is restricted to only the listed FQDNs via Cilium native serverNames SNI filtering,
 # blocking other URLs served by the same gateway or ingress controller.
 # globalInternalServices:
-# - namespace: gitlab
-#   fqdn: gitlab.internal.chorus-tre.local
+# - fqdn: gitlab.internal.chorus-tre.local
 #   ports: ["443"]
-# - namespace: i2b2
-#   fqdn: i2b2.internal.chorus-tre.local
+# - fqdn: i2b2.internal.chorus-tre.local
 #   ports: ["443"]
 globalInternalServices: []
 

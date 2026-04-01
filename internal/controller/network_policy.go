@@ -107,15 +107,8 @@ func ValidateFQDNs(entries []string) error {
 
 // InternalService describes a platform-internal service that workspace pods should always
 // be able to reach, regardless of the workspace's network isolation mode.
-// The FQDN must be validated against the cluster (Ingress host) before being added to the network policy.
+// The FQDN must be validated against the cluster (HTTPRoute hostname) before being added to the network policy.
 type InternalService struct {
-	// Namespace identifies the service's own Kubernetes namespace (e.g. "gitlab", "i2b2").
-	// Documentation only — it does NOT scope HTTPRoute validation (routes are searched
-	// cluster-wide since they are managed centrally in the gateway namespace) and does NOT
-	// appear in the generated CiliumNetworkPolicy (egress targets are the namespaces in
-	// NetworkPolicyNamespaces.AllowedEgress). What restricts workspace pods to specific
-	// services is the serverNames SNI list in the CNP, derived from the FQDN field.
-	Namespace string
 	// FQDN is the fully-qualified domain name of the internal service (e.g. "gitlab.int.chorus-tre.ch").
 	FQDN string
 	// Ports is the list of TCP ports declared for this service (e.g. ["443", "22"]).

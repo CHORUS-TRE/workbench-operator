@@ -30,7 +30,7 @@ spec:
         - --pvc-label={{ $k }}={{ $v }}
         {{- end }}
         {{- range .Values.globalInternalServices }}
-        - --global-internal-service={{ .namespace }}/{{ .fqdn }}:{{ join "," .ports }}
+        - --global-internal-service={{ .fqdn }}:{{ join "," .ports }}
         {{- end }}
         {{- range .Values.networkPolicy.allowedIngressNamespaces }}
         - --allowed-ingress-namespace={{ . }}

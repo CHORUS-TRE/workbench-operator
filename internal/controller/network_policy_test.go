@@ -211,8 +211,8 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 	}
 
 	internalSvcs := []InternalService{
-		{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-		{Namespace: "i2b2", FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
+		{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		{FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
 	}
 
 	It("emits a single ingress-nginx toEndpoints rule with SNI selectors in Airgapped mode", func() {
@@ -335,31 +335,31 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 var _ = Describe("internalServiceFQDNs", func() {
 	It("normalizes uppercase FQDNs to lowercase", func() {
 		svcs := []InternalService{
-			{Namespace: "gitlab", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+			{FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
 		}
 		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
 	})
 
 	It("trims whitespace from FQDNs", func() {
 		svcs := []InternalService{
-			{Namespace: "gitlab", FQDN: "  gitlab.chorus-tre.ch  ", Ports: []string{"443"}},
+			{FQDN: "  gitlab.chorus-tre.ch  ", Ports: []string{"443"}},
 		}
 		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
 	})
 
 	It("skips empty FQDNs", func() {
 		svcs := []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-			{Namespace: "empty", FQDN: "", Ports: []string{"443"}},
-			{Namespace: "spaces", FQDN: "   ", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "", Ports: []string{"443"}},
+			{FQDN: "   ", Ports: []string{"443"}},
 		}
 		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
 	})
 
 	It("deduplicates FQDNs (case-insensitive)", func() {
 		svcs := []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-			{Namespace: "gitlab-mirror", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
 		}
 		Expect(internalServiceFQDNs(svcs)).To(ConsistOf("gitlab.chorus-tre.ch"))
 	})

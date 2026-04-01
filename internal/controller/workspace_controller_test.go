@@ -1056,7 +1056,7 @@ var _ = Describe("ValidateInternalServices", func() {
 	It("succeeds when FQDN matches an HTTPRoute hostname", func() {
 		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "gitlab.chorus-tre.ch")
 		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -1064,23 +1064,22 @@ var _ = Describe("ValidateInternalServices", func() {
 	It("is case-insensitive when matching FQDN", func() {
 		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "GITLAB.CHORUS-TRE.CH")
 		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("succeeds when the HTTPRoute is in a namespace different from InternalService.Namespace", func() {
-		// Routes are searched cluster-wide — InternalService.Namespace is doc-only.
+	It("succeeds when the HTTPRoute is in any namespace (cluster-wide search)", func() {
 		route := newHTTPRoute("gitlab-httproute", "other-ns", "gitlab.chorus-tre.ch")
 		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("returns an error when FQDN is not found anywhere", func() {
 		err := ValidateInternalServices(ctx, newFakeClient(), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
@@ -1099,7 +1098,7 @@ var _ = Describe("ValidateInternalServices", func() {
 			}).
 			Build()
 		err := ValidateInternalServices(ctx, c, []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("httproute list error"))
@@ -1108,8 +1107,8 @@ var _ = Describe("ValidateInternalServices", func() {
 	It("returns an error when two entries declare the same FQDN (case-insensitive)", func() {
 		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "gitlab.chorus-tre.ch")
 		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-			{Namespace: "gitlab-mirror", FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "GITLAB.CHORUS-TRE.CH", Ports: []string{"443"}},
 		})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("duplicate internal service FQDN"))
@@ -1118,8 +1117,8 @@ var _ = Describe("ValidateInternalServices", func() {
 	It("returns an error on the first failing entry when multiple services are configured", func() {
 		route := newHTTPRoute("gitlab-httproute", "envoy-gateway-system", "gitlab.chorus-tre.ch")
 		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
-			{Namespace: "gitlab", FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
-			{Namespace: "i2b2", FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
 		})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("i2b2.chorus-tre.ch"))
