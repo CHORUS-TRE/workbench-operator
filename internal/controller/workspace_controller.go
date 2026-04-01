@@ -281,8 +281,6 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 
 // ValidateInternalServices checks each service's FQDN against the live cluster.
 // Verifies an HTTPRoute with the matching hostname exists anywhere in the cluster.
-// Routes are managed centrally in the gateway namespace, not per-service namespace —
-// the InternalService.Namespace field is doc-only and is not used for scoping here.
 // Returns an error if any entry is not found or if duplicate FQDNs are declared.
 // Called at operator startup — caller logs a warning on error.
 func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
