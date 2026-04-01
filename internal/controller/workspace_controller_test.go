@@ -1085,6 +1085,17 @@ var _ = Describe("ValidateInternalServices", func() {
 		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
 	})
 
+	It("does not match an HTTPRoute with no hostnames (catch-all route should not satisfy a specific FQDN)", func() {
+		// Gateway API allows omitting Hostnames (matches all hostnames), but such a route
+		// should not count as satisfying a specific FQDN entry — require explicit hostnames.
+		route := newHTTPRoute("catch-all", "envoy-gateway-system")
+		err := ValidateInternalServices(ctx, newFakeClient(route), []InternalService{
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("gitlab.chorus-tre.ch"))
+	})
+
 	It("returns an error when HTTPRoute listing fails", func() {
 		c := fake.NewClientBuilder().
 			WithScheme(k8sClient.Scheme()).
