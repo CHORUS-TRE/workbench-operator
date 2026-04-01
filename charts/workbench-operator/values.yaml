@@ -1,15 +1,12 @@
 
 # Platform-internal services always reachable from workspace pods in all network modes.
-# Each entry must correspond to an Ingress host in the declared namespace.
-# Because all internal services share the same ingress controller, access is restricted to
-# only the listed FQDNs via Cilium native serverNames SNI filtering, blocking other URLs
-# served by the same ingress controller.
+# Each entry must correspond to an HTTPRoute hostname in the cluster.
+# Access is restricted to only the listed FQDNs via Cilium native serverNames SNI filtering,
+# blocking other URLs served by the same gateway or ingress controller.
 # globalInternalServices:
-# - namespace: gitlab
-#   fqdn: gitlab.internal.chorus-tre.local
+# - fqdn: gitlab.internal.chorus-tre.local
 #   ports: ["443"]
-# - namespace: i2b2
-#   fqdn: i2b2.internal.chorus-tre.local
+# - fqdn: i2b2.internal.chorus-tre.local
 #   ports: ["443"]
 globalInternalServices: []
 
@@ -19,11 +16,13 @@ networkPolicy:
   allowedIngressNamespaces:
     - backend
     - prometheus
-  # Namespaces that workspace pods may connect OUT TO.
-  # ingress-nginx is required because Cilium performs service DNAT before the policy check:
-  # traffic to internal service FQDNs is load-balanced to ingress-nginx controller pod IPs before
-  # evaluation, so toEndpoints for the ingress-nginx namespace is needed to match the post-DNAT destination.
+  # Namespaces that workspace pods may connect OUT TO (post-DNAT destinations).
+  # envoy-gateway-system: internal services on Envoy Gateway (gitlab, i2b2).
+  # ingress-nginx: keycloak, which stays on nginx (open to all browsers for OAuth).
+  # The serverNames SNI filter in the CNP ensures only the listed FQDNs are reachable
+  # in each namespace — frontend and backend on nginx remain blocked.
   allowedEgressNamespaces:
+    - envoy-gateway-system
     - ingress-nginx
 
 # Storage configuration
@@ -78,7 +77,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.52
+      tag: 0.4.53
     resources:
       limits:
         cpu: 500m

@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 	"github.com/CHORUS-TRE/workbench-operator/internal/controller"
@@ -41,28 +42,21 @@ type internalServiceFlag []controller.InternalService
 func (f internalServiceFlag) String() string {
 	parts := make([]string, 0, len(f))
 	for _, svc := range f {
-		parts = append(parts, svc.Namespace+"/"+svc.FQDN+":"+strings.Join(svc.Ports, ","))
+		parts = append(parts, svc.FQDN+":"+strings.Join(svc.Ports, ","))
 	}
 	return strings.Join(parts, " ")
 }
 
 func (f *internalServiceFlag) Set(s string) error {
-	slashIdx := strings.Index(s, "/")
-	if slashIdx < 1 {
-		return fmt.Errorf("global-internal-service %q must be in namespace/fqdn:port[,port...] format", s)
-	}
-	namespace := s[:slashIdx]
-	rest := s[slashIdx+1:]
-
-	idx := strings.LastIndex(rest, ":")
+	idx := strings.LastIndex(s, ":")
 	if idx < 1 {
-		return fmt.Errorf("global-internal-service %q must be in namespace/fqdn:port[,port...] format", s)
+		return fmt.Errorf("global-internal-service %q must be in fqdn:port[,port...] format", s)
 	}
-	fqdn := strings.ToLower(strings.TrimSpace(rest[:idx]))
+	fqdn := strings.ToLower(strings.TrimSpace(s[:idx]))
 	if err := controller.ValidateFQDNs([]string{fqdn}); err != nil {
 		return fmt.Errorf("global-internal-service %q contains invalid FQDN %q: %w", s, fqdn, err)
 	}
-	rawPorts := strings.Split(rest[idx+1:], ",")
+	rawPorts := strings.Split(s[idx+1:], ",")
 	ports := make([]string, 0, len(rawPorts))
 	for _, p := range rawPorts {
 		p = strings.TrimSpace(p)
@@ -75,7 +69,7 @@ func (f *internalServiceFlag) Set(s string) error {
 		}
 		ports = append(ports, p)
 	}
-	*f = append(*f, controller.InternalService{Namespace: namespace, FQDN: fqdn, Ports: ports})
+	*f = append(*f, controller.InternalService{FQDN: fqdn, Ports: ports})
 	return nil
 }
 
@@ -120,6 +114,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(defaultv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -187,7 +182,7 @@ func main() {
 	flag.StringVar(&workbenchCPURequest, "workbench-cpu-request", "", "Default CPU request for the workbench server container (e.g. 100m)")
 	flag.StringVar(&workbenchMemoryRequest, "workbench-memory-request", "", "Default memory request for the workbench server container (e.g. 256Mi)")
 	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
-	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in namespace/fqdn:port[,port...] format (can be repeated)")
+	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in fqdn:port[,port...] format (can be repeated)")
 	flag.Var(&allowedIngressNamespaces, "allowed-ingress-namespace", "Namespace allowed to initiate connections into workspace pods (can be repeated, default: backend, prometheus)")
 	flag.Var(&allowedEgressNamespaces, "allowed-egress-namespace", "Namespace that workspace pods may connect to for internal services post-DNAT (can be repeated, default: ingress-nginx)")
 	flag.StringVar(&licenseSecretName, "license-secret-name", "", "Name of the license Secret (empty = no license injection)")

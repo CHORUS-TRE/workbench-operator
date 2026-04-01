@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	defaultv1alpha1 "github.com/CHORUS-TRE/workbench-operator/api/v1alpha1"
 )
@@ -48,7 +48,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch
 
 // Reconcile ensures the CiliumNetworkPolicy for this Workspace matches the
 // desired state derived from the WorkspaceSpec.
@@ -280,26 +280,28 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, worksp
 }
 
 // ValidateInternalServices checks each service's FQDN against the live cluster.
-// Verifies an Ingress with the matching hostname exists in the declared namespace.
+// Verifies an HTTPRoute with the matching hostname exists anywhere in the cluster.
 // Returns an error if any entry is not found or if duplicate FQDNs are declared.
-// Called at operator startup — caller must exit on error.
+// Called at operator startup — caller logs a warning on error.
 func ValidateInternalServices(ctx context.Context, c client.Client, services []InternalService) error {
 	seen := map[string]struct{}{}
+
+	routeList := &gatewayv1.HTTPRouteList{}
+	if err := c.List(ctx, routeList); err != nil {
+		return fmt.Errorf("failed to list HTTPRoutes: %w", err)
+	}
+
 	for _, svc := range services {
 		key := strings.ToLower(svc.FQDN)
 		if _, exists := seen[key]; exists {
 			return fmt.Errorf("duplicate internal service FQDN: %q", svc.FQDN)
 		}
 		seen[key] = struct{}{}
-		ingressList := &networkingv1.IngressList{}
-		if err := c.List(ctx, ingressList, client.InNamespace(svc.Namespace)); err != nil {
-			return fmt.Errorf("failed to list Ingresses in namespace %q: %w", svc.Namespace, err)
-		}
 
 		found := false
-		for _, ing := range ingressList.Items {
-			for _, rule := range ing.Spec.Rules {
-				if strings.EqualFold(rule.Host, svc.FQDN) {
+		for _, route := range routeList.Items {
+			for _, h := range route.Spec.Hostnames {
+				if strings.EqualFold(string(h), svc.FQDN) {
 					found = true
 					break
 				}
@@ -310,7 +312,7 @@ func ValidateInternalServices(ctx context.Context, c client.Client, services []I
 		}
 
 		if !found {
-			return fmt.Errorf("internal service %q: no Ingress with this hostname found in namespace %q", svc.FQDN, svc.Namespace)
+			return fmt.Errorf("internal service %q: no HTTPRoute with this hostname found in the cluster", svc.FQDN)
 		}
 	}
 
