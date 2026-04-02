@@ -330,6 +330,137 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(egress).To(HaveLen(3))
 	})
 
+	It("emits separate rules for Envoy Gateway and regular namespaces", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		mixedNS := NetworkPolicyNamespaces{
+			AllowedIngress:         []string{"backend"},
+			AllowedEgress:          []string{"envoy-gateway-system", "ingress-nginx"},
+			EnvoyGatewayNamespaces: []string{"envoy-gateway-system"},
+		}
+		cnp, err := buildNetworkPolicy(ws, internalSvcs, mixedNS)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 1 envoy rule + 1 regular rule
+		Expect(egress).To(HaveLen(5))
+
+		envoyRule := egress[3]
+		toEndpoints := envoyRule["toEndpoints"].([]map[string]any)
+		Expect(toEndpoints).To(HaveLen(1))
+		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "envoy-gateway-system"))
+		toPorts := envoyRule["toPorts"].([]map[string]any)
+		ports := toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "10443")))
+		Expect(ports).NotTo(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(toPorts[0]).To(HaveKey("serverNames"))
+
+		regularRule := egress[4]
+		toEndpoints = regularRule["toEndpoints"].([]map[string]any)
+		Expect(toEndpoints).To(HaveLen(1))
+		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
+		toPorts = regularRule["toPorts"].([]map[string]any)
+		ports = toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(ports).NotTo(ContainElement(HaveKeyWithValue("port", "10443")))
+		Expect(toPorts[0]).To(HaveKey("serverNames"))
+	})
+
+	It("includes all declared ports (e.g. 443 and 22) with remapping for Envoy Gateway", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		multiPortSvcs := []InternalService{
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443", "22"}},
+		}
+		mixedNS := NetworkPolicyNamespaces{
+			AllowedIngress:         []string{"backend"},
+			AllowedEgress:          []string{"envoy-gateway-system", "ingress-nginx"},
+			EnvoyGatewayNamespaces: []string{"envoy-gateway-system"},
+		}
+		cnp, err := buildNetworkPolicy(ws, multiPortSvcs, mixedNS)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 1 envoy + 1 regular
+		Expect(egress).To(HaveLen(5))
+
+		envoyPorts := egress[3]["toPorts"].([]map[string]any)[0]["ports"].([]map[string]any)
+		Expect(envoyPorts).To(ContainElement(HaveKeyWithValue("port", "10443")))
+		Expect(envoyPorts).To(ContainElement(HaveKeyWithValue("port", "10022")))
+
+		regularPorts := egress[4]["toPorts"].([]map[string]any)[0]["ports"].([]map[string]any)
+		Expect(regularPorts).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(regularPorts).To(ContainElement(HaveKeyWithValue("port", "22")))
+	})
+
+	It("treats all namespaces as regular when EnvoyGatewayNamespaces is empty", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		noEnvoyNS := NetworkPolicyNamespaces{
+			AllowedIngress:         []string{"backend"},
+			AllowedEgress:          []string{"envoy-gateway-system", "ingress-nginx"},
+			EnvoyGatewayNamespaces: []string{},
+		}
+		cnp, err := buildNetworkPolicy(ws, internalSvcs, noEnvoyNS)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 1 regular rule (both namespaces merged, no envoy rule)
+		Expect(egress).To(HaveLen(4))
+
+		regularRule := egress[3]
+		toEndpoints := regularRule["toEndpoints"].([]map[string]any)
+		Expect(toEndpoints).To(HaveLen(2))
+		toPorts := regularRule["toPorts"].([]map[string]any)
+		ports := toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(ports).NotTo(ContainElement(HaveKeyWithValue("port", "10443")))
+	})
+
+	It("emits only an Envoy rule when all AllowedEgress namespaces are Envoy Gateway namespaces", func() {
+		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
+		envoyOnlyNS := NetworkPolicyNamespaces{
+			AllowedIngress:         []string{"backend"},
+			AllowedEgress:          []string{"envoy-gateway-system"},
+			EnvoyGatewayNamespaces: []string{"envoy-gateway-system"},
+		}
+		cnp, err := buildNetworkPolicy(ws, internalSvcs, envoyOnlyNS)
+		Expect(err).NotTo(HaveOccurred())
+
+		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
+		// 3 base + 1 envoy rule only
+		Expect(egress).To(HaveLen(4))
+
+		envoyRule := egress[3]
+		toPorts := envoyRule["toPorts"].([]map[string]any)
+		ports := toPorts[0]["ports"].([]map[string]any)
+		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "10443")))
+	})
+
+})
+
+var _ = Describe("envoyRemapPort", func() {
+	It("remaps port 443 to 10443", func() {
+		Expect(envoyRemapPort("443")).To(Equal("10443"))
+	})
+
+	It("remaps port 22 to 10022", func() {
+		Expect(envoyRemapPort("22")).To(Equal("10022"))
+	})
+
+	It("remaps port 80 to 10080", func() {
+		Expect(envoyRemapPort("80")).To(Equal("10080"))
+	})
+
+	It("does not remap port 1024 (boundary)", func() {
+		Expect(envoyRemapPort("1024")).To(Equal("1024"))
+	})
+
+	It("does not remap high ports", func() {
+		Expect(envoyRemapPort("8080")).To(Equal("8080"))
+		Expect(envoyRemapPort("10443")).To(Equal("10443"))
+	})
+
+	It("returns the port unchanged for non-numeric input", func() {
+		Expect(envoyRemapPort("abc")).To(Equal("abc"))
+	})
 })
 
 var _ = Describe("internalServiceFQDNs", func() {
@@ -366,6 +497,42 @@ var _ = Describe("internalServiceFQDNs", func() {
 
 	It("returns empty slice for nil input", func() {
 		Expect(internalServiceFQDNs(nil)).To(BeEmpty())
+	})
+})
+
+var _ = Describe("internalServicePorts", func() {
+	It("returns the union of ports across all services", func() {
+		svcs := []InternalService{
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443", "22"}},
+			{FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
+		}
+		Expect(internalServicePorts(svcs)).To(Equal([]string{"443", "22"}))
+	})
+
+	It("deduplicates ports", func() {
+		svcs := []InternalService{
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443"}},
+			{FQDN: "i2b2.chorus-tre.ch", Ports: []string{"443"}},
+		}
+		Expect(internalServicePorts(svcs)).To(Equal([]string{"443"}))
+	})
+
+	It("skips empty port entries", func() {
+		svcs := []InternalService{
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443", "", "  "}},
+		}
+		Expect(internalServicePorts(svcs)).To(Equal([]string{"443"}))
+	})
+
+	It("falls back to 443 when no ports are declared", func() {
+		svcs := []InternalService{
+			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{}},
+		}
+		Expect(internalServicePorts(svcs)).To(Equal([]string{"443"}))
+	})
+
+	It("falls back to 443 for nil input", func() {
+		Expect(internalServicePorts(nil)).To(Equal([]string{"443"}))
 	})
 })
 
