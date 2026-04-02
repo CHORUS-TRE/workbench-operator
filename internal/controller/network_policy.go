@@ -271,26 +271,36 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 			}
 		}
 
-		// Envoy Gateway namespaces remap privileged ports (443 → 10443).
+		ports := internalServicePorts(internalServices)
+
+		// Envoy Gateway namespaces remap privileged ports (e.g. 443 → 10443, 22 → 10022).
 		if len(envoyEndpoints) > 0 {
+			envoyPorts := make([]map[string]any, 0, len(ports))
+			for _, p := range ports {
+				envoyPorts = append(envoyPorts, map[string]any{"port": envoyRemapPort(p), "protocol": "TCP"})
+			}
 			egressRules = append(egressRules, map[string]any{
 				"toEndpoints": envoyEndpoints,
 				"toPorts": []map[string]any{
 					{
-						"ports":       []map[string]any{{"port": envoyRemapPort("443"), "protocol": "TCP"}},
+						"ports":       envoyPorts,
 						"serverNames": fqdns,
 					},
 				},
 			})
 		}
 
-		// Regular namespaces (e.g. ingress-nginx) use the original port.
+		// Regular namespaces (e.g. ingress-nginx) use the original ports.
 		if len(regularEndpoints) > 0 {
+			regularPorts := make([]map[string]any, 0, len(ports))
+			for _, p := range ports {
+				regularPorts = append(regularPorts, map[string]any{"port": p, "protocol": "TCP"})
+			}
 			egressRules = append(egressRules, map[string]any{
 				"toEndpoints": regularEndpoints,
 				"toPorts": []map[string]any{
 					{
-						"ports":       []map[string]any{{"port": "443", "protocol": "TCP"}},
+						"ports":       regularPorts,
 						"serverNames": fqdns,
 					},
 				},
@@ -375,6 +385,31 @@ func internalServiceFQDNs(services []InternalService) []string {
 		fqdns = append(fqdns, n)
 	}
 	return fqdns
+}
+
+// internalServicePorts returns the deduplicated union of all ports declared across
+// the given services, preserving first-seen order. Empty or invalid entries are skipped.
+func internalServicePorts(services []InternalService) []string {
+	seen := map[string]struct{}{}
+	var ports []string
+	for _, svc := range services {
+		for _, p := range svc.Ports {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if _, exists := seen[p]; exists {
+				continue
+			}
+			seen[p] = struct{}{}
+			ports = append(ports, p)
+		}
+	}
+	if len(ports) == 0 {
+		// Fall back to 443 when no ports are declared — maintains backwards compatibility.
+		return []string{"443"}
+	}
+	return ports
 }
 
 // envoyRemapPort remaps privileged ports (< 1024) by adding 10000, matching

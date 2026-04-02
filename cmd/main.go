@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -185,7 +186,7 @@ func main() {
 	flag.Var(pvcLabels, "pvc-label", "Label to add to every PVC created by the operator, in key=value format (can be repeated)")
 	flag.Var(&globalInternalServices, "global-internal-service", "Platform-internal service always reachable from workspaces, in fqdn:port[,port...] format (can be repeated)")
 	flag.Var(&allowedIngressNamespaces, "allowed-ingress-namespace", "Namespace allowed to initiate connections into workspace pods (can be repeated, default: backend, prometheus)")
-	flag.Var(&allowedEgressNamespaces, "allowed-egress-namespace", "Namespace that workspace pods may connect to for internal services post-DNAT (can be repeated, default: ingress-nginx)")
+	flag.Var(&allowedEgressNamespaces, "allowed-egress-namespace", "Namespace that workspace pods may connect to for internal services post-DNAT (can be repeated, default: envoy-gateway-system, ingress-nginx)")
 	flag.Var(&envoyGatewayNamespaces, "envoy-gateway-namespace", "Subset of allowed-egress-namespace that runs Envoy Gateway (ports remapped: 443→10443, can be repeated, default: envoy-gateway-system)")
 	flag.StringVar(&licenseSecretName, "license-secret-name", "", "Name of the license Secret (empty = no license injection)")
 	opts := zap.Options{
@@ -195,6 +196,17 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Validate that all envoy-gateway-namespace values are also in allowed-egress-namespace.
+	// A namespace in envoy-gateway-namespace but not in allowed-egress-namespace is always a misconfiguration.
+	resolvedEgress := defaultIfEmpty([]string(allowedEgressNamespaces), []string{"envoy-gateway-system", "ingress-nginx"})
+	resolvedEnvoy := defaultIfEmpty([]string(envoyGatewayNamespaces), []string{"envoy-gateway-system"})
+	for _, ns := range resolvedEnvoy {
+		if !slices.Contains(resolvedEgress, ns) {
+			setupLog.Error(fmt.Errorf("envoy-gateway-namespace %q is not listed in allowed-egress-namespace", ns), "invalid configuration")
+			os.Exit(1)
+		}
+	}
 
 	// Log local storage configuration with safety warning
 	if localStorageEnabled {
@@ -333,7 +345,7 @@ func main() {
 		GlobalInternalServices: []controller.InternalService(globalInternalServices),
 		NetworkPolicyNamespaces: controller.NetworkPolicyNamespaces{
 			AllowedIngress:         defaultIfEmpty([]string(allowedIngressNamespaces), []string{"backend", "prometheus"}),
-			AllowedEgress:          defaultIfEmpty([]string(allowedEgressNamespaces), []string{"ingress-nginx"}),
+			AllowedEgress:          defaultIfEmpty([]string(allowedEgressNamespaces), []string{"envoy-gateway-system", "ingress-nginx"}),
 			EnvoyGatewayNamespaces: defaultIfEmpty([]string(envoyGatewayNamespaces), []string{"envoy-gateway-system"}),
 		},
 	}).SetupWithManager(mgr); err != nil {
