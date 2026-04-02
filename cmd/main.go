@@ -345,8 +345,8 @@ func main() {
 		GlobalInternalServices: []controller.InternalService(globalInternalServices),
 		NetworkPolicyNamespaces: controller.NetworkPolicyNamespaces{
 			AllowedIngress:         defaultIfEmpty([]string(allowedIngressNamespaces), []string{"backend", "prometheus"}),
-			AllowedEgress:          defaultIfEmpty([]string(allowedEgressNamespaces), []string{"envoy-gateway-system", "ingress-nginx"}),
-			EnvoyGatewayNamespaces: defaultIfEmpty([]string(envoyGatewayNamespaces), []string{"envoy-gateway-system"}),
+			AllowedEgress:          resolvedEgress,
+			EnvoyGatewayNamespaces: resolvedEnvoy,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
