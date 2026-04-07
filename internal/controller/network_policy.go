@@ -287,47 +287,17 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 
 		// Envoy Gateway namespaces remap privileged ports (e.g. 443 → 10443, 22 → 10022).
 		if len(envoyEndpoints) > 0 {
-			var toPorts []map[string]any
-			if len(tlsPorts) > 0 {
-				remapped := make([]map[string]any, 0, len(tlsPorts))
-				for _, p := range tlsPorts {
-					remapped = append(remapped, map[string]any{"port": envoyRemapPort(p), "protocol": "TCP"})
-				}
-				toPorts = append(toPorts, map[string]any{"ports": remapped, "serverNames": fqdns})
-			}
-			if len(nonTLSPorts) > 0 {
-				remapped := make([]map[string]any, 0, len(nonTLSPorts))
-				for _, p := range nonTLSPorts {
-					remapped = append(remapped, map[string]any{"port": envoyRemapPort(p), "protocol": "TCP"})
-				}
-				toPorts = append(toPorts, map[string]any{"ports": remapped})
-			}
 			egressRules = append(egressRules, map[string]any{
 				"toEndpoints": envoyEndpoints,
-				"toPorts":     toPorts,
+				"toPorts":     buildToPorts(tlsPorts, nonTLSPorts, fqdns, envoyRemapPort),
 			})
 		}
 
 		// Regular namespaces (e.g. ingress-nginx) use the original ports.
 		if len(regularEndpoints) > 0 {
-			var toPorts []map[string]any
-			if len(tlsPorts) > 0 {
-				portEntries := make([]map[string]any, 0, len(tlsPorts))
-				for _, p := range tlsPorts {
-					portEntries = append(portEntries, map[string]any{"port": p, "protocol": "TCP"})
-				}
-				toPorts = append(toPorts, map[string]any{"ports": portEntries, "serverNames": fqdns})
-			}
-			if len(nonTLSPorts) > 0 {
-				portEntries := make([]map[string]any, 0, len(nonTLSPorts))
-				for _, p := range nonTLSPorts {
-					portEntries = append(portEntries, map[string]any{"port": p, "protocol": "TCP"})
-				}
-				toPorts = append(toPorts, map[string]any{"ports": portEntries})
-			}
 			egressRules = append(egressRules, map[string]any{
 				"toEndpoints": regularEndpoints,
-				"toPorts":     toPorts,
+				"toPorts":     buildToPorts(tlsPorts, nonTLSPorts, fqdns, func(p string) string { return p }),
 			})
 		}
 	}
@@ -434,6 +404,27 @@ func internalServicePorts(services []InternalService) []string {
 		return []string{"443"}
 	}
 	return ports
+}
+
+// buildToPorts constructs the toPorts slice for an egress rule, applying remapFn to each port.
+// TLS ports (see isTLSPort) get a serverNames entry for SNI filtering; non-TLS ports do not.
+func buildToPorts(tlsPorts, nonTLSPorts []string, fqdns []string, remapFn func(string) string) []map[string]any {
+	var toPorts []map[string]any
+	if len(tlsPorts) > 0 {
+		ports := make([]map[string]any, 0, len(tlsPorts))
+		for _, p := range tlsPorts {
+			ports = append(ports, map[string]any{"port": remapFn(p), "protocol": "TCP"})
+		}
+		toPorts = append(toPorts, map[string]any{"ports": ports, "serverNames": fqdns})
+	}
+	if len(nonTLSPorts) > 0 {
+		ports := make([]map[string]any, 0, len(nonTLSPorts))
+		for _, p := range nonTLSPorts {
+			ports = append(ports, map[string]any{"port": remapFn(p), "protocol": "TCP"})
+		}
+		toPorts = append(toPorts, map[string]any{"ports": ports})
+	}
+	return toPorts
 }
 
 // isTLSPort reports whether a port carries TLS traffic and should use serverNames
