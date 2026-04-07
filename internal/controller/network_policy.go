@@ -113,9 +113,8 @@ type InternalService struct {
 	// FQDN is the fully-qualified domain name of the internal service (e.g. "gitlab.int.chorus-tre.ch").
 	FQDN string
 	// Ports is the list of TCP ports declared for this service (e.g. ["443", "22"]).
-	// RESERVED — this field has NO effect on the generated CiliumNetworkPolicy.
-	// buildNetworkPolicy always hardcodes port 443 in the egress rule.
-	// Non-443 ports (e.g. SSH/22) require a separate egress path and are not yet implemented.
+	// TLS ports (443) are emitted with serverNames SNI filtering in the CNP egress rule.
+	// Non-TLS ports (e.g. 22 for SSH) are emitted without serverNames — SSH has no TLS ClientHello.
 	Ports []string
 }
 
@@ -144,8 +143,9 @@ type NetworkPolicyNamespaces struct {
 //   - Airgapped     → kube-dns + intra-namespace (pod + service) + internal services only
 //
 // Internal services are always allowed regardless of mode. Separate toEndpoints rules are
-// emitted for Envoy Gateway namespaces (ports remapped: 443 → 10443) and regular namespaces
-// (ports unchanged), both with serverNames SNI filtering to restrict access to listed FQDNs only.
+// emitted for Envoy Gateway namespaces (ports remapped: 443 → 10443, 22 → 10022) and regular
+// namespaces (ports unchanged). TLS ports (443) carry serverNames SNI filtering; non-TLS ports
+// (e.g. 22 for SSH) do not — SSH has no TLS ClientHello so serverNames cannot apply.
 //
 // Ingress policy: pods from ns.AllowedIngress namespaces and the workspace namespace
 // may connect inbound. This prevents pods in other workspaces from reaching services here.
@@ -273,37 +273,61 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 
 		ports := internalServicePorts(internalServices)
 
+		// Separate ports by protocol layer: TLS ports (443) support serverNames SNI filtering;
+		// non-TLS ports (e.g. 22 for SSH) do not have a TLS ClientHello and must be emitted
+		// in a separate toPorts entry without serverNames.
+		var tlsPorts, nonTLSPorts []string
+		for _, p := range ports {
+			if p == "443" {
+				tlsPorts = append(tlsPorts, p)
+			} else {
+				nonTLSPorts = append(nonTLSPorts, p)
+			}
+		}
+
 		// Envoy Gateway namespaces remap privileged ports (e.g. 443 → 10443, 22 → 10022).
 		if len(envoyEndpoints) > 0 {
-			envoyPorts := make([]map[string]any, 0, len(ports))
-			for _, p := range ports {
-				envoyPorts = append(envoyPorts, map[string]any{"port": envoyRemapPort(p), "protocol": "TCP"})
+			var toPorts []map[string]any
+			if len(tlsPorts) > 0 {
+				remapped := make([]map[string]any, 0, len(tlsPorts))
+				for _, p := range tlsPorts {
+					remapped = append(remapped, map[string]any{"port": envoyRemapPort(p), "protocol": "TCP"})
+				}
+				toPorts = append(toPorts, map[string]any{"ports": remapped, "serverNames": fqdns})
+			}
+			if len(nonTLSPorts) > 0 {
+				remapped := make([]map[string]any, 0, len(nonTLSPorts))
+				for _, p := range nonTLSPorts {
+					remapped = append(remapped, map[string]any{"port": envoyRemapPort(p), "protocol": "TCP"})
+				}
+				toPorts = append(toPorts, map[string]any{"ports": remapped})
 			}
 			egressRules = append(egressRules, map[string]any{
 				"toEndpoints": envoyEndpoints,
-				"toPorts": []map[string]any{
-					{
-						"ports":       envoyPorts,
-						"serverNames": fqdns,
-					},
-				},
+				"toPorts":     toPorts,
 			})
 		}
 
 		// Regular namespaces (e.g. ingress-nginx) use the original ports.
 		if len(regularEndpoints) > 0 {
-			regularPorts := make([]map[string]any, 0, len(ports))
-			for _, p := range ports {
-				regularPorts = append(regularPorts, map[string]any{"port": p, "protocol": "TCP"})
+			var toPorts []map[string]any
+			if len(tlsPorts) > 0 {
+				portEntries := make([]map[string]any, 0, len(tlsPorts))
+				for _, p := range tlsPorts {
+					portEntries = append(portEntries, map[string]any{"port": p, "protocol": "TCP"})
+				}
+				toPorts = append(toPorts, map[string]any{"ports": portEntries, "serverNames": fqdns})
+			}
+			if len(nonTLSPorts) > 0 {
+				portEntries := make([]map[string]any, 0, len(nonTLSPorts))
+				for _, p := range nonTLSPorts {
+					portEntries = append(portEntries, map[string]any{"port": p, "protocol": "TCP"})
+				}
+				toPorts = append(toPorts, map[string]any{"ports": portEntries})
 			}
 			egressRules = append(egressRules, map[string]any{
 				"toEndpoints": regularEndpoints,
-				"toPorts": []map[string]any{
-					{
-						"ports":       regularPorts,
-						"serverNames": fqdns,
-					},
-				},
+				"toPorts":     toPorts,
 			})
 		}
 	}
