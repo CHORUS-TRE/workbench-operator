@@ -5,7 +5,7 @@
 # blocking other URLs served by the same gateway or ingress controller.
 # globalInternalServices:
 # - fqdn: gitlab.internal.chorus-tre.local
-#   ports: ["443"]
+#   ports: ["443", "22"]
 # - fqdn: i2b2.internal.chorus-tre.local
 #   ports: ["443"]
 globalInternalServices: []
@@ -82,7 +82,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.54
+      tag: 0.4.55
     resources:
       limits:
         cpu: 500m

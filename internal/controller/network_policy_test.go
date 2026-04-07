@@ -365,7 +365,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(toPorts[0]).To(HaveKey("serverNames"))
 	})
 
-	It("includes all declared ports (e.g. 443 and 22) with remapping for Envoy Gateway", func() {
+	It("splits TLS and non-TLS ports into separate toPorts entries: serverNames on 443 only, not on 22", func() {
 		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
 		multiPortSvcs := []InternalService{
 			{FQDN: "gitlab.chorus-tre.ch", Ports: []string{"443", "22"}},
@@ -382,13 +382,21 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		// 3 base + 1 envoy + 1 regular
 		Expect(egress).To(HaveLen(5))
 
-		envoyPorts := egress[3]["toPorts"].([]map[string]any)[0]["ports"].([]map[string]any)
-		Expect(envoyPorts).To(ContainElement(HaveKeyWithValue("port", "10443")))
-		Expect(envoyPorts).To(ContainElement(HaveKeyWithValue("port", "10022")))
+		// Envoy rule: TLS entry (10443, with serverNames) and non-TLS entry (10022, no serverNames)
+		envoyToPorts := egress[3]["toPorts"].([]map[string]any)
+		Expect(envoyToPorts).To(HaveLen(2))
+		Expect(envoyToPorts[0]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "10443")))
+		Expect(envoyToPorts[0]).To(HaveKey("serverNames"))
+		Expect(envoyToPorts[1]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "10022")))
+		Expect(envoyToPorts[1]).NotTo(HaveKey("serverNames"))
 
-		regularPorts := egress[4]["toPorts"].([]map[string]any)[0]["ports"].([]map[string]any)
-		Expect(regularPorts).To(ContainElement(HaveKeyWithValue("port", "443")))
-		Expect(regularPorts).To(ContainElement(HaveKeyWithValue("port", "22")))
+		// Regular rule: TLS entry (443, with serverNames) and non-TLS entry (22, no serverNames)
+		regularToPorts := egress[4]["toPorts"].([]map[string]any)
+		Expect(regularToPorts).To(HaveLen(2))
+		Expect(regularToPorts[0]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(regularToPorts[0]).To(HaveKey("serverNames"))
+		Expect(regularToPorts[1]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "22")))
+		Expect(regularToPorts[1]).NotTo(HaveKey("serverNames"))
 	})
 
 	It("treats all namespaces as regular when EnvoyGatewayNamespaces is empty", func() {
