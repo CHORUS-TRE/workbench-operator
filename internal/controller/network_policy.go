@@ -273,12 +273,12 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 
 		ports := internalServicePorts(internalServices)
 
-		// Separate ports by protocol layer: TLS ports (443) support serverNames SNI filtering;
+		// Separate ports by protocol layer: TLS ports support serverNames SNI filtering;
 		// non-TLS ports (e.g. 22 for SSH) do not have a TLS ClientHello and must be emitted
 		// in a separate toPorts entry without serverNames.
 		var tlsPorts, nonTLSPorts []string
 		for _, p := range ports {
-			if p == "443" {
+			if isTLSPort(p) {
 				tlsPorts = append(tlsPorts, p)
 			} else {
 				nonTLSPorts = append(nonTLSPorts, p)
@@ -434,6 +434,13 @@ func internalServicePorts(services []InternalService) []string {
 		return []string{"443"}
 	}
 	return ports
+}
+
+// isTLSPort reports whether a port carries TLS traffic and should use serverNames
+// SNI filtering. Currently only standard HTTPS (443). Extend here if non-standard
+// TLS ports (e.g. 8443) are needed — or adopt a typed PortSpec with a TLS field.
+func isTLSPort(p string) bool {
+	return p == "443"
 }
 
 // envoyRemapPort remaps privileged ports (< 1024) by adding 10000, matching
