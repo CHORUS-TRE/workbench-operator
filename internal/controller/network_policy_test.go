@@ -146,14 +146,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 FQDN/443 + 1 FQDN/80 (even though toFQDNs is nil)
-		Expect(egress).To(HaveLen(5))
-		httpsRule := egress[3]
-		Expect(httpsRule).To(HaveKey("toFQDNs"))
-		Expect(httpsRule["toFQDNs"]).To(BeNil())
-		httpRule := egress[4]
-		Expect(httpRule).To(HaveKey("toFQDNs"))
-		Expect(httpRule["toFQDNs"]).To(BeNil())
+		// 3 base only — no FQDN rules emitted when AllowedFQDNs is empty
+		Expect(egress).To(HaveLen(3))
 	})
 
 	It("returns an error when called with invalid FQDNs", func() {

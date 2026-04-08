@@ -315,25 +315,27 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		// responses, but multiple domains can share the same CDN IP. serverNames ensures
 		// only the explicitly allowed hostnames are reachable, even if the destination IP
 		// is shared with other domains.
-		fqdnSelectors := toFQDNSelectors(workspace.Spec.AllowedFQDNs)
-		egressRules = append(egressRules, map[string]any{
-			"toFQDNs": fqdnSelectors,
-			"toPorts": []map[string]any{
-				{
-					"ports":       []map[string]any{{"port": "443", "protocol": "TCP"}},
-					"serverNames": toServerNames(workspace.Spec.AllowedFQDNs),
+		if len(workspace.Spec.AllowedFQDNs) > 0 {
+			fqdnSelectors := toFQDNSelectors(workspace.Spec.AllowedFQDNs)
+			egressRules = append(egressRules, map[string]any{
+				"toFQDNs": fqdnSelectors,
+				"toPorts": []map[string]any{
+					{
+						"ports":       []map[string]any{{"port": "443", "protocol": "TCP"}},
+						"serverNames": toServerNames(workspace.Spec.AllowedFQDNs),
+					},
 				},
-			},
-		})
-		// Port 80: allow HTTP without SNI filtering (no SNI available on plain HTTP).
-		egressRules = append(egressRules, map[string]any{
-			"toFQDNs": fqdnSelectors,
-			"toPorts": []map[string]any{
-				{
-					"ports": []map[string]any{{"port": "80", "protocol": "TCP"}},
+			})
+			// Port 80: allow HTTP without SNI filtering (no SNI available on plain HTTP).
+			egressRules = append(egressRules, map[string]any{
+				"toFQDNs": fqdnSelectors,
+				"toPorts": []map[string]any{
+					{
+						"ports": []map[string]any{{"port": "80", "protocol": "TCP"}},
+					},
 				},
-			},
-		})
+			})
+		}
 	default:
 		// Airgapped: no external traffic beyond kube-dns and intra-namespace.
 	}
