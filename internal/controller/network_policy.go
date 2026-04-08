@@ -286,19 +286,29 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		}
 
 		// Envoy Gateway namespaces remap privileged ports (e.g. 443 → 10443, 22 → 10022).
+		// TLS and non-TLS ports MUST be in separate egress rules. Cilium applies the L7
+		// proxy (serverNames SNI filtering) to ALL toPorts entries within a single rule —
+		// mixing TLS ports (with serverNames) and non-TLS ports (without) in one rule
+		// can cause the L7 proxy to be mis-applied to non-TLS ports, breaking protocols
+		// like SSH that have no TLS ClientHello.
 		if len(envoyEndpoints) > 0 {
-			egressRules = append(egressRules, map[string]any{
-				"toEndpoints": envoyEndpoints,
-				"toPorts":     buildToPorts(tlsPorts, nonTLSPorts, fqdns, envoyRemapPort),
-			})
+			if len(tlsPorts) > 0 {
+				egressRules = append(egressRules, buildEgressRule(envoyEndpoints, tlsPorts, fqdns, envoyRemapPort))
+			}
+			if len(nonTLSPorts) > 0 {
+				egressRules = append(egressRules, buildEgressRule(envoyEndpoints, nonTLSPorts, nil, envoyRemapPort))
+			}
 		}
 
 		// Regular namespaces (e.g. ingress-nginx) use the original ports.
 		if len(regularEndpoints) > 0 {
-			egressRules = append(egressRules, map[string]any{
-				"toEndpoints": regularEndpoints,
-				"toPorts":     buildToPorts(tlsPorts, nonTLSPorts, fqdns, func(p string) string { return p }),
-			})
+			identityFn := func(p string) string { return p }
+			if len(tlsPorts) > 0 {
+				egressRules = append(egressRules, buildEgressRule(regularEndpoints, tlsPorts, fqdns, identityFn))
+			}
+			if len(nonTLSPorts) > 0 {
+				egressRules = append(egressRules, buildEgressRule(regularEndpoints, nonTLSPorts, nil, identityFn))
+			}
 		}
 	}
 
@@ -406,25 +416,22 @@ func internalServicePorts(services []InternalService) []string {
 	return ports
 }
 
-// buildToPorts constructs the toPorts slice for an egress rule, applying remapFn to each port.
-// TLS ports (see isTLSPort) get a serverNames entry for SNI filtering; non-TLS ports do not.
-func buildToPorts(tlsPorts, nonTLSPorts []string, fqdns []string, remapFn func(string) string) []map[string]any {
-	var toPorts []map[string]any
-	if len(tlsPorts) > 0 {
-		ports := make([]map[string]any, 0, len(tlsPorts))
-		for _, p := range tlsPorts {
-			ports = append(ports, map[string]any{"port": remapFn(p), "protocol": "TCP"})
-		}
-		toPorts = append(toPorts, map[string]any{"ports": ports, "serverNames": fqdns})
+// buildEgressRule constructs a single egress rule for the given endpoints and ports.
+// If fqdns is non-nil, serverNames SNI filtering is added to the toPorts entry.
+// remapFn transforms each port (e.g. envoyRemapPort for Envoy Gateway namespaces).
+func buildEgressRule(endpoints []map[string]any, ports []string, fqdns []string, remapFn func(string) string) map[string]any {
+	portEntries := make([]map[string]any, 0, len(ports))
+	for _, p := range ports {
+		portEntries = append(portEntries, map[string]any{"port": remapFn(p), "protocol": "TCP"})
 	}
-	if len(nonTLSPorts) > 0 {
-		ports := make([]map[string]any, 0, len(nonTLSPorts))
-		for _, p := range nonTLSPorts {
-			ports = append(ports, map[string]any{"port": remapFn(p), "protocol": "TCP"})
-		}
-		toPorts = append(toPorts, map[string]any{"ports": ports})
+	toPortsEntry := map[string]any{"ports": portEntries}
+	if len(fqdns) > 0 {
+		toPortsEntry["serverNames"] = fqdns
 	}
-	return toPorts
+	return map[string]any{
+		"toEndpoints": endpoints,
+		"toPorts":     []map[string]any{toPortsEntry},
+	}
 }
 
 // isTLSPort reports whether a port carries TLS traffic and should use serverNames
