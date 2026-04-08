@@ -89,18 +89,29 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(4))
+		// 3 base + 1 FQDN/443 (with serverNames) + 1 FQDN/80 (without)
+		Expect(egress).To(HaveLen(5))
 
-		fqdnRule := egress[3]
-		toFQDNs := fqdnRule["toFQDNs"].([]map[string]any)
+		// Port 443 rule with serverNames SNI filtering
+		httpsRule := egress[3]
+		toFQDNs := httpsRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
+		httpsToPorts := httpsRule["toPorts"].([]map[string]any)
+		Expect(httpsToPorts).To(HaveLen(1))
+		Expect(httpsToPorts[0]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "443")))
+		Expect(httpsToPorts[0]).To(HaveKey("serverNames"))
+		serverNames := httpsToPorts[0]["serverNames"].([]string)
+		Expect(serverNames).To(ContainElement("example.com"))
+		Expect(serverNames).To(ContainElement("*.corp.internal"))
 
-		toPorts := fqdnRule["toPorts"].([]map[string]any)
-		Expect(toPorts).To(HaveLen(1))
-		ports := toPorts[0]["ports"].([]map[string]any)
-		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "80")))
-		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "443")))
+		// Port 80 rule without serverNames
+		httpRule := egress[4]
+		Expect(httpRule["toFQDNs"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
+		httpToPorts := httpRule["toPorts"].([]map[string]any)
+		Expect(httpToPorts).To(HaveLen(1))
+		Expect(httpToPorts[0]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "80")))
+		Expect(httpToPorts[0]).NotTo(HaveKey("serverNames"))
 	})
 
 	It("allows full internet on HTTP/HTTPS when Open and no FQDNs specified", func() {
@@ -135,11 +146,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 FQDN rule (even though toFQDNs is nil)
-		Expect(egress).To(HaveLen(4))
-		fqdnRule := egress[3]
-		Expect(fqdnRule).To(HaveKey("toFQDNs"))
-		Expect(fqdnRule["toFQDNs"]).To(BeNil())
+		// 3 base only — no FQDN rules emitted when AllowedFQDNs is empty
+		Expect(egress).To(HaveLen(3))
 	})
 
 	It("returns an error when called with invalid FQDNs", func() {
@@ -269,14 +277,14 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 ingress-nginx + 1 allowlist = 5
-		Expect(egress).To(HaveLen(5))
+		// 3 base + 1 ingress-nginx + 2 allowlist (443 + 80) = 6
+		Expect(egress).To(HaveLen(6))
 
 		ingressNginxRule := egress[3]
 		toEndpoints := ingressNginxRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
 
-		// Verify the FQDN allowlist rule at [4] is still correct
+		// Verify the FQDN allowlist HTTPS rule at [4]
 		allowlistRule := egress[4]
 		toFQDNs := allowlistRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))

@@ -247,7 +247,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(4)) // kube-dns + intra-ns endpoints + intra-ns services + FQDN
+			Expect(egress).To(HaveLen(5)) // kube-dns + intra-ns endpoints + intra-ns services + FQDN/443 + FQDN/80
 
 			// Verify condition
 			updated := &defaultv1alpha1.Workspace{}
