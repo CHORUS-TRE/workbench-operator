@@ -310,10 +310,29 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 			"toPorts": httpPortRules(),
 		})
 	case defaultv1alpha1.NetworkPolicyFQDNAllowlist:
-		// Allow only the specified FQDNs on HTTP/HTTPS.
+		// Port 443: allow only the specified FQDNs via SNI inspection (serverNames).
+		// This closes the CDN/shared-IP loophole: toFQDNs generates CIDRs from DNS
+		// responses, but multiple domains can share the same CDN IP. serverNames ensures
+		// only the explicitly allowed hostnames are reachable, even if the destination IP
+		// is shared with other domains.
+		fqdnSelectors := toFQDNSelectors(workspace.Spec.AllowedFQDNs)
 		egressRules = append(egressRules, map[string]any{
-			"toFQDNs": toFQDNSelectors(workspace.Spec.AllowedFQDNs),
-			"toPorts": httpPortRules(),
+			"toFQDNs": fqdnSelectors,
+			"toPorts": []map[string]any{
+				{
+					"ports":       []map[string]any{{"port": "443", "protocol": "TCP"}},
+					"serverNames": toServerNames(workspace.Spec.AllowedFQDNs),
+				},
+			},
+		})
+		// Port 80: allow HTTP without SNI filtering (no SNI available on plain HTTP).
+		egressRules = append(egressRules, map[string]any{
+			"toFQDNs": fqdnSelectors,
+			"toPorts": []map[string]any{
+				{
+					"ports": []map[string]any{{"port": "80", "protocol": "TCP"}},
+				},
+			},
 		})
 	default:
 		// Airgapped: no external traffic beyond kube-dns and intra-namespace.
@@ -363,22 +382,12 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 
 // internalServiceFQDNs extracts the FQDN list from internal services for use
 // as Cilium serverNames in CNP toPorts rules (native Envoy TLS SNI filtering).
-// FQDNs are normalized (lowercased, trimmed), deduplicated, and empty entries are skipped.
 func internalServiceFQDNs(services []InternalService) []string {
-	seen := map[string]struct{}{}
-	fqdns := make([]string, 0, len(services))
+	entries := make([]string, 0, len(services))
 	for _, svc := range services {
-		n := normalizeFQDNEntry(svc.FQDN)
-		if n == "" {
-			continue
-		}
-		if _, exists := seen[n]; exists {
-			continue
-		}
-		seen[n] = struct{}{}
-		fqdns = append(fqdns, n)
+		entries = append(entries, svc.FQDN)
 	}
-	return fqdns
+	return toServerNames(entries)
 }
 
 // internalServicePorts returns the deduplicated union of all ports declared across
@@ -425,6 +434,27 @@ func buildToPorts(tlsPorts, nonTLSPorts []string, fqdns []string, remapFn func(s
 		toPorts = append(toPorts, map[string]any{"ports": ports})
 	}
 	return toPorts
+}
+
+// toServerNames normalizes and deduplicates FQDN entries for use as Cilium serverNames
+// (native Envoy TLS SNI filtering). Wildcard patterns (e.g. *.chorus-tre.ch) are passed
+// through as-is — Cilium serverNames supports the same wildcard syntax as toFQDNs matchPattern.
+// Used by both internal service rules and FQDNAllowlist rules.
+func toServerNames(entries []string) []string {
+	seen := map[string]struct{}{}
+	var names []string
+	for _, entry := range entries {
+		entry = normalizeFQDNEntry(entry)
+		if entry == "" {
+			continue
+		}
+		if _, exists := seen[entry]; exists {
+			continue
+		}
+		seen[entry] = struct{}{}
+		names = append(names, entry)
+	}
+	return names
 }
 
 // isTLSPort reports whether a port carries TLS traffic and should use serverNames
