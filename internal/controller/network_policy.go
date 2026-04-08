@@ -442,7 +442,7 @@ func buildToPorts(tlsPorts, nonTLSPorts []string, fqdns []string, remapFn func(s
 // Used by both internal service rules and FQDNAllowlist rules.
 func toServerNames(entries []string) []string {
 	seen := map[string]struct{}{}
-	var names []string
+	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		entry = normalizeFQDNEntry(entry)
 		if entry == "" {
