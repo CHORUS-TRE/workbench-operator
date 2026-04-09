@@ -1,0 +1,290 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    app.kubernetes.io/name: workbench-operator
+    app.kubernetes.io/part-of: chorus-tre
+  name: workspaces.default.chorus-tre.ch
+spec:
+  group: default.chorus-tre.ch
+  names:
+    kind: Workspace
+    listKind: WorkspaceList
+    plural: workspaces
+    singular: workspace
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.networkPolicy.status
+      name: Network-Policy
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="NetworkPolicyReady")].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Workspace is the Schema for the workspaces API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: WorkspaceSpec defines the desired state of Workspace
+            properties:
+              allowedFQDNs:
+                description: |-
+                  AllowedFQDNs is a list of fully qualified domain names that are permitted in this workspace.
+                  Only used when NetworkPolicy is FQDNAllowlist. Each entry can be an exact domain (e.g. example.com)
+                  or a wildcard pattern (e.g. *.corp.internal).
+
+                  Note: wildcards are opt-in. Specifying "example.com" does not implicitly allow "*.example.com".
+                  Note: entries must contain at least one dot (two labels), e.g. "example.com".
+                  Note: each entry produces one Cilium FQDN selector. To allow both apex and subdomains,
+                  add both "example.com" and "*.example.com" as separate entries (counts toward MaxItems).
+                items:
+                  maxLength: 253
+                  type: string
+                maxItems: 64
+                type: array
+                x-kubernetes-list-type: set
+              networkPolicy:
+                description: |-
+                  NetworkPolicy defines the desired network policy mode for this workspace.
+                  - Open: all external internet traffic is allowed.
+                  - Airgapped: all external traffic is blocked.
+                  - FQDNAllowlist: only the FQDNs listed in AllowedFQDNs are allowed.
+                enum:
+                - Open
+                - Airgapped
+                - FQDNAllowlist
+                type: string
+              services:
+                additionalProperties:
+                  description: WorkspaceService defines a Helm-chart-based service
+                    running in the workspace namespace.
+                  properties:
+                    chart:
+                      description: |-
+                        Chart identifies the Helm chart to deploy.
+                        Registry and Repository are optional and fall back to operator defaults.
+                      properties:
+                        registry:
+                          description: Registry represents the hostname of the OCI
+                            registry. E.g. harbor.build.chorus-tre.local
+                          type: string
+                        repository:
+                          description: Repository contains the project and chart name.
+                            E.g. services/postgres
+                          type: string
+                        tag:
+                          description: Tag contains the chart version (semver). E.g.
+                            1.6.1
+                          type: string
+                      required:
+                      - tag
+                      type: object
+                    computedValues:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        ComputedValues is a map of dot-notation Helm value paths to placeholder strings evaluated at deploy time.
+                        Supported placeholders (exact syntax, no spaces): {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}}.
+                        Computed values are merged last and take precedence over Values and Credentials.
+                        Example: {"mlflow.backendStore.postgres.host": "{{.ReleaseName}}-mlflow-db"}
+                      type: object
+                    connectionInfoTemplate:
+                      description: |-
+                        ConnectionInfoTemplate is a string with placeholder substitution rendered into status.services[*].connectionInfo.
+                        Supported placeholders (exact syntax, no spaces): {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}}.
+                        This is not a full Go template — conditionals and pipelines are not supported.
+                      type: string
+                    credentials:
+                      description: |-
+                        Credentials configures auto-generated password injection.
+                        Passwords are never written to the CRD — only to the named Secret.
+                      properties:
+                        paths:
+                          description: |-
+                            Paths is a list of dot-notation Helm value paths for which the operator auto-generates passwords.
+                            One 24-char random password is generated per entry, stored in SecretName, and injected into Helm.
+                          items:
+                            type: string
+                          type: array
+                        secretName:
+                          description: |-
+                            SecretName is the name of the Kubernetes Secret the operator creates in the workspace namespace.
+                            Passwords are stored here and never written to the CRD.
+                          type: string
+                      required:
+                      - secretName
+                      type: object
+                    state:
+                      default: Running
+                      description: State controls the service lifecycle.
+                      enum:
+                      - Running
+                      - Stopped
+                      - Deleted
+                      type: string
+                    values:
+                      description: |-
+                        Values contains free-form Helm values merged at install/upgrade time.
+                        Use to override chart defaults (e.g. storage.requestedSize).
+                        Credential values take precedence over anything set here.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - chart
+                  type: object
+                description: Services represent a map of services and their state
+                type: object
+            required:
+            - networkPolicy
+            type: object
+          status:
+            description: WorkspaceStatus defines the observed state of Workspace
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations
+                  of a Workspace's state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              networkPolicy:
+                description: NetworkPolicy is the observed state of the network policy
+                  for this workspace.
+                properties:
+                  message:
+                    description: Message is a human-readable description of the active
+                      policy or the reason for an error.
+                    type: string
+                  status:
+                    description: |-
+                      Status is the network policy reconciliation status.
+                      Values: "Progressing", "Open", "Airgapped", "FQDNAllowlist", "Error".
+                    enum:
+                    - Progressing
+                    - Open
+                    - Airgapped
+                    - FQDNAllowlist
+                    - Error
+                    type: string
+                type: object
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              services:
+                additionalProperties:
+                  description: WorkspaceStatusService is the observed status of a
+                    workspace service.
+                  properties:
+                    connectionInfo:
+                      description: ConnectionInfo is the rendered connection string
+                        from connectionInfoTemplate.
+                      type: string
+                    message:
+                      description: Message provides additional context (e.g. error
+                        details).
+                      type: string
+                    secretName:
+                      description: SecretName is the name of the Secret containing
+                        the service credentials.
+                      type: string
+                    status:
+                      description: Status is the observed lifecycle state of the service.
+                      enum:
+                      - Progressing
+                      - Running
+                      - Stopped
+                      - Deleted
+                      - Failed
+                      type: string
+                  required:
+                  - status
+                  type: object
+                description: Services represent the observed state of each workspace
+                  service.
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
