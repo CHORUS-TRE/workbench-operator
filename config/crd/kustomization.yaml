@@ -6,6 +6,12 @@ resources:
 - bases/default.chorus-tre.ch_workspaces.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
+# Labels applied to all CRDs when installing via kustomize (config/default).
+# Helm chart CRDs (charts/workbench-operator/crds/) use static labels instead.
+commonLabels:
+  app.kubernetes.io/name: workbench-operator
+  app.kubernetes.io/part-of: chorus-tre
+
 patches:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
