@@ -51,12 +51,12 @@ HELM_CRD_MAP = \
   default.chorus-tre.ch_workspaces.yaml:workspace-crd.yaml
 
 .PHONY: sync-helm-crds
-sync-helm-crds: ## Copy generated CRDs into the Helm chart, preserving Helm template headers.
-	@# For each CRD pair, keep everything before "^spec:" from the Helm template
-	@# (comments + Helm-specific metadata/labels) and replace spec onwards with the generated output.
+sync-helm-crds: ## Copy generated CRDs into the Helm chart crds/ directory with static labels.
+	@# CRDs in the crds/ directory are NOT templated per Helm best practices.
+	@# We preserve static labels and replace everything from spec: onwards.
 	@for pair in $(HELM_CRD_MAP); do \
 	  src=config/crd/bases/$${pair%%:*}; \
-	  dst=charts/workbench-operator/templates/$${pair##*:}; \
+	  dst=charts/workbench-operator/crds/$${pair##*:}; \
 	  awk '/^spec:/{exit} {print}' $$dst > $$dst.tmp; \
 	  awk '/^spec:/{found=1} found{print}' $$src >> $$dst.tmp; \
 	  mv $$dst.tmp $$dst; \
