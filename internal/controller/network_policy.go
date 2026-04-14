@@ -132,6 +132,12 @@ type NetworkPolicyNamespaces struct {
 	// Namespaces in this list get the remapped port in their CNP toPorts rule.
 	// Namespaces not in this list (e.g. ingress-nginx) use the original port.
 	EnvoyGatewayNamespaces []string
+	// EnvoyGatewayName restricts workspace egress to only the Envoy pods owned by this gateway.
+	// Uses the gateway.envoyproxy.io/owning-gateway-name label set by Envoy Gateway on each pod.
+	// When set, workspace pods can only reach the named gateway (e.g. chorus-internal-gateway),
+	// not other gateways in the same namespace (e.g. chorus-external-gateway).
+	// When empty, all Envoy pods in the namespace are reachable (backwards compatible).
+	EnvoyGatewayName string
 }
 
 // buildNetworkPolicy constructs a namespaced CiliumNetworkPolicy (unstructured)
@@ -259,15 +265,18 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		var envoyEndpoints []map[string]any
 		var regularEndpoints []map[string]any
 		for _, egressNS := range ns.AllowedEgress {
-			endpoint := map[string]any{
-				"matchLabels": map[string]any{
-					"k8s:io.kubernetes.pod.namespace": egressNS,
-				},
+			labels := map[string]any{
+				"k8s:io.kubernetes.pod.namespace": egressNS,
 			}
 			if _, ok := envoyNSSet[egressNS]; ok {
-				envoyEndpoints = append(envoyEndpoints, endpoint)
+				// Restrict to the named internal gateway's pods when configured,
+				// preventing workspace pods from reaching other gateways (e.g. external).
+				if ns.EnvoyGatewayName != "" {
+					labels["k8s:gateway.envoyproxy.io/owning-gateway-name"] = ns.EnvoyGatewayName
+				}
+				envoyEndpoints = append(envoyEndpoints, map[string]any{"matchLabels": labels})
 			} else {
-				regularEndpoints = append(regularEndpoints, endpoint)
+				regularEndpoints = append(regularEndpoints, map[string]any{"matchLabels": labels})
 			}
 		}
 
