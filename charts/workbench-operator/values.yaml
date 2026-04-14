@@ -34,7 +34,7 @@ networkPolicy:
   # When set, workspace pods can only reach this gateway, not other gateways
   # in the same namespace (e.g. chorus-external-gateway).
   # Empty = all Envoy pods in the namespace (backwards compatible).
-  envoyGatewayName: ""
+  envoyGatewayName: "chorus-internal-gateway"
 
 # Storage configuration
 storage:
