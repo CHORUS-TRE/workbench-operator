@@ -41,6 +41,9 @@ spec:
         {{- range .Values.networkPolicy.envoyGatewayNamespaces }}
         - --envoy-gateway-namespace={{ . }}
         {{- end }}
+        {{- if .Values.networkPolicy.envoyGatewayName }}
+        - --envoy-gateway-name={{ .Values.networkPolicy.envoyGatewayName }}
+        {{- end }}
         - --workbench-priority-class-name={{ .Values.workbench.priorityClassName }}
         - --application-priority-class-name={{ .Values.application.priorityClassName }}
         {{- if .Values.licenseSecretName }}

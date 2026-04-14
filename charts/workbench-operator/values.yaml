@@ -29,6 +29,12 @@ networkPolicy:
   # Namespaces listed here get the remapped port in their CNP rule.
   envoyGatewayNamespaces:
     - envoy-gateway-system
+  # Restrict workspace egress to only the named Envoy Gateway's pods.
+  # Uses the gateway.envoyproxy.io/owning-gateway-name label.
+  # When set, workspace pods can only reach this gateway, not other gateways
+  # in the same namespace (e.g. chorus-external-gateway).
+  # Empty = all Envoy pods in the namespace (backwards compatible).
+  envoyGatewayName: ""
 
 # Storage configuration
 storage:
@@ -82,7 +88,7 @@ controllerManager:
         - ALL
     image:
       repository: harbor.build.chorus-tre.local/chorus/workbench-operator
-      tag: 0.4.56
+      tag: 0.4.57
     resources:
       limits:
         cpu: 500m
