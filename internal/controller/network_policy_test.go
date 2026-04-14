@@ -450,50 +450,6 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "10443")))
 	})
 
-	It("adds owning-gateway-name label to Envoy endpoints when EnvoyGatewayName is set", func() {
-		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
-		namedGW := NetworkPolicyNamespaces{
-			AllowedIngress:         []string{"backend"},
-			AllowedEgress:          []string{"envoy-gateway-system", "ingress-nginx"},
-			EnvoyGatewayNamespaces: []string{"envoy-gateway-system"},
-			EnvoyGatewayName:       "chorus-internal-gateway",
-		}
-		cnp, err := buildNetworkPolicy(ws, internalSvcs, namedGW)
-		Expect(err).NotTo(HaveOccurred())
-
-		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 envoy + 1 regular = 5
-		Expect(egress).To(HaveLen(5))
-
-		// Envoy rule should have the gateway name label
-		envoyRule := egress[3]
-		toEndpoints := envoyRule["toEndpoints"].([]map[string]any)
-		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:gateway.envoyproxy.io/owning-gateway-name", "chorus-internal-gateway"))
-		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "envoy-gateway-system"))
-
-		// Regular rule should NOT have the gateway name label
-		regularRule := egress[4]
-		regularEndpoints := regularRule["toEndpoints"].([]map[string]any)
-		Expect(regularEndpoints[0]["matchLabels"]).NotTo(HaveKey("k8s:gateway.envoyproxy.io/owning-gateway-name"))
-	})
-
-	It("does not add owning-gateway-name label when EnvoyGatewayName is empty", func() {
-		ws := baseWorkspace(defaultv1alpha1.NetworkPolicyAirgapped)
-		noNameGW := NetworkPolicyNamespaces{
-			AllowedIngress:         []string{"backend"},
-			AllowedEgress:          []string{"envoy-gateway-system"},
-			EnvoyGatewayNamespaces: []string{"envoy-gateway-system"},
-			EnvoyGatewayName:       "",
-		}
-		cnp, err := buildNetworkPolicy(ws, internalSvcs, noNameGW)
-		Expect(err).NotTo(HaveOccurred())
-
-		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		envoyRule := egress[3]
-		toEndpoints := envoyRule["toEndpoints"].([]map[string]any)
-		Expect(toEndpoints[0]["matchLabels"]).NotTo(HaveKey("k8s:gateway.envoyproxy.io/owning-gateway-name"))
-	})
-
 })
 
 var _ = Describe("envoyRemapPort", func() {

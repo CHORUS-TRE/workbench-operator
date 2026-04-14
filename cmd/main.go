@@ -150,7 +150,6 @@ func main() {
 	allowedIngressNamespaces := stringSliceFlag{}
 	allowedEgressNamespaces := stringSliceFlag{}
 	envoyGatewayNamespaces := stringSliceFlag{}
-	var envoyGatewayName string
 	pvcLabels := labelFlag{}
 	globalInternalServices := internalServiceFlag{}
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
@@ -189,7 +188,6 @@ func main() {
 	flag.Var(&allowedIngressNamespaces, "allowed-ingress-namespace", "Namespace allowed to initiate connections into workspace pods (can be repeated, default: backend, prometheus)")
 	flag.Var(&allowedEgressNamespaces, "allowed-egress-namespace", "Namespace that workspace pods may connect to for internal services post-DNAT (can be repeated, default: envoy-gateway-system, ingress-nginx)")
 	flag.Var(&envoyGatewayNamespaces, "envoy-gateway-namespace", "Subset of allowed-egress-namespace that runs Envoy Gateway (ports remapped: 443→10443, can be repeated, default: envoy-gateway-system)")
-	flag.StringVar(&envoyGatewayName, "envoy-gateway-name", "", "Restrict workspace egress to only Envoy pods owned by this gateway name (e.g. chorus-internal-gateway). Empty = all Envoy pods in the namespace.")
 	flag.StringVar(&licenseSecretName, "license-secret-name", "", "Name of the license Secret (empty = no license injection)")
 	opts := zap.Options{
 		Development: true,
@@ -209,7 +207,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	setupLog.Info("envoy gateway configuration", "envoyGatewayNamespaces", resolvedEnvoy, "envoyGatewayName", envoyGatewayName)
+	setupLog.Info("envoy gateway configuration", "envoyGatewayNamespaces", resolvedEnvoy)
 
 	// Log local storage configuration with safety warning
 	if localStorageEnabled {
@@ -350,7 +348,6 @@ func main() {
 			AllowedIngress:         defaultIfEmpty([]string(allowedIngressNamespaces), []string{"backend", "prometheus"}),
 			AllowedEgress:          resolvedEgress,
 			EnvoyGatewayNamespaces: resolvedEnvoy,
-			EnvoyGatewayName:       envoyGatewayName,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
