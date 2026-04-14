@@ -209,6 +209,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	if envoyGatewayName != "" {
+		setupLog.Info("restricting workspace egress to named Envoy Gateway", "envoyGatewayName", envoyGatewayName)
+	}
 
 	// Log local storage configuration with safety warning
 	if localStorageEnabled {
