@@ -33,6 +33,8 @@ networkPolicy:
   # Uses the gateway.envoyproxy.io/owning-gateway-name label.
   # When set, workspace pods can only reach this gateway, not other gateways
   # in the same namespace (e.g. chorus-external-gateway).
+  # Must match an existing Gateway resource — mismatches silently block all workspace
+  # egress to Envoy with no obvious error signal.
   # Empty = all Envoy pods in the namespace (backwards compatible).
   envoyGatewayName: "chorus-internal-gateway"
 

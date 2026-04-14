@@ -272,7 +272,7 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 				// Restrict to the named internal gateway's pods when configured,
 				// preventing workspace pods from reaching other gateways (e.g. external).
 				if ns.EnvoyGatewayName != "" {
-					labels["gateway.envoyproxy.io/owning-gateway-name"] = ns.EnvoyGatewayName
+					labels["k8s:gateway.envoyproxy.io/owning-gateway-name"] = ns.EnvoyGatewayName
 				}
 				envoyEndpoints = append(envoyEndpoints, map[string]any{"matchLabels": labels})
 			} else {
