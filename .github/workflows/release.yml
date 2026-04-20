@@ -4,14 +4,18 @@ on:
   push:
     branches: [master]
 
-# On every merge to master, if charts/workbench-operator/Chart.yaml contains a
-# new version (no matching v<version> tag yet), this workflow:
-#   1. Creates and pushes the v<version> tag. chorus-ci's webhook-driven sensor
-#      picks it up and publishes the image + chart to Harbor.
-#   2. Packages the chart locally with the tag as --version/--app-version
-#      (matching helm-publish-template.yaml in chorus-ci).
-#   3. Creates the GitHub release with auto-generated notes and the .tgz attached.
-# If the version in Chart.yaml is unchanged, the job short-circuits.
+# On every merge to master:
+#   1. Validate that the four version references are in sync (Chart.yaml
+#      version + appVersion, values.yaml image.tag, kustomization.yaml newTag).
+#   2. If no v<version> tag exists yet, package the chart and atomically
+#      create tag + GitHub release (with auto-generated notes and the .tgz
+#      attached) via the Releases API. chorus-ci's webhook picks up the tag
+#      creation and publishes the image + chart to Harbor as usual.
+# If Chart.yaml was not bumped, the job short-circuits.
+#
+# Note: the .tgz becomes downloadable from the release before chorus-ci
+# finishes pushing the image to Harbor. Any install in that window will
+# retry image pulls until Harbor has the image — transient, self-healing.
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -28,49 +32,67 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Read version from Chart.yaml
+      - name: Read and validate version across all files
         id: v
         run: |
-          VERSION=$(awk '/^version:/ {print $2}' charts/workbench-operator/Chart.yaml | tr -d '"')
+          VERSION=$(yq '.version' charts/workbench-operator/Chart.yaml)
+          APPVERSION=$(yq '.appVersion' charts/workbench-operator/Chart.yaml)
+          VALUES_TAG=$(yq '.controllerManager.manager.image.tag' charts/workbench-operator/values.yaml)
+          KUSTOMIZE_TAG=$(yq '.images[0].newTag' config/manager/kustomization.yaml)
+          echo "Chart.yaml version        = $VERSION"
+          echo "Chart.yaml appVersion     = $APPVERSION"
+          echo "values.yaml image.tag     = $VALUES_TAG"
+          echo "kustomization.yaml newTag = $KUSTOMIZE_TAG"
+          mismatch=0
+          if [ "$APPVERSION" != "$VERSION" ]; then
+            echo "::error::Chart.yaml appVersion ($APPVERSION) does not match version ($VERSION)"
+            mismatch=1
+          fi
+          if [ "$VALUES_TAG" != "$VERSION" ]; then
+            echo "::error::values.yaml image.tag ($VALUES_TAG) does not match Chart.yaml version ($VERSION)"
+            mismatch=1
+          fi
+          if [ "$KUSTOMIZE_TAG" != "$VERSION" ]; then
+            echo "::error::kustomization.yaml newTag ($KUSTOMIZE_TAG) does not match Chart.yaml version ($VERSION)"
+            mismatch=1
+          fi
+          if [ "$mismatch" = "1" ]; then
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check if tag already exists
         id: check
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
         run: |
-          if git rev-parse "refs/tags/${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ steps.v.outputs.tag }} already exists, skipping release."
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping release."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Configure git
-        if: steps.check.outputs.skip == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Create and push tag
-        if: steps.check.outputs.skip == 'false'
-        run: |
-          git tag -a "${{ steps.v.outputs.tag }}" -m "Release ${{ steps.v.outputs.tag }}"
-          git push origin "${{ steps.v.outputs.tag }}"
-
       - name: Package chart
         if: steps.check.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
           helm package charts/workbench-operator \
-            --version "${{ steps.v.outputs.version }}" \
-            --app-version "${{ steps.v.outputs.version }}" \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
             --destination .
 
-      - name: Create GitHub release
+      - name: Create tag + release atomically, upload chart
         if: steps.check.outputs.skip == 'false'
         env:
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.v.outputs.tag }}" \
-            "workbench-operator-${{ steps.v.outputs.version }}.tgz" \
-            --title "${{ steps.v.outputs.tag }}" \
+          gh release create "$TAG" \
+            "workbench-operator-${VERSION}.tgz" \
+            --title "$TAG" \
+            --target "$GITHUB_SHA" \
             --generate-notes
