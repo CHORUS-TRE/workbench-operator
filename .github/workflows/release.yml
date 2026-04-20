@@ -38,11 +38,15 @@ jobs:
           VERSION=$(yq '.version' charts/workbench-operator/Chart.yaml)
           APPVERSION=$(yq '.appVersion' charts/workbench-operator/Chart.yaml)
           VALUES_TAG=$(yq '.controllerManager.manager.image.tag' charts/workbench-operator/values.yaml)
-          KUSTOMIZE_TAG=$(yq '.images[0].newTag' config/manager/kustomization.yaml)
+          KUSTOMIZE_TAG=$(yq '.images[] | select(.name == "controller") | .newTag' config/manager/kustomization.yaml)
           echo "Chart.yaml version        = $VERSION"
           echo "Chart.yaml appVersion     = $APPVERSION"
           echo "values.yaml image.tag     = $VALUES_TAG"
           echo "kustomization.yaml newTag = $KUSTOMIZE_TAG"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Chart.yaml version '$VERSION' is not in the expected x.y.z format"
+            exit 1
+          fi
           mismatch=0
           if [ "$APPVERSION" != "$VERSION" ]; then
             echo "::error::Chart.yaml appVersion ($APPVERSION) does not match version ($VERSION)"
@@ -73,6 +77,10 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Lint chart
+        if: steps.check.outputs.skip == 'false'
+        run: helm lint charts/workbench-operator
 
       - name: Package chart
         if: steps.check.outputs.skip == 'false'
