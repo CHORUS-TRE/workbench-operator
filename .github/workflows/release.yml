@@ -32,9 +32,13 @@ jobs:
         with:
           version: 'latest'
 
+      - name: Lint chart
+        run: helm lint charts/workbench-operator
+
       - name: Read and validate version across all files
         id: v
         run: |
+          set -euo pipefail
           VERSION=$(yq '.version' charts/workbench-operator/Chart.yaml)
           APPVERSION=$(yq '.appVersion' charts/workbench-operator/Chart.yaml)
           VALUES_TAG=$(yq '.controllerManager.manager.image.tag' charts/workbench-operator/values.yaml)
@@ -71,16 +75,13 @@ jobs:
         env:
           TAG: ${{ steps.v.outputs.tag }}
         run: |
+          set -euo pipefail
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists, skipping release."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Lint chart
-        if: steps.check.outputs.skip == 'false'
-        run: helm lint charts/workbench-operator
 
       - name: Package chart
         if: steps.check.outputs.skip == 'false'
