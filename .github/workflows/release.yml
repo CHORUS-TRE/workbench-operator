@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+# On every merge to master:
+#   1. Validate that the four version references are in sync (Chart.yaml
+#      version + appVersion, values.yaml image.tag, kustomization.yaml newTag).
+#   2. If no v<version> tag exists yet, package the chart and atomically
+#      create tag + GitHub release (with auto-generated notes and the .tgz
+#      attached) via the Releases API. chorus-ci's webhook picks up the tag
+#      creation and publishes the image + chart to Harbor as usual.
+# If Chart.yaml was not bumped, the job short-circuits.
+#
+# Note: the .tgz becomes downloadable from the release before chorus-ci
+# finishes pushing the image to Harbor. Any install in that window will
+# retry image pulls until Harbor has the image — transient, self-healing.
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.1
+        with:
+          version: 'latest'
+
+      - name: Lint chart
+        run: helm lint charts/workbench-operator
+
+      - name: Read and validate version across all files
+        id: v
+        run: |
+          set -euo pipefail
+          VERSION=$(yq '.version' charts/workbench-operator/Chart.yaml)
+          APPVERSION=$(yq '.appVersion' charts/workbench-operator/Chart.yaml)
+          VALUES_TAG=$(yq '.controllerManager.manager.image.tag' charts/workbench-operator/values.yaml)
+          KUSTOMIZE_TAG=$(yq '.images[] | select(.name == "controller") | .newTag' config/manager/kustomization.yaml)
+          echo "Chart.yaml version        = $VERSION"
+          echo "Chart.yaml appVersion     = $APPVERSION"
+          echo "values.yaml image.tag     = $VALUES_TAG"
+          echo "kustomization.yaml newTag = $KUSTOMIZE_TAG"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Chart.yaml version '$VERSION' is not in the expected x.y.z format"
+            exit 1
+          fi
+          mismatch=0
+          if [ "$APPVERSION" != "$VERSION" ]; then
+            echo "::error::Chart.yaml appVersion ($APPVERSION) does not match version ($VERSION)"
+            mismatch=1
+          fi
+          if [ "$VALUES_TAG" != "$VERSION" ]; then
+            echo "::error::values.yaml image.tag ($VALUES_TAG) does not match Chart.yaml version ($VERSION)"
+            mismatch=1
+          fi
+          if [ "$KUSTOMIZE_TAG" != "$VERSION" ]; then
+            echo "::error::kustomization.yaml newTag ($KUSTOMIZE_TAG) does not match Chart.yaml version ($VERSION)"
+            mismatch=1
+          fi
+          if [ "$mismatch" = "1" ]; then
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package chart
+        if: steps.check.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          helm package charts/workbench-operator \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            --destination .
+
+      - name: Create tag + release atomically, upload chart
+        if: steps.check.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$TAG" \
+            "workbench-operator-${VERSION}.tgz" \
+            --title "$TAG" \
+            --target "$GITHUB_SHA" \
+            --generate-notes
