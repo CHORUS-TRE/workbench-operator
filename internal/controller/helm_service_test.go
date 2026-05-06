@@ -733,61 +733,61 @@ var _ = Describe("buildServiceStatus", func() {
 
 	It("populates message from helm description", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "Install complete", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "Install complete", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Message).To(Equal("Install complete"))
 	})
 
 	It("sets empty message when description is empty", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Message).To(BeEmpty())
 	})
 
 	It("returns Running when deployed and state is Running", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
 	})
 
 	It("returns Progressing when helm status is pending-install", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("pending-install", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("pending-install", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing when helm status is pending-upgrade", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("pending-upgrade", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("pending-upgrade", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing when helm status is pending-rollback", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("pending-rollback", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("pending-rollback", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Failed when helm status is failed", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("failed", "install failed", svc, "rel", "", workspace)
+		status := buildServiceStatus("failed", "install failed", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
 	})
 
 	It("returns Stopped when not-found and state is Stopped", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		status := buildServiceStatus("not-found", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("not-found", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
 	})
 
 	It("returns Deleted when not-found and state is Deleted", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
-		status := buildServiceStatus("not-found", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("not-found", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
 	})
 
 	It("returns Progressing as default fallback", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("unknown-state", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("unknown-state", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
@@ -796,8 +796,29 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "host={{.ReleaseName}}.{{.Namespace}} secret={{.SecretName}}",
 		}
-		status := buildServiceStatus("deployed", "", svc, "my-release", "my-secret", workspace)
+		status := buildServiceStatus("deployed", "", svc, "my-release", "my-secret", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.ConnectionInfo).To(Equal("host=my-release.mynamespace secret=my-secret"))
+	})
+
+	It("uses the explicit template parameter, not svc.ConnectionInfoTemplate", func() {
+		// Lock in the contract: the function reads the connectionInfoTemplate parameter
+		// (which the controller resolves from CR + chorus.yaml fallback) and ignores
+		// the field on the WorkspaceService struct.
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
+			ConnectionInfoTemplate: "from-svc-{{.ReleaseName}}",
+		}
+		status := buildServiceStatus("deployed", "", svc, "my-release", "", "from-param-{{.ReleaseName}}", workspace)
+		Expect(status.ConnectionInfo).To(Equal("from-param-my-release"))
+	})
+
+	It("renders an empty connection info when the template parameter is empty even if svc has one", func() {
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
+			ConnectionInfoTemplate: "from-svc-{{.ReleaseName}}",
+		}
+		status := buildServiceStatus("deployed", "", svc, "my-release", "", "", workspace)
+		Expect(status.ConnectionInfo).To(BeEmpty())
 	})
 
 	It("does not render connection info when not Running", func() {
@@ -805,31 +826,31 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "host={{.ReleaseName}}",
 		}
-		status := buildServiceStatus("failed", "", svc, "my-release", "", workspace)
+		status := buildServiceStatus("failed", "", svc, "my-release", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.ConnectionInfo).To(BeEmpty())
 	})
 
 	It("populates SecretName in status", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "", svc, "rel", "my-creds", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "my-creds", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.SecretName).To(Equal("my-creds"))
 	})
 
 	It("populates SecretName even when not Running", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", workspace)
+		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.SecretName).To(Equal("my-creds"))
 	})
 
 	It("returns Progressing when deployed but desired state is Stopped", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing when deployed but desired state is Deleted", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 })
@@ -1216,5 +1237,312 @@ var _ = Describe("helmInstallOrUpgrade", func() {
 		// With a correct version field the install must pass the version check.
 		// The fake kube client returns no error, so the whole call succeeds.
 		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+func newChartWithChorusFile(content string) *chartv2.Chart {
+	files := []*chartcommon.File{}
+	if content != "" {
+		files = append(files, &chartcommon.File{Name: "chorus.yaml", Data: []byte(content)})
+	}
+	return &chartv2.Chart{
+		Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"},
+		Files:    files,
+	}
+}
+
+var _ = Describe("parseChorusConfig", func() {
+	It("returns nil when the chart has no chorus.yaml", func() {
+		ch := newChartWithChorusFile("")
+		cfg, err := parseChorusConfig(ch)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).To(BeNil())
+	})
+
+	It("parses a well-formed chorus.yaml", func() {
+		content := `
+values:
+  foo:
+    bar: "{{.ReleaseName}}-x"
+credentials:
+  secretName: "{{.ReleaseName}}-creds"
+  paths:
+    - foo.password
+connectionInfoTemplate: "https://{{.ReleaseName}}.{{.Namespace}}"
+`
+		cfg, err := parseChorusConfig(newChartWithChorusFile(content))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.ConnectionInfoTemplate).To(Equal("https://{{.ReleaseName}}.{{.Namespace}}"))
+		Expect(cfg.Credentials).NotTo(BeNil())
+		Expect(cfg.Credentials.SecretName).To(Equal("{{.ReleaseName}}-creds"))
+		Expect(cfg.Credentials.Paths).To(Equal([]string{"foo.password"}))
+		Expect(cfg.Values).To(HaveKey("foo"))
+	})
+
+	It("rejects malformed YAML", func() {
+		_, err := parseChorusConfig(newChartWithChorusFile("values: [not-a-map"))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("parsing chorus.yaml"))
+	})
+
+	It("rejects unknown top-level keys (strict)", func() {
+		_, err := parseChorusConfig(newChartWithChorusFile("nope: 1\n"))
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("parses a chorus.yaml that contains only empty blocks", func() {
+		cfg, err := parseChorusConfig(newChartWithChorusFile("values: {}\ncredentials: {}\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.Values).To(BeEmpty())
+		Expect(cfg.Credentials).NotTo(BeNil())
+		Expect(cfg.Credentials.Paths).To(BeEmpty())
+		Expect(cfg.Credentials.SecretName).To(BeEmpty())
+	})
+
+	It("parses a chorus.yaml that contains only comments", func() {
+		cfg, err := parseChorusConfig(newChartWithChorusFile("# just a comment\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.Values).To(BeNil())
+		Expect(cfg.Credentials).To(BeNil())
+		Expect(cfg.ConnectionInfoTemplate).To(BeEmpty())
+	})
+
+	It("finds chorus.yaml when it is not the first entry in chart.Files", func() {
+		ch := &chartv2.Chart{
+			Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"},
+			Files: []*chartcommon.File{
+				{Name: "decoy-before.yaml", Data: []byte("garbage: [")},
+				{Name: "chorus.yaml", Data: []byte("connectionInfoTemplate: hello\n")},
+				{Name: "decoy-after.yaml", Data: []byte("more: garbage")},
+			},
+		}
+		cfg, err := parseChorusConfig(ch)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.ConnectionInfoTemplate).To(Equal("hello"))
+	})
+})
+
+var _ = Describe("effectiveSecretName", func() {
+	It("returns the CR field when set", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "explicit-name"},
+		}
+		got, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("explicit-name"))
+	})
+
+	It("substitutes placeholders in the CR field", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "{{.ReleaseName}}-creds"},
+		}
+		got, err := effectiveSecretName(svc, nil, "my-release", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("my-release-creds"))
+	})
+
+	It("falls through to chorus.yaml when CR is empty and substitutes placeholders", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{SecretName: "{{.ReleaseName}}-creds"}}
+		got, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("defaults to <release>-creds when both are empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		got, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("falls through to default when CR has Credentials struct with empty SecretName and chorus.yaml is nil", func() {
+		// Different branch from "Credentials = nil": exercises the empty-string check inside the if.
+		svc := &defaultv1alpha1.WorkspaceService{Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{Paths: []string{"pw"}}}
+		got, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("returns an error when the CR field has an unrecognised placeholder", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "{{.Bogus}}-creds"},
+		}
+		_, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("returns an error when the chorus.yaml field has an unrecognised placeholder", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{SecretName: "{{.Bogus}}-creds"}}
+		_, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("falls through to default when chorus.yaml has no credentials block", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{} // no Credentials field
+		got, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("falls through to default when both CR and chorus.yaml have empty SecretName", func() {
+		svc := &defaultv1alpha1.WorkspaceService{Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{}}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"pw"}}}
+		got, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+})
+
+var _ = Describe("resolvePlaceholders", func() {
+	It("substitutes the three supported placeholders", func() {
+		got, err := resolvePlaceholders("ns={{.Namespace}} rel={{.ReleaseName}} sec={{.SecretName}}", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("ns=ns rel=rel sec=sec"))
+	})
+
+	It("returns the input unchanged when no placeholders are present", func() {
+		got, err := resolvePlaceholders("plain-string", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("plain-string"))
+	})
+
+	It("returns an error when an unrecognised placeholder remains", func() {
+		_, err := resolvePlaceholders("hello {{.Unknown}}", "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("returns the empty string for empty input", func() {
+		got, err := resolvePlaceholders("", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
+	})
+
+	It("substitutes the same placeholder multiple times", func() {
+		got, err := resolvePlaceholders("{{.ReleaseName}}-{{.ReleaseName}}", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-rel"))
+	})
+})
+
+var _ = Describe("effectiveCredentialPaths", func() {
+	It("returns CR paths when non-empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{Paths: []string{"a", "b"}},
+		}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"x"}}}
+		Expect(effectiveCredentialPaths(svc, cfg)).To(Equal([]string{"a", "b"}))
+	})
+
+	It("falls through to chorus.yaml when CR paths are empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{}}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"x"}}}
+		Expect(effectiveCredentialPaths(svc, cfg)).To(Equal([]string{"x"}))
+	})
+
+	It("falls through to chorus.yaml when CR has no Credentials block at all", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"x"}}}
+		Expect(effectiveCredentialPaths(svc, cfg)).To(Equal([]string{"x"}))
+	})
+
+	It("returns nil when both are empty", func() {
+		Expect(effectiveCredentialPaths(&defaultv1alpha1.WorkspaceService{}, nil)).To(BeNil())
+	})
+
+	It("returns nil when chorus.yaml has no credentials block", func() {
+		Expect(effectiveCredentialPaths(&defaultv1alpha1.WorkspaceService{}, &ChorusConfig{})).To(BeNil())
+	})
+})
+
+var _ = Describe("effectiveConnectionInfoTemplate", func() {
+	It("returns the CR field when set", func() {
+		svc := &defaultv1alpha1.WorkspaceService{ConnectionInfoTemplate: "from-cr"}
+		cfg := &ChorusConfig{ConnectionInfoTemplate: "from-chorus"}
+		Expect(effectiveConnectionInfoTemplate(svc, cfg)).To(Equal("from-cr"))
+	})
+
+	It("falls through to chorus.yaml when CR is empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{ConnectionInfoTemplate: "from-chorus"}
+		Expect(effectiveConnectionInfoTemplate(svc, cfg)).To(Equal("from-chorus"))
+	})
+
+	It("returns empty string when both are empty", func() {
+		Expect(effectiveConnectionInfoTemplate(&defaultv1alpha1.WorkspaceService{}, nil)).To(BeEmpty())
+	})
+
+	It("returns empty string when chorus.yaml is non-nil but has empty template", func() {
+		Expect(effectiveConnectionInfoTemplate(&defaultv1alpha1.WorkspaceService{}, &ChorusConfig{})).To(BeEmpty())
+	})
+})
+
+var _ = Describe("substituteChorusPlaceholders", func() {
+	It("substitutes placeholders in nested maps and slices", func() {
+		values := map[string]interface{}{
+			"top": "{{.ReleaseName}}-x",
+			"nested": map[string]interface{}{
+				"inner": "ns={{.Namespace}}",
+			},
+			"list": []interface{}{"sec={{.SecretName}}", 42},
+		}
+		out, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out["top"]).To(Equal("rel-x"))
+		Expect(out["nested"].(map[string]interface{})["inner"]).To(Equal("ns=ns"))
+		Expect(out["list"].([]interface{})[0]).To(Equal("sec=sec"))
+		Expect(out["list"].([]interface{})[1]).To(Equal(42))
+	})
+
+	It("returns nil when input is empty", func() {
+		out, err := substituteChorusPlaceholders(nil, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(BeNil())
+	})
+
+	It("returns an error when an unrecognised placeholder remains", func() {
+		_, err := substituteChorusPlaceholders(map[string]interface{}{"k": "{{.Bogus}}"}, "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("propagates the unknown-placeholder error from a nested map", func() {
+		values := map[string]interface{}{
+			"outer": map[string]interface{}{"inner": "{{.Bogus}}"},
+		}
+		_, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("propagates the unknown-placeholder error from inside a slice", func() {
+		values := map[string]interface{}{
+			"list": []interface{}{"ok", "{{.Bogus}}"},
+		}
+		_, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("leaves non-string scalars and nil values untouched (default case)", func() {
+		values := map[string]interface{}{
+			"int":   42,
+			"bool":  true,
+			"float": 3.14,
+			"nil":   nil,
+		}
+		out, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out["int"]).To(Equal(42))
+		Expect(out["bool"]).To(Equal(true))
+		Expect(out["float"]).To(Equal(3.14))
+		Expect(out["nil"]).To(BeNil())
 	})
 })

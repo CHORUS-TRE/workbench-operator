@@ -86,7 +86,10 @@ type WorkspaceServiceChart struct {
 type WorkspaceServiceCredentials struct {
 	// SecretName is the name of the Kubernetes Secret the operator creates in the workspace namespace.
 	// Passwords are stored here and never written to the CRD.
-	SecretName string `json:"secretName"`
+	// Supports placeholders: {{.Namespace}}, {{.ReleaseName}}.
+	// Precedence: this field → chart's chorus.yaml credentials.secretName → "<release-name>-creds".
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
 
 	// Paths is a list of dot-notation Helm value paths for which the operator auto-generates passwords.
 	// One 24-char random password is generated per entry, stored in SecretName, and injected into Helm.
