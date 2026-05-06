@@ -783,8 +783,16 @@ func substituteChorusPlaceholders(values map[string]any, releaseName, namespace,
 	return out, nil
 }
 
-// substituteValueNode walks the value tree in-place, replacing placeholders in
-// every string leaf. Returns the (possibly substituted) node.
+// substituteValueNode walks the value tree, replacing placeholders in every
+// string leaf. Returns the (possibly substituted) node.
+//
+// CALLERS MUST PASS A FRESH MAP. The function mutates maps and slices in place
+// — map keys are reassigned, slice indices overwritten. The current operator
+// install path satisfies this naturally (chorusCfg is unmarshalled from
+// chorus.yaml on every reconcile and not shared). If a future change ever caches
+// a parsed *ChorusConfig across reconciles, the cached values would be mutated
+// on each call and progressively corrupted; deep-copy before calling in that
+// case.
 func substituteValueNode(v any, replacer *strings.Replacer) any {
 	switch x := v.(type) {
 	case string:
@@ -808,6 +816,12 @@ func substituteValueNode(v any, replacer *strings.Replacer) any {
 // credentials. Precedence: CR field → chorus.yaml field → "<release>-creds".
 // Both CR and chorus.yaml values are placeholder-substituted before use, so a
 // chart shipping "{{.ReleaseName}}-creds" stays per-release.
+//
+// {{.SecretName}} cannot be used to template the SecretName itself — the
+// placeholder is intentionally resolved with an empty SecretName here (you
+// can't reference yourself). A chart shipping `secretName: "creds-{{.SecretName}}"`
+// will fail with "unrecognised placeholder" because resolvePlaceholders
+// validates that no placeholders remain after substitution.
 func effectiveSecretName(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig, releaseName, namespace string) (string, error) {
 	if svc.Credentials != nil && svc.Credentials.SecretName != "" {
 		return resolvePlaceholders(svc.Credentials.SecretName, releaseName, namespace, "")

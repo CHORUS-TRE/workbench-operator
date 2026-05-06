@@ -1116,6 +1116,43 @@ var _ = Describe("reconcileServices", func() {
 		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to resolve secretName"))
 	})
 
+	It("preserves the previously-recorded SecretName when a Failed status is written", func() {
+		// Regression test for failedServiceStatus: a transient failure (here, chart
+		// load against the fake registry) must NOT clear the SecretName field that
+		// a prior successful reconcile recorded in status. Without the helper the
+		// wholesale-replace would drop it, surfacing a stale empty SecretName to
+		// the backend / catalog UI even though the cluster Secret still exists.
+		const recordedSecret = "previously-recorded-creds"
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "preserve-secret-ws", Namespace: namespace, UID: "uid-preserve-secret"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateRunning,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+					},
+				},
+			},
+			Status: defaultv1alpha1.WorkspaceStatus{
+				Services: map[string]defaultv1alpha1.WorkspaceStatusService{
+					"postgres": {
+						Status:     defaultv1alpha1.WorkspaceStatusServiceStatusRunning,
+						SecretName: recordedSecret,
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to load chart"))
+		// The recorded SecretName from the prior reconcile must survive the Failed write.
+		Expect(ws.Status.Services["postgres"].SecretName).To(Equal(recordedSecret))
+	})
+
 	It("falls back to the <release>-creds default when CR omits credentials and status is empty", func() {
 		// Workspace name is "default-creds-fallback-ws"; release name is "<workspace>-postgres";
 		// effective Secret name therefore defaults to "<release>-creds".

@@ -198,10 +198,20 @@ func buildNetworkPolicy(workspace defaultv1alpha1.Workspace, internalServices []
 		// DNS to node-local-dns (hostNetwork=true, link-local IP 169.254.x.x).
 		// Cilium classifies that link-local IP as the "world" entity (not "host"
 		// and not the node-local-dns pod identity, since the pod runs hostNetwork).
-		// Bounded to port 53 — does not allow general external egress. No L7 DNS
-		// rules here because Cilium's DNS proxy doesn't intercept world-entity
-		// destinations; FQDN policies still resolve via the kube-dns rule above
-		// when the cluster runs CoreDNS in pods.
+		//
+		// Scope caveat: "world" is every destination Cilium classifies as
+		// outside-cluster, so this rule technically permits port 53 traffic to
+		// any external IP — including public DNS resolvers and arbitrary hosts
+		// that happen to listen on 53. The bound is "port 53 to anywhere", not
+		// "port 53 to node-local-dns only". A Cilium policy can't single out the
+		// link-local IP without an entity for it. Acceptable trade-off because
+		// (a) ports other than 53 stay blocked by the workspace mode (Airgapped
+		// / FQDNAllowlist / Open) and (b) DNS-over-53 exfiltration is in scope
+		// of separate FQDN-egress controls, not this rule.
+		//
+		// No L7 DNS rules here because Cilium's DNS proxy doesn't intercept
+		// world-entity destinations; FQDN policies still resolve via the
+		// kube-dns rule above when the cluster runs CoreDNS in pods.
 		{
 			"toEntities": []string{"world"},
 			"toPorts": []map[string]any{
