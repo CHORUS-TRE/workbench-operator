@@ -36,15 +36,15 @@ var _ = Describe("parseServiceValues", func() {
 	})
 
 	It("returns the parsed map for valid JSON values", func() {
-		raw, _ := json.Marshal(map[string]interface{}{
-			"storage": map[string]interface{}{"requestedSize": "10Gi"},
+		raw, _ := json.Marshal(map[string]any{
+			"storage": map[string]any{"requestedSize": "10Gi"},
 		})
 		svc := &defaultv1alpha1.WorkspaceService{
 			Values: &apiextensionsv1.JSON{Raw: raw},
 		}
 		result, err := parseServiceValues(svc)
 		Expect(err).NotTo(HaveOccurred())
-		storage, ok := result["storage"].(map[string]interface{})
+		storage, ok := result["storage"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(storage["requestedSize"]).To(Equal("10Gi"))
 	})
@@ -668,14 +668,14 @@ var _ = Describe("checkServicePodsHealth", func() {
 
 var _ = Describe("releaseValuesMatch", func() {
 	It("returns true for equal non-empty maps", func() {
-		a := map[string]interface{}{"key": "value", "num": float64(1)}
-		b := map[string]interface{}{"key": "value", "num": float64(1)}
+		a := map[string]any{"key": "value", "num": float64(1)}
+		b := map[string]any{"key": "value", "num": float64(1)}
 		Expect(releaseValuesMatch(a, b)).To(BeTrue())
 	})
 
 	It("returns false when maps differ", func() {
-		a := map[string]interface{}{"key": "value1"}
-		b := map[string]interface{}{"key": "value2"}
+		a := map[string]any{"key": "value1"}
+		b := map[string]any{"key": "value2"}
 		Expect(releaseValuesMatch(a, b)).To(BeFalse())
 	})
 
@@ -684,25 +684,25 @@ var _ = Describe("releaseValuesMatch", func() {
 	})
 
 	It("returns false when one map is nil and the other is not", func() {
-		Expect(releaseValuesMatch(nil, map[string]interface{}{"k": "v"})).To(BeFalse())
+		Expect(releaseValuesMatch(nil, map[string]any{"k": "v"})).To(BeFalse())
 	})
 
 	It("returns true for nested equal maps", func() {
-		a := map[string]interface{}{"outer": map[string]interface{}{"inner": "val"}}
-		b := map[string]interface{}{"outer": map[string]interface{}{"inner": "val"}}
+		a := map[string]any{"outer": map[string]any{"inner": "val"}}
+		b := map[string]any{"outer": map[string]any{"inner": "val"}}
 		Expect(releaseValuesMatch(a, b)).To(BeTrue())
 	})
 })
 
 var _ = Describe("wrapWithPrefix", func() {
 	It("returns values unchanged when prefix is empty", func() {
-		vals := map[string]interface{}{"k": "v"}
+		vals := map[string]any{"k": "v"}
 		result := wrapWithPrefix(vals, "")
 		Expect(result).To(Equal(vals))
 	})
 
 	It("returns values unchanged when values map is empty", func() {
-		result := wrapWithPrefix(map[string]interface{}{}, "myprefix")
+		result := wrapWithPrefix(map[string]any{}, "myprefix")
 		Expect(result).To(BeEmpty())
 	})
 
@@ -711,7 +711,7 @@ var _ = Describe("wrapWithPrefix", func() {
 	})
 
 	It("wraps values under the prefix key", func() {
-		vals := map[string]interface{}{"settings": map[string]interface{}{"password": "secret"}}
+		vals := map[string]any{"settings": map[string]any{"password": "secret"}}
 		result := wrapWithPrefix(vals, "postgres")
 		Expect(result).To(HaveKey("postgres"))
 		Expect(result["postgres"]).To(Equal(vals))
@@ -916,7 +916,7 @@ var _ = Describe("evaluateComputedValues", func() {
 			"myrel", "myns", "",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		inner, ok := result["a"].(map[string]interface{})
+		inner, ok := result["a"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(inner["host"]).To(Equal("myrel-db"))
 		Expect(inner["port"]).To(Equal("5432"))
@@ -935,14 +935,14 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("handles an array index in the middle of a path", func() {
 		result, err := dotNotationToNestedMap("mlflow.extraVolumes[0].persistentVolumeClaim.claimName", "my-pvc")
 		Expect(err).NotTo(HaveOccurred())
-		mlflow, ok := result["mlflow"].(map[string]interface{})
+		mlflow, ok := result["mlflow"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := mlflow["extraVolumes"].([]interface{})
+		slice, ok := mlflow["extraVolumes"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(1))
-		elem, ok := slice[0].(map[string]interface{})
+		elem, ok := slice[0].(map[string]any)
 		Expect(ok).To(BeTrue())
-		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(pvc).To(HaveKeyWithValue("claimName", "my-pvc"))
 	})
@@ -950,9 +950,9 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("handles an array index as the last segment", func() {
 		result, err := dotNotationToNestedMap("a.items[2]", "val")
 		Expect(err).NotTo(HaveOccurred())
-		a, ok := result["a"].(map[string]interface{})
+		a, ok := result["a"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := a["items"].([]interface{})
+		slice, ok := a["items"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(3))
 		Expect(slice[2]).To(Equal("val"))
@@ -961,14 +961,14 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("creates a slice of the right length for a non-zero index", func() {
 		result, err := dotNotationToNestedMap("a.items[2].name", "val")
 		Expect(err).NotTo(HaveOccurred())
-		a, ok := result["a"].(map[string]interface{})
+		a, ok := result["a"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := a["items"].([]interface{})
+		slice, ok := a["items"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(3))
 		Expect(slice[0]).To(BeNil())
 		Expect(slice[1]).To(BeNil())
-		elem, ok := slice[2].(map[string]interface{})
+		elem, ok := slice[2].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(elem).To(HaveKeyWithValue("name", "val"))
 	})
@@ -976,10 +976,10 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("handles an array index at the root level (no leading dot)", func() {
 		result, err := dotNotationToNestedMap("items[0].name", "val")
 		Expect(err).NotTo(HaveOccurred())
-		slice, ok := result["items"].([]interface{})
+		slice, ok := result["items"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(1))
-		elem, ok := slice[0].(map[string]interface{})
+		elem, ok := slice[0].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(elem).To(HaveKeyWithValue("name", "val"))
 	})
@@ -993,21 +993,21 @@ var _ = Describe("dotNotationToNestedMap", func() {
 
 var _ = Describe("buildAtPath", func() {
 	It("merges two calls sharing an array key on the same map", func() {
-		m := make(map[string]interface{})
+		m := make(map[string]any)
 		Expect(buildAtPath(m, []string{"extraVolumes[0]", "name"}, "artifacts")).To(Succeed())
 		Expect(buildAtPath(m, []string{"extraVolumes[1]", "name"}, "config")).To(Succeed())
-		slice, ok := m["extraVolumes"].([]interface{})
+		slice, ok := m["extraVolumes"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(2))
-		Expect(slice[0].(map[string]interface{})).To(HaveKeyWithValue("name", "artifacts"))
-		Expect(slice[1].(map[string]interface{})).To(HaveKeyWithValue("name", "config"))
+		Expect(slice[0].(map[string]any)).To(HaveKeyWithValue("name", "artifacts"))
+		Expect(slice[1].(map[string]any)).To(HaveKeyWithValue("name", "config"))
 	})
 
 	It("merges two calls sharing a map key on the same map", func() {
-		m := make(map[string]interface{})
+		m := make(map[string]any)
 		Expect(buildAtPath(m, []string{"postgres", "host"}, "db-host")).To(Succeed())
 		Expect(buildAtPath(m, []string{"postgres", "port"}, "5432")).To(Succeed())
-		pg, ok := m["postgres"].(map[string]interface{})
+		pg, ok := m["postgres"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(pg).To(HaveKeyWithValue("host", "db-host"))
 		Expect(pg).To(HaveKeyWithValue("port", "5432"))
@@ -1016,45 +1016,119 @@ var _ = Describe("buildAtPath", func() {
 
 var _ = Describe("mergeSlices", func() {
 	It("merges two same-length slices of maps element-wise", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}}
-		override := []interface{}{map[string]interface{}{"b": "2"}}
+		base := []any{map[string]any{"a": "1"}}
+		override := []any{map[string]any{"b": "2"}}
 		result := mergeSlices(base, override)
 		Expect(result).To(HaveLen(1))
-		elem := result[0].(map[string]interface{})
+		elem := result[0].(map[string]any)
 		Expect(elem).To(HaveKeyWithValue("a", "1"))
 		Expect(elem).To(HaveKeyWithValue("b", "2"))
 	})
 
 	It("keeps base elements beyond override length", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"}}
-		override := []interface{}{map[string]interface{}{"x": "9"}}
+		base := []any{map[string]any{"a": "1"}, map[string]any{"b": "2"}}
+		override := []any{map[string]any{"x": "9"}}
 		result := mergeSlices(base, override)
 		Expect(result).To(HaveLen(2))
-		Expect(result[0].(map[string]interface{})).To(HaveKeyWithValue("x", "9"))
-		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("b", "2"))
+		Expect(result[0].(map[string]any)).To(HaveKeyWithValue("x", "9"))
+		Expect(result[1].(map[string]any)).To(HaveKeyWithValue("b", "2"))
 	})
 
 	It("appends override elements beyond base length", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}}
-		override := []interface{}{map[string]interface{}{"x": "9"}, map[string]interface{}{"y": "8"}}
+		base := []any{map[string]any{"a": "1"}}
+		override := []any{map[string]any{"x": "9"}, map[string]any{"y": "8"}}
 		result := mergeSlices(base, override)
 		Expect(result).To(HaveLen(2))
-		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("y", "8"))
+		Expect(result[1].(map[string]any)).To(HaveKeyWithValue("y", "8"))
 	})
 
 	It("override wins for non-map scalar elements", func() {
-		base := []interface{}{"old"}
-		override := []interface{}{"new"}
+		base := []any{"old"}
+		override := []any{"new"}
 		result := mergeSlices(base, override)
 		Expect(result[0]).To(Equal("new"))
 	})
 
 	It("keeps base element when override element is nil", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"}}
-		override := []interface{}{nil, map[string]interface{}{"c": "3"}}
+		base := []any{map[string]any{"a": "1"}, map[string]any{"b": "2"}}
+		override := []any{nil, map[string]any{"c": "3"}}
 		result := mergeSlices(base, override)
-		Expect(result[0].(map[string]interface{})).To(HaveKeyWithValue("a", "1"))
-		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("c", "3"))
+		Expect(result[0].(map[string]any)).To(HaveKeyWithValue("a", "1"))
+		Expect(result[1].(map[string]any)).To(HaveKeyWithValue("c", "3"))
+	})
+})
+
+var _ = Describe("mergeMapsReplaceSlices", func() {
+	It("recursively merges maps", func() {
+		base := map[string]any{
+			"mlflow": map[string]any{"a": 1, "b": 2},
+		}
+		override := map[string]any{
+			"mlflow": map[string]any{"b": 99, "c": 3},
+		}
+		merged := mergeMapsReplaceSlices(base, override)
+		Expect(merged["mlflow"]).To(Equal(map[string]any{"a": 1, "b": 99, "c": 3}))
+	})
+
+	It("wholesale-replaces slices instead of element-wise merging", func() {
+		// chorus.yaml ships extraVolumes[0] = {name: artifacts, persistentVolumeClaim: {...}}
+		// User CR overrides extraVolumes wholesale with a different volume.
+		// Expected: user CR wins entirely, no Frankenstein entry.
+		base := map[string]any{
+			"mlflow": map[string]any{
+				"extraVolumes": []any{
+					map[string]any{
+						"name": "artifacts",
+						"persistentVolumeClaim": map[string]any{
+							"claimName": "release-artifacts",
+						},
+					},
+				},
+			},
+		}
+		override := map[string]any{
+			"mlflow": map[string]any{
+				"extraVolumes": []any{
+					map[string]any{
+						"name":     "data",
+						"hostPath": map[string]any{"path": "/foo"},
+					},
+				},
+			},
+		}
+		merged := mergeMapsReplaceSlices(base, override)
+		mlflow := merged["mlflow"].(map[string]any)
+		slice := mlflow["extraVolumes"].([]any)
+		Expect(slice).To(HaveLen(1))
+		elem0 := slice[0].(map[string]any)
+		Expect(elem0).To(HaveKeyWithValue("name", "data"))
+		Expect(elem0).NotTo(HaveKey("persistentVolumeClaim")) // base entry's field is GONE
+		Expect(elem0).To(HaveKey("hostPath"))
+	})
+
+	It("keeps base slice when override does not set the key", func() {
+		base := map[string]any{
+			"mlflow": map[string]any{
+				"extraVolumes": []any{
+					map[string]any{"name": "artifacts"},
+				},
+			},
+		}
+		override := map[string]any{
+			"mlflow": map[string]any{"image": "x"},
+		}
+		merged := mergeMapsReplaceSlices(base, override)
+		mlflow := merged["mlflow"].(map[string]any)
+		Expect(mlflow["extraVolumes"]).To(HaveLen(1))
+		Expect(mlflow["image"]).To(Equal("x"))
+	})
+
+	It("does not mutate the base map", func() {
+		base := map[string]any{"a": 1, "list": []any{1, 2}}
+		override := map[string]any{"a": 2, "list": []any{9}}
+		_ = mergeMapsReplaceSlices(base, override)
+		Expect(base["a"]).To(Equal(1))
+		Expect(base["list"]).To(Equal([]any{1, 2}))
 	})
 })
 
@@ -1073,13 +1147,13 @@ var _ = Describe("mergeMaps with slice-aware merging", func() {
 			"workspace156-mlflow", "workspace156", "",
 		)
 		merged := mergeMaps(first, second)
-		mlflow := merged["mlflow"].(map[string]interface{})
-		slice := mlflow["extraVolumes"].([]interface{})
+		mlflow := merged["mlflow"].(map[string]any)
+		slice := mlflow["extraVolumes"].([]any)
 		Expect(slice).To(HaveLen(2))
-		elem0 := slice[0].(map[string]interface{})
-		pvc := elem0["persistentVolumeClaim"].(map[string]interface{})
+		elem0 := slice[0].(map[string]any)
+		pvc := elem0["persistentVolumeClaim"].(map[string]any)
 		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
-		elem1 := slice[1].(map[string]interface{})
+		elem1 := slice[1].(map[string]any)
 		Expect(elem1).To(HaveKeyWithValue("name", "extra-vol"))
 	})
 })
@@ -1094,13 +1168,13 @@ var _ = Describe("evaluateComputedValues with array notation", func() {
 			"workspace156-mlflow", "workspace156", "",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		mlflow := result["mlflow"].(map[string]interface{})
-		slice := mlflow["extraVolumes"].([]interface{})
+		mlflow := result["mlflow"].(map[string]any)
+		slice := mlflow["extraVolumes"].([]any)
 		Expect(slice).To(HaveLen(2))
-		elem0 := slice[0].(map[string]interface{})
-		pvc := elem0["persistentVolumeClaim"].(map[string]interface{})
+		elem0 := slice[0].(map[string]any)
+		pvc := elem0["persistentVolumeClaim"].(map[string]any)
 		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
-		elem1 := slice[1].(map[string]interface{})
+		elem1 := slice[1].(map[string]any)
 		Expect(elem1).To(HaveKeyWithValue("name", "extra-vol"))
 	})
 
@@ -1123,14 +1197,14 @@ var _ = Describe("evaluateComputedValues with array notation", func() {
 			"workspace156-mlflow", "workspace156", "",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		mlflow, ok := result["mlflow"].(map[string]interface{})
+		mlflow, ok := result["mlflow"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := mlflow["extraVolumes"].([]interface{})
+		slice, ok := mlflow["extraVolumes"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(1))
-		elem, ok := slice[0].(map[string]interface{})
+		elem, ok := slice[0].(map[string]any)
 		Expect(ok).To(BeTrue())
-		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
 	})
@@ -1486,19 +1560,19 @@ var _ = Describe("effectiveConnectionInfoTemplate", func() {
 
 var _ = Describe("substituteChorusPlaceholders", func() {
 	It("substitutes placeholders in nested maps and slices", func() {
-		values := map[string]interface{}{
+		values := map[string]any{
 			"top": "{{.ReleaseName}}-x",
-			"nested": map[string]interface{}{
+			"nested": map[string]any{
 				"inner": "ns={{.Namespace}}",
 			},
-			"list": []interface{}{"sec={{.SecretName}}", 42},
+			"list": []any{"sec={{.SecretName}}", 42},
 		}
 		out, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out["top"]).To(Equal("rel-x"))
-		Expect(out["nested"].(map[string]interface{})["inner"]).To(Equal("ns=ns"))
-		Expect(out["list"].([]interface{})[0]).To(Equal("sec=sec"))
-		Expect(out["list"].([]interface{})[1]).To(Equal(42))
+		Expect(out["nested"].(map[string]any)["inner"]).To(Equal("ns=ns"))
+		Expect(out["list"].([]any)[0]).To(Equal("sec=sec"))
+		Expect(out["list"].([]any)[1]).To(Equal(42))
 	})
 
 	It("returns nil when input is empty", func() {
@@ -1508,14 +1582,14 @@ var _ = Describe("substituteChorusPlaceholders", func() {
 	})
 
 	It("returns an error when an unrecognised placeholder remains", func() {
-		_, err := substituteChorusPlaceholders(map[string]interface{}{"k": "{{.Bogus}}"}, "rel", "ns", "sec")
+		_, err := substituteChorusPlaceholders(map[string]any{"k": "{{.Bogus}}"}, "rel", "ns", "sec")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
 	})
 
 	It("propagates the unknown-placeholder error from a nested map", func() {
-		values := map[string]interface{}{
-			"outer": map[string]interface{}{"inner": "{{.Bogus}}"},
+		values := map[string]any{
+			"outer": map[string]any{"inner": "{{.Bogus}}"},
 		}
 		_, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
 		Expect(err).To(HaveOccurred())
@@ -1523,8 +1597,8 @@ var _ = Describe("substituteChorusPlaceholders", func() {
 	})
 
 	It("propagates the unknown-placeholder error from inside a slice", func() {
-		values := map[string]interface{}{
-			"list": []interface{}{"ok", "{{.Bogus}}"},
+		values := map[string]any{
+			"list": []any{"ok", "{{.Bogus}}"},
 		}
 		_, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
 		Expect(err).To(HaveOccurred())
@@ -1532,7 +1606,7 @@ var _ = Describe("substituteChorusPlaceholders", func() {
 	})
 
 	It("leaves non-string scalars and nil values untouched (default case)", func() {
-		values := map[string]interface{}{
+		values := map[string]any{
 			"int":   42,
 			"bool":  true,
 			"float": 3.14,

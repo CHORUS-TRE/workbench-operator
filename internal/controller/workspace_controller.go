@@ -440,6 +440,18 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			}
 			continue
 		}
+		// If the CR did not pin a SecretName, prefer what a prior Running reconcile
+		// recorded in status (which reflects chorus.yaml's contribution) over the
+		// default. Without this fallback, a Running → Stopped transition would
+		// overwrite status.SecretName with the chorus.yaml-less default even though
+		// the actual Secret in the cluster keeps the chorus.yaml-derived name.
+		// The Running branch re-resolves with chorusCfg, so this only affects the
+		// non-Running paths.
+		if svc.Credentials == nil || svc.Credentials.SecretName == "" {
+			if existing, ok := workspace.Status.Services[key]; ok && existing.SecretName != "" {
+				secretName = existing.SecretName
+			}
+		}
 		connectionInfoTemplate := effectiveConnectionInfoTemplate(&svc, nil)
 
 		desiredState := svc.State
@@ -479,8 +491,10 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				continue
 			}
 
-			// Re-resolve effective values now that chorus.yaml is available.
-			secretName, err = effectiveSecretName(&svc, chorusCfg, releaseName, namespace)
+			// Resolve chorus.yaml-aware values into branch-locals; promote to the
+			// outer scope at the end of the branch so the post-switch status update
+			// sees the chorus-derived values.
+			runningSecretName, err := effectiveSecretName(&svc, chorusCfg, releaseName, namespace)
 			if err != nil {
 				logger.Error(err, "Failed to resolve secretName", "service", key)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
@@ -489,13 +503,13 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				}
 				continue
 			}
-			connectionInfoTemplate = effectiveConnectionInfoTemplate(&svc, chorusCfg)
+			runningConnTpl := effectiveConnectionInfoTemplate(&svc, chorusCfg)
 			effPaths := effectiveCredentialPaths(&svc, chorusCfg)
 
 			var effCreds *defaultv1alpha1.WorkspaceServiceCredentials
 			if len(effPaths) > 0 {
 				effCreds = &defaultv1alpha1.WorkspaceServiceCredentials{
-					SecretName: secretName,
+					SecretName: runningSecretName,
 					Paths:      effPaths,
 				}
 			}
@@ -512,9 +526,9 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 
 			valuesPrefix := autoValuesPrefix(ch, repoLastSegment)
 
-			var metadataValues map[string]interface{}
+			var metadataValues map[string]any
 			if chorusCfg != nil && len(chorusCfg.Values) > 0 {
-				metadataValues, err = substituteChorusPlaceholders(chorusCfg.Values, releaseName, namespace, secretName)
+				metadataValues, err = substituteChorusPlaceholders(chorusCfg.Values, releaseName, namespace, runningSecretName)
 				if err != nil {
 					logger.Error(err, "Invalid placeholder in chorus.yaml values", "service", key)
 					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
@@ -525,7 +539,7 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				}
 			}
 
-			computedVals, err := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, secretName)
+			computedVals, err := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, runningSecretName)
 			if err != nil {
 				logger.Error(err, "Invalid computedValues", "service", key, "release", releaseName)
 				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
@@ -535,10 +549,11 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				continue
 			}
 
-			// Merge order (lowest to highest priority):
-			// chorus.yaml values → user CR values → generated credentials → computedValues
+			// Merge order: chorus.yaml → CR values → CR credentials → CR computedValues.
+			// chorus.yaml × CR values uses Helm-style merge (slices wholesale-replace).
+			// CR credentials/computedValues are sparse-path patches and stay element-wise.
 			baseVals := wrapWithPrefix(metadataValues, valuesPrefix)
-			baseVals = mergeMaps(baseVals, wrapWithPrefix(userValues, valuesPrefix))
+			baseVals = mergeMapsReplaceSlices(baseVals, wrapWithPrefix(userValues, valuesPrefix))
 			baseVals = mergeMaps(baseVals, wrapWithPrefix(credValues, valuesPrefix))
 			finalVals := mergeMaps(baseVals, wrapWithPrefix(computedVals, valuesPrefix))
 			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, finalVals); err != nil {
@@ -549,6 +564,12 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				}
 				continue
 			}
+
+			// Promote branch-locals to outer scope only on success — the post-switch
+			// status update needs the chorus-derived values; error paths above use
+			// `continue` so the outer values stay at their pre-switch state.
+			secretName = runningSecretName
+			connectionInfoTemplate = runningConnTpl
 
 		case defaultv1alpha1.WorkspaceServiceStateStopped:
 			if _, err := helmUninstall(cfg, releaseName); err != nil {

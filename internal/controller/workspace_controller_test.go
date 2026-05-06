@@ -582,23 +582,23 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("converts a simple key", func() {
 		result, err := dotNotationToNestedMap("password", "secret")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(Equal(map[string]interface{}{"password": "secret"}))
+		Expect(result).To(Equal(map[string]any{"password": "secret"}))
 	})
 
 	It("converts a two-level key", func() {
 		result, err := dotNotationToNestedMap("auth.password", "secret")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(Equal(map[string]interface{}{
-			"auth": map[string]interface{}{"password": "secret"},
+		Expect(result).To(Equal(map[string]any{
+			"auth": map[string]any{"password": "secret"},
 		}))
 	})
 
 	It("converts a three-level key", func() {
 		result, err := dotNotationToNestedMap("settings.auth.password", "secret")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result).To(Equal(map[string]interface{}{
-			"settings": map[string]interface{}{
-				"auth": map[string]interface{}{"password": "secret"},
+		Expect(result).To(Equal(map[string]any{
+			"settings": map[string]any{
+				"auth": map[string]any{"password": "secret"},
 			},
 		}))
 	})
@@ -606,32 +606,32 @@ var _ = Describe("dotNotationToNestedMap", func() {
 
 var _ = Describe("mergeMaps", func() {
 	It("merges non-overlapping keys", func() {
-		result := mergeMaps(map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"})
+		result := mergeMaps(map[string]any{"a": "1"}, map[string]any{"b": "2"})
 		Expect(result).To(HaveKeyWithValue("a", "1"))
 		Expect(result).To(HaveKeyWithValue("b", "2"))
 	})
 
 	It("override takes precedence for flat keys", func() {
-		result := mergeMaps(map[string]interface{}{"a": "1"}, map[string]interface{}{"a": "2"})
+		result := mergeMaps(map[string]any{"a": "1"}, map[string]any{"a": "2"})
 		Expect(result).To(HaveKeyWithValue("a", "2"))
 	})
 
 	It("deep merges nested maps preserving non-overridden keys", func() {
-		base := map[string]interface{}{"auth": map[string]interface{}{"user": "admin", "password": "old"}}
-		override := map[string]interface{}{"auth": map[string]interface{}{"password": "new"}}
+		base := map[string]any{"auth": map[string]any{"user": "admin", "password": "old"}}
+		override := map[string]any{"auth": map[string]any{"password": "new"}}
 		result := mergeMaps(base, override)
-		auth := result["auth"].(map[string]interface{})
+		auth := result["auth"].(map[string]any)
 		Expect(auth).To(HaveKeyWithValue("user", "admin"))
 		Expect(auth).To(HaveKeyWithValue("password", "new"))
 	})
 
 	It("handles nil override", func() {
-		result := mergeMaps(map[string]interface{}{"a": "1"}, nil)
+		result := mergeMaps(map[string]any{"a": "1"}, nil)
 		Expect(result).To(HaveKeyWithValue("a", "1"))
 	})
 
 	It("handles nil base", func() {
-		result := mergeMaps(nil, map[string]interface{}{"a": "1"})
+		result := mergeMaps(nil, map[string]any{"a": "1"})
 		Expect(result).To(HaveKeyWithValue("a", "1"))
 	})
 })
@@ -700,7 +700,7 @@ var _ = Describe("reconcileCredentialSecret", func() {
 		result, err := reconcileCredentialSecret(ctx, k8sClient, namespace, workspace, creds)
 		Expect(err).NotTo(HaveOccurred())
 
-		settings, ok := result["settings"].(map[string]interface{})
+		settings, ok := result["settings"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(settings).To(HaveKey("superuserPassword"))
 	})
@@ -863,48 +863,39 @@ var _ = Describe("reconcileServices", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("sets Failed status when credential secret is owned by another workspace", func() {
-		const secretName = "shared-creds-conflict"
-		// Create the secret owned by a different workspace first
-		otherWS := &defaultv1alpha1.Workspace{
-			ObjectMeta: metav1.ObjectMeta{Name: "other-ws-conflict", Namespace: namespace, UID: "uid-conflict-other"},
-		}
-		creds := &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: secretName, Paths: []string{"pw"}}
-		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, otherWS, creds)
-		Expect(err).NotTo(HaveOccurred())
-
-		DeferCleanup(func() {
-			secret := &corev1.Secret{}
-			if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err == nil {
-				_ = k8sClient.Delete(ctx, secret)
-			}
-		})
-
+	It("surfaces chart-load failure to status.Failed for a Running service", func() {
+		// The fake registry (oci://registry.example.invalid in newReconcilerWithHelm)
+		// guarantees chart pulls fail. With the new install ordering — chart load
+		// before credential reconcile so chorus.yaml can supply credential defaults —
+		// the chart-load failure is the first error a Running reconcile hits, and
+		// the controller must surface it as status.Failed without returning the
+		// error from reconcileServices.
+		//
+		// TODO: post-chart-load failure mappings (parseChorusConfig parse error,
+		// substituteChorusPlaceholders typo, reconcileCredentialSecret ownership
+		// conflict, evaluateComputedValues typo, helmInstallOrUpgrade) all share
+		// this harness blocker — they require a successful chart load to reach.
+		// A fake chart loader / chart-loader interface seam would let us cover
+		// each → status.Failed mapping. The ownership-conflict path itself is
+		// already unit-tested directly against reconcileCredentialSecret in
+		// helm_service_test.go (see "reconcileCredentialSecret (ownership)").
 		ws := &defaultv1alpha1.Workspace{
-			ObjectMeta: metav1.ObjectMeta{Name: "conflict-ws", Namespace: namespace, UID: "uid-conflict-this"},
+			ObjectMeta: metav1.ObjectMeta{Name: "chart-load-fail-ws", Namespace: namespace, UID: "uid-chart-load-fail"},
 			Spec: defaultv1alpha1.WorkspaceSpec{
 				NetworkPolicy: "Airgapped",
 				Services: map[string]defaultv1alpha1.WorkspaceService{
 					"postgres": {
 						State: defaultv1alpha1.WorkspaceServiceStateRunning,
 						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
-						Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{
-							SecretName: secretName,
-							Paths:      []string{"pw"},
-						},
 					},
 				},
 			},
 		}
 
 		r := newReconcilerWithHelm()
-		err = r.reconcileServices(ctx, ws)
+		err := r.reconcileServices(ctx, ws)
 		Expect(err).NotTo(HaveOccurred()) // per-service errors go to status, not returned
 		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
-		// Chart load runs before credential reconcile (the chart's chorus.yaml may
-		// supply default credentials), so against the fake registry the chart-load
-		// failure surfaces first. The ownership check itself is unit-tested directly
-		// against reconcileCredentialSecret in helm_service_test.go.
 		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to load chart"))
 	})
 
@@ -948,6 +939,70 @@ var _ = Describe("reconcileServices", func() {
 		err := r.reconcileServices(ctx, ws)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
+	})
+
+	It("preserves status.SecretName from a prior Running reconcile across a Stopped transition", func() {
+		// Regression test: a Running reconcile records the chorus.yaml-derived
+		// SecretName in status. The next Stopped reconcile must NOT overwrite that
+		// value with the CR-or-default name (which would diverge from the actual
+		// Secret in the cluster) unless the CR explicitly pins SecretName.
+		const chorusDerivedName = "chorus-derived-creds"
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "stop-status-ws", Namespace: namespace, UID: "uid-stop-status"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateStopped,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						// CR does NOT pin a SecretName — the recorded one in status
+						// (presumed chorus.yaml-derived) must survive the Stopped reconcile.
+					},
+				},
+			},
+			Status: defaultv1alpha1.WorkspaceStatus{
+				Services: map[string]defaultv1alpha1.WorkspaceStatusService{
+					"postgres": {SecretName: chorusDerivedName},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
+		Expect(ws.Status.Services["postgres"].SecretName).To(Equal(chorusDerivedName))
+	})
+
+	It("lets CR.Credentials.SecretName override the recorded status value on Stopped", func() {
+		// Counterpart to the previous test: when the CR explicitly pins SecretName,
+		// the user intent wins over a stale recorded value.
+		const userPinned = "user-pinned-creds"
+		const recorded = "previously-recorded"
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "stop-cr-pin-ws", Namespace: namespace, UID: "uid-stop-cr-pin"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State:       defaultv1alpha1.WorkspaceServiceStateStopped,
+						Chart:       defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: userPinned},
+					},
+				},
+			},
+			Status: defaultv1alpha1.WorkspaceStatus{
+				Services: map[string]defaultv1alpha1.WorkspaceStatusService{
+					"postgres": {SecretName: recorded},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
+		Expect(ws.Status.Services["postgres"].SecretName).To(Equal(userPinned))
 	})
 
 	It("sets Deleted status when service is Deleted and release and PVCs do not exist", func() {
