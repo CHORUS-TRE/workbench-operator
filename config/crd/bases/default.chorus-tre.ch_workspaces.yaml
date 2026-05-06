@@ -132,9 +132,9 @@ spec:
                           description: |-
                             SecretName is the name of the Kubernetes Secret the operator creates in the workspace namespace.
                             Passwords are stored here and never written to the CRD.
+                            Supports placeholders: {{.Namespace}}, {{.ReleaseName}}.
+                            Precedence: this field → chart's chorus.yaml credentials.secretName → "<release-name>-creds".
                           type: string
-                      required:
-                      - secretName
                       type: object
                     state:
                       default: Running

@@ -13,38 +13,43 @@ spec:
   # allowedFQDNs:                # only used when networkPolicy: FQDNAllowlist
   #   - chorus-tre.ch
   #   - "*.chorus-tre.ch"
+  # Defaults (values overlay, credential paths, connection template) are read by
+  # the operator from each chart's chorus.yaml at install time. The CR fields
+  # below are optional per-instance overrides — uncomment to override.
   services:
     postgres:
       state: Running
       chart:
+        # registry: harbor.build.chorus-tre.local
         repository: services/postgres
-        tag: "0.0.3"
-      credentials:
-        secretName: postgres-creds
-        paths:
-          - settings.superuserPassword.value
-      values:
-        settings:
-          superuser:
-            value: postgres
-        storage:
-          requestedSize: 1Gi
-      connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/postgres"
+        tag: "0.0.4"
+      # credentials:
+      #   secretName: "{{.ReleaseName}}-creds"
+      #   paths:
+      #     - settings.superuserPassword.value
+      # values:
+      #   settings:
+      #     superuser:
+      #       value: postgres
+      #   storage:
+      #     requestedSize: 1Gi
+      # connectionInfoTemplate: "postgresql://postgres@{{.ReleaseName}}.{{.Namespace}}:5432/postgres"
     mlflow:
       state: Running
       chart:
+        # registry: harbor.build.chorus-tre.local
         repository: services/mlflow
-        tag: "0.0.8"
-      credentials:
-        secretName: mlflow-creds
-        paths:
-          - postgres.settings.superuserPassword.value
-          - postgres.userDatabase.password.value|mlflow.backendStore.postgres.password
-      values:
-        mlflow:
-          extraVolumes:
-            - name: artifacts
-      computedValues:
-        mlflow.backendStore.postgres.host: "{{.ReleaseName}}-mlflow-db"
-        mlflow.extraVolumes[0].persistentVolumeClaim.claimName: "{{.ReleaseName}}-artifacts"
-      connectionInfoTemplate: "http://{{.ReleaseName}}.{{.Namespace}}"
+        tag: "0.0.9"
+      # credentials:
+      #   secretName: "{{.ReleaseName}}-creds"
+      #   paths:
+      #     - postgres.settings.superuserPassword.value
+      #     - postgres.userDatabase.password.value|mlflow.backendStore.postgres.password
+      # values:
+      #   mlflow:
+      #     extraVolumes:
+      #       - name: artifacts
+      # computedValues:
+      #   mlflow.backendStore.postgres.host: "{{.ReleaseName}}-mlflow-db"
+      #   mlflow.extraVolumes[0].persistentVolumeClaim.claimName: "{{.ReleaseName}}-artifacts"
+      # connectionInfoTemplate: "http://{{.ReleaseName}}.{{.Namespace}}"

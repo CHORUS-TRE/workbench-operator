@@ -217,7 +217,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(3)) // kube-dns + intra-namespace endpoints + intra-namespace services
+			Expect(egress).To(HaveLen(4)) // kube-dns + node-local-dns + intra-namespace endpoints + intra-namespace services
 			// Verify ingress rule restricts to same namespace
 			ingress := specMap["ingress"].([]any)
 			Expect(ingress).To(HaveLen(1))
@@ -247,7 +247,7 @@ var _ = Describe("WorkspaceReconciler", func() {
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(5)) // kube-dns + intra-ns endpoints + intra-ns services + FQDN/443 + FQDN/80
+			Expect(egress).To(HaveLen(6)) // kube-dns + node-local-dns + intra-ns endpoints + intra-ns services + FQDN/443 + FQDN/80
 
 			// Verify condition
 			updated := &defaultv1alpha1.Workspace{}
@@ -284,10 +284,10 @@ var _ = Describe("WorkspaceReconciler", func() {
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			specMap := spec.(map[string]any)
 			egress := specMap["egress"].([]any)
-			Expect(egress).To(HaveLen(4)) // kube-dns + intra-ns endpoints + intra-ns services + CIDR
+			Expect(egress).To(HaveLen(5)) // kube-dns + node-local-dns + intra-ns endpoints + intra-ns services + CIDR
 
 			// Verify the toCIDR rule is present
-			lastRule := egress[3].(map[string]any)
+			lastRule := egress[4].(map[string]any)
 			Expect(lastRule).To(HaveKey("toCIDR"))
 
 			// Verify condition
@@ -405,12 +405,12 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify Airgapped: 3 egress rules
+			// Verify Airgapped: 4 egress rules
 			cnp, err := getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			spec, _, _ := unstructured.NestedFieldCopy(cnp.Object, "spec")
 			egress := spec.(map[string]any)["egress"].([]any)
-			Expect(egress).To(HaveLen(3))
+			Expect(egress).To(HaveLen(4))
 
 			// Update workspace to Open (full internet)
 			fresh := &defaultv1alpha1.Workspace{}
@@ -422,12 +422,12 @@ var _ = Describe("WorkspaceReconciler", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify Open: 4 egress rules (kube-dns + intra-ns endpoints + intra-ns services + CIDR)
+			// Verify Open: 5 egress rules (kube-dns + node-local-dns + intra-ns endpoints + intra-ns services + CIDR)
 			cnp, err = getCNP(workspaceName+"-netpol", workspaceNamespace)
 			Expect(err).NotTo(HaveOccurred())
 			spec, _, _ = unstructured.NestedFieldCopy(cnp.Object, "spec")
 			egress = spec.(map[string]any)["egress"].([]any)
-			Expect(egress).To(HaveLen(4))
+			Expect(egress).To(HaveLen(5))
 		})
 
 		It("updates CNP when AllowedFQDNs list changes", func() {
@@ -901,7 +901,11 @@ var _ = Describe("reconcileServices", func() {
 		err = r.reconcileServices(ctx, ws)
 		Expect(err).NotTo(HaveOccurred()) // per-service errors go to status, not returned
 		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
-		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("not owned by this Workspace"))
+		// Chart load runs before credential reconcile (the chart's chorus.yaml may
+		// supply default credentials), so against the fake registry the chart-load
+		// failure surfaces first. The ownership check itself is unit-tested directly
+		// against reconcileCredentialSecret in helm_service_test.go.
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to load chart"))
 	})
 
 	It("sets Failed status when service values JSON is invalid", func() {
@@ -1028,6 +1032,120 @@ var _ = Describe("reconcileServices", func() {
 		Expect(err).NotTo(HaveOccurred())
 		// Helm install fails (no real registry) — status should be Failed
 		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+	})
+
+	It("sets Failed before chart load when CR secretName has an unrecognised placeholder", func() {
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "bad-ph-ws", Namespace: namespace, UID: "uid-bad-ph"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: "Airgapped",
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateRunning,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{
+							SecretName: "{{.Bogus}}-creds",
+							Paths:      []string{"pw"},
+						},
+					},
+				},
+			},
+		}
+
+		r := newReconcilerWithHelm()
+		err := r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
+		// Pre-switch effectiveSecretName runs before chart load; the placeholder
+		// failure must surface here, not as a chart-load error.
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to resolve secretName"))
+	})
+
+	It("falls back to the <release>-creds default when CR omits credentials and status is empty", func() {
+		// Workspace name is "default-creds-fallback-ws"; release name is "<workspace>-postgres";
+		// effective Secret name therefore defaults to "<release>-creds".
+		const releaseName = "default-creds-fallback-ws-postgres"
+		const defaultSecret = releaseName + "-creds"
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-creds-fallback-ws", Namespace: namespace, UID: "uid-default-creds"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateDeleted,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						// No Credentials block; no Status entry.
+					},
+				},
+			},
+		}
+
+		// Pre-create a Secret using the default name owned by this workspace.
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: defaultSecret, Paths: []string{"pw"}}
+		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		DeferCleanup(func() {
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: defaultSecret, Namespace: namespace}, secret); err == nil {
+				_ = k8sClient.Delete(ctx, secret)
+			}
+		})
+
+		r := newReconcilerWithHelm()
+		err = r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("credentials deleted"))
+
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: defaultSecret, Namespace: namespace}, &corev1.Secret{})
+		Expect(client.IgnoreNotFound(err)).To(Succeed())
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("uses status.SecretName recorded on a previous reconcile when deleting credentials", func() {
+		const recordedName = "recorded-creds-from-status"
+		ws := &defaultv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "del-from-status-ws", Namespace: namespace, UID: "uid-del-from-status"},
+			Spec: defaultv1alpha1.WorkspaceSpec{
+				NetworkPolicy: defaultv1alpha1.NetworkPolicyAirgapped,
+				Services: map[string]defaultv1alpha1.WorkspaceService{
+					"postgres": {
+						State: defaultv1alpha1.WorkspaceServiceStateDeleted,
+						Chart: defaultv1alpha1.WorkspaceServiceChart{Tag: "1.0.0"},
+						// No Credentials block — must rely on status to know the name.
+					},
+				},
+			},
+			Status: defaultv1alpha1.WorkspaceStatus{
+				Services: map[string]defaultv1alpha1.WorkspaceStatusService{
+					"postgres": {SecretName: recordedName},
+				},
+			},
+		}
+
+		// Pre-create the Secret using the chorus.yaml-supplied name recorded in status.
+		creds := &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: recordedName, Paths: []string{"pw"}}
+		_, err := reconcileCredentialSecret(ctx, k8sClient, namespace, ws, creds)
+		Expect(err).NotTo(HaveOccurred())
+
+		DeferCleanup(func() {
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: recordedName, Namespace: namespace}, secret); err == nil {
+				_ = k8sClient.Delete(ctx, secret)
+			}
+		})
+
+		r := newReconcilerWithHelm()
+		err = r.reconcileServices(ctx, ws)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
+		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("credentials deleted"))
+
+		// Secret recorded in status must be gone.
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: recordedName, Namespace: namespace}, &corev1.Secret{})
+		Expect(client.IgnoreNotFound(err)).To(Succeed())
+		Expect(err).To(HaveOccurred())
 	})
 })
 

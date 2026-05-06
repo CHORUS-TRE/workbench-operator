@@ -23,6 +23,7 @@ import (
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart"
@@ -601,7 +602,9 @@ func checkServicePodsHealth(ctx context.Context, k8sClient client.Client, namesp
 }
 
 // buildServiceStatus maps Helm release state + desired spec state to a WorkspaceStatusService.
-func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.WorkspaceService, releaseName, secretName string, workspace *defaultv1alpha1.Workspace) defaultv1alpha1.WorkspaceStatusService {
+// connectionInfoTemplate is the effective template (CR override, then chorus.yaml fallback) —
+// it is rendered into ConnectionInfo only when the resolved state is Running.
+func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.WorkspaceService, releaseName, secretName, connectionInfoTemplate string, workspace *defaultv1alpha1.Workspace) defaultv1alpha1.WorkspaceStatusService {
 	var state defaultv1alpha1.WorkspaceStatusServiceStatus
 
 	switch {
@@ -620,12 +623,12 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 	}
 
 	connectionInfo := ""
-	if svc.ConnectionInfoTemplate != "" && state == defaultv1alpha1.WorkspaceStatusServiceStatusRunning {
+	if connectionInfoTemplate != "" && state == defaultv1alpha1.WorkspaceStatusServiceStatusRunning {
 		connectionInfo = strings.NewReplacer(
 			"{{.Namespace}}", workspace.Namespace,
 			"{{.ReleaseName}}", releaseName,
 			"{{.SecretName}}", secretName,
-		).Replace(svc.ConnectionInfoTemplate)
+		).Replace(connectionInfoTemplate)
 	}
 
 	return defaultv1alpha1.WorkspaceStatusService{
@@ -672,4 +675,183 @@ func parseServiceValues(svc *defaultv1alpha1.WorkspaceService) (map[string]inter
 		}
 	}
 	return userValues, nil
+}
+
+// chorusConfigFile is the name of the chart-shipped configuration file the
+// operator reads at install time. Lives at chart root, alongside Chart.yaml.
+const chorusConfigFile = "chorus.yaml"
+
+// ChorusConfig is the chart-shipped chorus.yaml file.
+// The chart maintainer ships defaults the operator merges into the Helm install:
+//   - Values: a Helm values overlay (lowest-priority, below user-CR values).
+//   - Credentials.Paths: default credential paths when the WorkspaceService CR
+//     omits them.
+//   - ConnectionInfoTemplate: default surfaced in WorkspaceStatus when the CR
+//     omits it.
+//
+// CR fields always override chorus.yaml fields when set.
+type ChorusConfig struct {
+	Values                 map[string]interface{}   `json:"values,omitempty"`
+	Credentials            *ChorusConfigCredentials `json:"credentials,omitempty"`
+	ConnectionInfoTemplate string                   `json:"connectionInfoTemplate,omitempty"`
+}
+
+// ChorusConfigCredentials carries the chart-shipped credential defaults.
+// SecretName supports template placeholders so a chart can express a stable
+// release-prefixed name (e.g. "{{.ReleaseName}}-creds") without colliding when
+// the same chart is installed twice in the same namespace. The operator falls
+// back to "<release>-creds" when neither chorus.yaml nor the CR sets it.
+type ChorusConfigCredentials struct {
+	SecretName string   `json:"secretName,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+}
+
+// parseChorusConfig reads chart.Files["chorus.yaml"] and strictly unmarshals it.
+// Returns (nil, nil) when the chart ships no chorus.yaml — legacy charts keep
+// working with the WorkspaceService CR carrying everything.
+// Returns an error when the file is present but malformed or contains unknown
+// top-level keys, so a chart-author typo fails loudly at install time.
+func parseChorusConfig(ch chart.Charter) (*ChorusConfig, error) {
+	acc, err := chart.NewAccessor(ch)
+	if err != nil {
+		return nil, fmt.Errorf("opening chart accessor: %w", err)
+	}
+	var raw []byte
+	for _, f := range acc.Files() {
+		if f.Name == chorusConfigFile {
+			raw = f.Data
+			break
+		}
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	cfg := &ChorusConfig{}
+	if err := yaml.UnmarshalStrict(raw, cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", chorusConfigFile, err)
+	}
+	return cfg, nil
+}
+
+// substituteChorusPlaceholders applies the same
+// {{.ReleaseName}}/{{.Namespace}}/{{.SecretName}} substitutions used by
+// evaluateComputedValues and buildServiceStatus to every string leaf in the
+// values tree. Returns an error if any string still contains "{{." after
+// substitution — an unrecognised placeholder that's almost always a typo.
+func substituteChorusPlaceholders(values map[string]interface{}, releaseName, namespace, secretName string) (map[string]interface{}, error) {
+	if len(values) == 0 {
+		return values, nil
+	}
+	replacer := strings.NewReplacer(
+		"{{.Namespace}}", namespace,
+		"{{.ReleaseName}}", releaseName,
+		"{{.SecretName}}", secretName,
+	)
+	out := substituteValueNode(values, replacer).(map[string]interface{})
+	if err := validateNoUnresolvedPlaceholders(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// substituteValueNode walks the value tree in-place, replacing placeholders in
+// every string leaf. Returns the (possibly substituted) node.
+func substituteValueNode(v interface{}, replacer *strings.Replacer) interface{} {
+	switch x := v.(type) {
+	case string:
+		return replacer.Replace(x)
+	case map[string]interface{}:
+		for k, val := range x {
+			x[k] = substituteValueNode(val, replacer)
+		}
+		return x
+	case []interface{}:
+		for i, val := range x {
+			x[i] = substituteValueNode(val, replacer)
+		}
+		return x
+	default:
+		return v
+	}
+}
+
+// effectiveSecretName resolves the Secret name to use for a service's
+// credentials. Precedence: CR field → chorus.yaml field → "<release>-creds".
+// Both CR and chorus.yaml values are placeholder-substituted before use, so a
+// chart shipping "{{.ReleaseName}}-creds" stays per-release.
+func effectiveSecretName(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig, releaseName, namespace string) (string, error) {
+	if svc.Credentials != nil && svc.Credentials.SecretName != "" {
+		return resolvePlaceholders(svc.Credentials.SecretName, releaseName, namespace, "")
+	}
+	if chorusCfg != nil && chorusCfg.Credentials != nil && chorusCfg.Credentials.SecretName != "" {
+		return resolvePlaceholders(chorusCfg.Credentials.SecretName, releaseName, namespace, "")
+	}
+	return releaseName + "-creds", nil
+}
+
+// effectiveCredentialPaths returns the credential paths the operator should
+// generate passwords for. CR Paths win when non-empty; otherwise falls through
+// to chorus.yaml's Credentials.Paths. Returns nil when neither side supplies any.
+func effectiveCredentialPaths(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig) []string {
+	if svc.Credentials != nil && len(svc.Credentials.Paths) > 0 {
+		return svc.Credentials.Paths
+	}
+	if chorusCfg != nil && chorusCfg.Credentials != nil {
+		return chorusCfg.Credentials.Paths
+	}
+	return nil
+}
+
+// effectiveConnectionInfoTemplate returns the template surfaced in
+// WorkspaceStatus.services[*].connectionInfo. CR wins when non-empty; otherwise
+// falls through to chorus.yaml's ConnectionInfoTemplate. Returns "" when neither
+// supplies one (status will then carry no connectionInfo).
+func effectiveConnectionInfoTemplate(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig) string {
+	if svc.ConnectionInfoTemplate != "" {
+		return svc.ConnectionInfoTemplate
+	}
+	if chorusCfg != nil {
+		return chorusCfg.ConnectionInfoTemplate
+	}
+	return ""
+}
+
+// resolvePlaceholders applies the standard {{.ReleaseName}}/{{.Namespace}}/{{.SecretName}}
+// substitutions to a single string. Returns an error if the result still contains
+// "{{." (unrecognised placeholder, almost always a typo).
+func resolvePlaceholders(s, releaseName, namespace, secretName string) (string, error) {
+	out := strings.NewReplacer(
+		"{{.Namespace}}", namespace,
+		"{{.ReleaseName}}", releaseName,
+		"{{.SecretName}}", secretName,
+	).Replace(s)
+	if strings.Contains(out, "{{.") {
+		return "", fmt.Errorf("unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", s)
+	}
+	return out, nil
+}
+
+// validateNoUnresolvedPlaceholders walks the post-substitution value tree and
+// returns an error if any string leaf still contains "{{." — an unrecognised
+// placeholder that didn't match the supported set.
+func validateNoUnresolvedPlaceholders(v interface{}) error {
+	switch x := v.(type) {
+	case string:
+		if strings.Contains(x, "{{.") {
+			return fmt.Errorf("unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", x)
+		}
+	case map[string]interface{}:
+		for _, val := range x {
+			if err := validateNoUnresolvedPlaceholders(val); err != nil {
+				return err
+			}
+		}
+	case []interface{}:
+		for _, val := range x {
+			if err := validateNoUnresolvedPlaceholders(val); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
