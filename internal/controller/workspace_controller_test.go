@@ -1116,13 +1116,16 @@ var _ = Describe("reconcileServices", func() {
 		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to resolve secretName"))
 	})
 
-	It("preserves the previously-recorded SecretName when a Failed status is written", func() {
+	It("preserves the previously-recorded SecretName and ConnectionInfo when a Failed status is written", func() {
 		// Regression test for failedServiceStatus: a transient failure (here, chart
-		// load against the fake registry) must NOT clear the SecretName field that
-		// a prior successful reconcile recorded in status. Without the helper the
-		// wholesale-replace would drop it, surfacing a stale empty SecretName to
-		// the backend / catalog UI even though the cluster Secret still exists.
+		// load against the fake registry) must NOT clear the SecretName or
+		// ConnectionInfo fields that a prior successful reconcile recorded in
+		// status. Without the helper the wholesale-replace would drop both,
+		// surfacing a stale empty Secret reference and connection URL to the
+		// backend / catalog UI even though the cluster Secret and Service still
+		// exist and are reachable.
 		const recordedSecret = "previously-recorded-creds"
+		const recordedConnInfo = "http://previously-recorded.example.com"
 		ws := &defaultv1alpha1.Workspace{
 			ObjectMeta: metav1.ObjectMeta{Name: "preserve-secret-ws", Namespace: namespace, UID: "uid-preserve-secret"},
 			Spec: defaultv1alpha1.WorkspaceSpec{
@@ -1137,8 +1140,9 @@ var _ = Describe("reconcileServices", func() {
 			Status: defaultv1alpha1.WorkspaceStatus{
 				Services: map[string]defaultv1alpha1.WorkspaceStatusService{
 					"postgres": {
-						Status:     defaultv1alpha1.WorkspaceStatusServiceStatusRunning,
-						SecretName: recordedSecret,
+						Status:         defaultv1alpha1.WorkspaceStatusServiceStatusRunning,
+						SecretName:     recordedSecret,
+						ConnectionInfo: recordedConnInfo,
 					},
 				},
 			},
@@ -1149,8 +1153,9 @@ var _ = Describe("reconcileServices", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ws.Status.Services["postgres"].Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
 		Expect(ws.Status.Services["postgres"].Message).To(ContainSubstring("Failed to load chart"))
-		// The recorded SecretName from the prior reconcile must survive the Failed write.
+		// Both recorded fields from the prior reconcile must survive the Failed write.
 		Expect(ws.Status.Services["postgres"].SecretName).To(Equal(recordedSecret))
+		Expect(ws.Status.Services["postgres"].ConnectionInfo).To(Equal(recordedConnInfo))
 	})
 
 	It("falls back to the <release>-creds default when CR omits credentials and status is empty", func() {

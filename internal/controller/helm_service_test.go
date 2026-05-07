@@ -1457,6 +1457,26 @@ var _ = Describe("effectiveSecretName", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	It("rejects {{.SecretName}} self-reference in the CR field rather than silently truncating", func() {
+		// Without the explicit guard, the replacer maps {{.SecretName}} → "" and
+		// "creds-{{.SecretName}}" silently becomes "creds-". The guard turns this
+		// chart-author mistake into a fail-loud error.
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "creds-{{.SecretName}}"},
+		}
+		_, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("self-reference is not supported"))
+	})
+
+	It("rejects {{.SecretName}} self-reference in the chorus.yaml field rather than silently truncating", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{SecretName: "creds-{{.SecretName}}"}}
+		_, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("self-reference is not supported"))
+	})
+
 	It("falls through to default when chorus.yaml has no credentials block", func() {
 		svc := &defaultv1alpha1.WorkspaceService{}
 		cfg := &ChorusConfig{} // no Credentials field

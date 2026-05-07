@@ -389,20 +389,23 @@ func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, w
 }
 
 // failedServiceStatus builds a Failed WorkspaceStatusService that preserves the
-// SecretName recorded by the previous reconcile (if any). A wholesale-replace
-// of Status.Services[key] would otherwise drop the user-facing Secret reference
-// on every transient failure (chorus.yaml parse error, credential conflict,
-// helm install error, etc.), even though the underlying Secret in the cluster
-// is still named the same.
+// SecretName and ConnectionInfo recorded by the previous reconcile (if any).
+// A wholesale-replace of Status.Services[key] would otherwise drop the
+// user-facing Secret reference and connection URL on every transient failure
+// (chorus.yaml parse error, credential conflict, helm install error, etc.),
+// even though the underlying Secret and Service in the cluster are still
+// named the same and reachable.
 func failedServiceStatus(workspace *defaultv1alpha1.Workspace, key, message string) defaultv1alpha1.WorkspaceStatusService {
-	var prevSecret string
+	var prevSecret, prevConnInfo string
 	if existing, ok := workspace.Status.Services[key]; ok {
 		prevSecret = existing.SecretName
+		prevConnInfo = existing.ConnectionInfo
 	}
 	return defaultv1alpha1.WorkspaceStatusService{
-		Status:     defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-		Message:    message,
-		SecretName: prevSecret,
+		Status:         defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+		Message:        message,
+		SecretName:     prevSecret,
+		ConnectionInfo: prevConnInfo,
 	}
 }
 

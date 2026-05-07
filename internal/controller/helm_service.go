@@ -817,16 +817,22 @@ func substituteValueNode(v any, replacer *strings.Replacer) any {
 // Both CR and chorus.yaml values are placeholder-substituted before use, so a
 // chart shipping "{{.ReleaseName}}-creds" stays per-release.
 //
-// {{.SecretName}} cannot be used to template the SecretName itself — the
-// placeholder is intentionally resolved with an empty SecretName here (you
-// can't reference yourself). A chart shipping `secretName: "creds-{{.SecretName}}"`
-// will fail with "unrecognised placeholder" because resolvePlaceholders
-// validates that no placeholders remain after substitution.
+// {{.SecretName}} cannot reference itself: when resolving the SecretName, the
+// secretName slot of the replacer is empty, which would silently produce a
+// truncated result (e.g. "creds-{{.SecretName}}" → "creds-"). The guard below
+// rejects self-references explicitly so a chart-author mistake fails loudly
+// rather than producing a malformed Secret name at install time.
 func effectiveSecretName(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig, releaseName, namespace string) (string, error) {
 	if svc.Credentials != nil && svc.Credentials.SecretName != "" {
+		if strings.Contains(svc.Credentials.SecretName, "{{.SecretName}}") {
+			return "", fmt.Errorf("CR Credentials.SecretName %q uses {{.SecretName}}: self-reference is not supported", svc.Credentials.SecretName)
+		}
 		return resolvePlaceholders(svc.Credentials.SecretName, releaseName, namespace, "")
 	}
 	if chorusCfg != nil && chorusCfg.Credentials != nil && chorusCfg.Credentials.SecretName != "" {
+		if strings.Contains(chorusCfg.Credentials.SecretName, "{{.SecretName}}") {
+			return "", fmt.Errorf("chorus.yaml credentials.secretName %q uses {{.SecretName}}: self-reference is not supported", chorusCfg.Credentials.SecretName)
+		}
 		return resolvePlaceholders(chorusCfg.Credentials.SecretName, releaseName, namespace, "")
 	}
 	return releaseName + "-creds", nil

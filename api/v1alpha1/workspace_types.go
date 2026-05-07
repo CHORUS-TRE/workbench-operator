@@ -87,6 +87,8 @@ type WorkspaceServiceCredentials struct {
 	// SecretName is the name of the Kubernetes Secret the operator creates in the workspace namespace.
 	// Passwords are stored here and never written to the CRD.
 	// Supports placeholders: {{.Namespace}}, {{.ReleaseName}}.
+	// {{.SecretName}} self-reference is rejected — the operator returns an error rather than silently
+	// substituting it to an empty string.
 	// Precedence: this field → chart's chorus.yaml credentials.secretName → "<release-name>-creds".
 	// +optional
 	SecretName string `json:"secretName,omitempty"`
