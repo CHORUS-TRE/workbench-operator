@@ -23,6 +23,7 @@ import (
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart"
@@ -140,7 +141,7 @@ func autoValuesPrefix(ch chart.Charter, repoLastSegment string) string {
 // Note: Upgrade.Install is purely informational in the Helm SDK (v3.16+) and does NOT handle the
 // missing-release case automatically. We split install vs upgrade explicitly, mirroring `helm upgrade --install`,
 // with cross-fallbacks to handle TOCTOU races between concurrent reconciles.
-func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch chart.Charter, values map[string]interface{}) error {
+func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namespace, releaseName string, ch chart.Charter, values map[string]any) error {
 	// Type-assert to the concrete chart type to read Version directly — avoids the
 	// reflection-based MetadataAsMap() whose keys depend on Go struct field names.
 	chV2, ok := ch.(*chartv2.Chart)
@@ -227,7 +228,7 @@ func helmInstallOrUpgrade(ctx context.Context, cfg *action.Configuration, namesp
 
 // releaseValuesMatch compares two Helm values maps by JSON serialization.
 // Returns true when both maps are semantically equal.
-func releaseValuesMatch(deployed, desired map[string]interface{}) bool {
+func releaseValuesMatch(deployed, desired map[string]any) bool {
 	a, err1 := json.Marshal(deployed)
 	b, err2 := json.Marshal(desired)
 	if err1 != nil || err2 != nil {
@@ -337,7 +338,7 @@ func generatePassword(length int) (string, error) {
 // Each path entry supports "|"-separated aliases: "secretKey[|extraHelmPath...]".
 // The first segment is the Secret key; all segments are injection targets in the Helm values.
 // This allows one password to be injected at multiple Helm value paths simultaneously.
-func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, namespace string, workspace *defaultv1alpha1.Workspace, creds *defaultv1alpha1.WorkspaceServiceCredentials) (map[string]interface{}, error) {
+func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, namespace string, workspace *defaultv1alpha1.Workspace, creds *defaultv1alpha1.WorkspaceServiceCredentials) (map[string]any, error) {
 	if creds == nil {
 		return nil, nil
 	}
@@ -394,7 +395,7 @@ func reconcileCredentialSecret(ctx context.Context, k8sClient client.Client, nam
 		}
 	}
 
-	helmValues := make(map[string]interface{})
+	helmValues := make(map[string]any)
 	for _, entry := range creds.Paths {
 		helmPaths := strings.Split(entry, "|")
 		secretKey := helmPaths[0]
@@ -426,8 +427,8 @@ const maxArrayIndex = 1000
 // dotNotationToNestedMap converts "a.b.c" → {"a": {"b": {"c": value}}}.
 // Array index notation is also supported: "a.b[0].c" → {"a": {"b": [{"c": value}]}}.
 // Returns an error if any array index exceeds maxArrayIndex.
-func dotNotationToNestedMap(key, value string) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+func dotNotationToNestedMap(key, value string) (map[string]any, error) {
+	result := make(map[string]any)
 	if err := buildAtPath(result, strings.Split(key, "."), value); err != nil {
 		return nil, err
 	}
@@ -438,7 +439,7 @@ func dotNotationToNestedMap(key, value string) (map[string]interface{}, error) {
 // It merges with any existing slice or map at each key rather than overwriting,
 // so it is safe to call multiple times on the same map.
 // Returns an error if any array index exceeds maxArrayIndex.
-func buildAtPath(m map[string]interface{}, parts []string, value string) error {
+func buildAtPath(m map[string]any, parts []string, value string) error {
 	part := parts[0]
 	rest := parts[1:]
 	if matches := arrayIndexRe.FindStringSubmatch(part); matches != nil {
@@ -447,17 +448,17 @@ func buildAtPath(m map[string]interface{}, parts []string, value string) error {
 		if idx > maxArrayIndex {
 			return fmt.Errorf("array index %d exceeds maximum allowed value of %d", idx, maxArrayIndex)
 		}
-		slice := make([]interface{}, idx+1)
+		slice := make([]any, idx+1)
 		if len(rest) == 0 {
 			slice[idx] = value
 		} else {
-			elem := make(map[string]interface{})
+			elem := make(map[string]any)
 			if err := buildAtPath(elem, rest, value); err != nil {
 				return err
 			}
 			slice[idx] = elem
 		}
-		if existing, ok := m[mapKey].([]interface{}); ok {
+		if existing, ok := m[mapKey].([]any); ok {
 			m[mapKey] = mergeSlices(existing, slice)
 		} else {
 			m[mapKey] = slice
@@ -465,10 +466,10 @@ func buildAtPath(m map[string]interface{}, parts []string, value string) error {
 	} else if len(rest) == 0 {
 		m[part] = value
 	} else {
-		if existing, ok := m[part].(map[string]interface{}); ok {
+		if existing, ok := m[part].(map[string]any); ok {
 			return buildAtPath(existing, rest, value)
 		}
-		next := make(map[string]interface{})
+		next := make(map[string]any)
 		m[part] = next
 		return buildAtPath(next, rest, value)
 	}
@@ -479,30 +480,54 @@ func buildAtPath(m map[string]interface{}, parts []string, value string) error {
 // sub-chart convention where a wrapper chart passes values to its dependency
 // under the dependency name (e.g. postgres.settings.superuserPassword).
 // When prefix is empty or values is empty, the original map is returned unchanged.
-func wrapWithPrefix(values map[string]interface{}, prefix string) map[string]interface{} {
+func wrapWithPrefix(values map[string]any, prefix string) map[string]any {
 	if prefix == "" || len(values) == 0 {
 		return values
 	}
-	return map[string]interface{}{prefix: values}
+	return map[string]any{prefix: values}
 }
 
-// mergeMaps merges override into base recursively. Override values take precedence.
-// Maps are merged recursively; slices are merged element-wise (see mergeSlices).
-func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+// mergeMapsReplaceSlices merges override into base recursively, with Helm-style
+// slice semantics: maps merge recursively, slices are wholesale-replaced by the
+// override (no element-wise positional merge). Use this for chart-shipped values
+// (chorus.yaml) × user CR values, where the user's intent is to override the
+// chart's array entirely.
+func mergeMapsReplaceSlices(base, override map[string]any) map[string]any {
+	result := make(map[string]any)
 	for k, v := range base {
 		result[k] = v
 	}
 	for k, v := range override {
 		if baseVal, ok := result[k]; ok {
-			if baseMap, ok := baseVal.(map[string]interface{}); ok {
-				if overrideMap, ok := v.(map[string]interface{}); ok {
+			if baseMap, ok := baseVal.(map[string]any); ok {
+				if overrideMap, ok := v.(map[string]any); ok {
+					result[k] = mergeMapsReplaceSlices(baseMap, overrideMap)
+					continue
+				}
+			}
+		}
+		result[k] = v
+	}
+	return result
+}
+
+// mergeMaps merges override into base recursively. Override values take precedence.
+// Maps are merged recursively; slices are merged element-wise (see mergeSlices).
+func mergeMaps(base, override map[string]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range override {
+		if baseVal, ok := result[k]; ok {
+			if baseMap, ok := baseVal.(map[string]any); ok {
+				if overrideMap, ok := v.(map[string]any); ok {
 					result[k] = mergeMaps(baseMap, overrideMap)
 					continue
 				}
 			}
-			if baseSlice, ok := baseVal.([]interface{}); ok {
-				if overrideSlice, ok := v.([]interface{}); ok {
+			if baseSlice, ok := baseVal.([]any); ok {
+				if overrideSlice, ok := v.([]any); ok {
 					result[k] = mergeSlices(baseSlice, overrideSlice)
 					continue
 				}
@@ -518,22 +543,22 @@ func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
 // Elements present in only one slice are taken as-is.
 // A nil override element is treated as absent, so the base element is kept — explicitly setting an
 // element to nil via override is not supported. This is intentional for Helm values merging.
-func mergeSlices(base, override []interface{}) []interface{} {
+func mergeSlices(base, override []any) []any {
 	length := len(base)
 	if len(override) > length {
 		length = len(override)
 	}
-	result := make([]interface{}, length)
+	result := make([]any, length)
 	for i := range result {
-		var baseElem, overrideElem interface{}
+		var baseElem, overrideElem any
 		if i < len(base) {
 			baseElem = base[i]
 		}
 		if i < len(override) {
 			overrideElem = override[i]
 		}
-		if baseMap, ok := baseElem.(map[string]interface{}); ok {
-			if overrideMap, ok := overrideElem.(map[string]interface{}); ok {
+		if baseMap, ok := baseElem.(map[string]any); ok {
+			if overrideMap, ok := overrideElem.(map[string]any); ok {
 				result[i] = mergeMaps(baseMap, overrideMap)
 				continue
 			}
@@ -601,7 +626,9 @@ func checkServicePodsHealth(ctx context.Context, k8sClient client.Client, namesp
 }
 
 // buildServiceStatus maps Helm release state + desired spec state to a WorkspaceStatusService.
-func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.WorkspaceService, releaseName, secretName string, workspace *defaultv1alpha1.Workspace) defaultv1alpha1.WorkspaceStatusService {
+// connectionInfoTemplate is the effective template (CR override, then chorus.yaml fallback) —
+// it is rendered into ConnectionInfo only when the resolved state is Running.
+func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.WorkspaceService, releaseName, secretName, connectionInfoTemplate string, workspace *defaultv1alpha1.Workspace) defaultv1alpha1.WorkspaceStatusService {
 	var state defaultv1alpha1.WorkspaceStatusServiceStatus
 
 	switch {
@@ -620,12 +647,12 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 	}
 
 	connectionInfo := ""
-	if svc.ConnectionInfoTemplate != "" && state == defaultv1alpha1.WorkspaceStatusServiceStatusRunning {
+	if connectionInfoTemplate != "" && state == defaultv1alpha1.WorkspaceStatusServiceStatusRunning {
 		connectionInfo = strings.NewReplacer(
 			"{{.Namespace}}", workspace.Namespace,
 			"{{.ReleaseName}}", releaseName,
 			"{{.SecretName}}", secretName,
-		).Replace(svc.ConnectionInfoTemplate)
+		).Replace(connectionInfoTemplate)
 	}
 
 	return defaultv1alpha1.WorkspaceStatusService{
@@ -639,8 +666,8 @@ func buildServiceStatus(helmStatus, helmDescription string, svc defaultv1alpha1.
 // evaluateComputedValues evaluates each dot-notation path template and returns a nested Helm values map.
 // Supports the same placeholder syntax as ConnectionInfoTemplate.
 // Returns an error if any value still contains "{{." after substitution, which indicates an unrecognised placeholder (likely a typo).
-func evaluateComputedValues(computedValues map[string]string, releaseName, namespace, secretName string) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+func evaluateComputedValues(computedValues map[string]string, releaseName, namespace, secretName string) (map[string]any, error) {
+	result := make(map[string]any)
 	if len(computedValues) == 0 {
 		return result, nil
 	}
@@ -652,7 +679,7 @@ func evaluateComputedValues(computedValues map[string]string, releaseName, names
 	for path, tmpl := range computedValues {
 		resolved := replacer.Replace(tmpl)
 		if strings.Contains(resolved, "{{.") {
-			return nil, fmt.Errorf("computedValues[%q]: unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})", path, resolved)
+			return nil, fmt.Errorf("computedValues[%q]: "+unrecognisedPlaceholderFmt, path, resolved)
 		}
 		nested, err := dotNotationToNestedMap(path, resolved)
 		if err != nil {
@@ -664,12 +691,216 @@ func evaluateComputedValues(computedValues map[string]string, releaseName, names
 }
 
 // parseServiceValues unmarshals the raw JSON values from a WorkspaceService into a map.
-func parseServiceValues(svc *defaultv1alpha1.WorkspaceService) (map[string]interface{}, error) {
-	userValues := make(map[string]interface{})
+func parseServiceValues(svc *defaultv1alpha1.WorkspaceService) (map[string]any, error) {
+	userValues := make(map[string]any)
 	if svc.Values != nil {
 		if err := json.Unmarshal(svc.Values.Raw, &userValues); err != nil {
 			return nil, fmt.Errorf("parsing service values: %w", err)
 		}
 	}
 	return userValues, nil
+}
+
+// chorusConfigFile is the name of the chart-shipped configuration file the
+// operator reads at install time. Lives at chart root, alongside Chart.yaml.
+const chorusConfigFile = "chorus.yaml"
+
+// unrecognisedPlaceholderFmt is the shared error format for placeholder typos.
+// The single %q is the offending string. Supported placeholders: {{.Namespace}},
+// {{.ReleaseName}}, {{.SecretName}}.
+const unrecognisedPlaceholderFmt = "unrecognised placeholder in %q (supported: {{.Namespace}}, {{.ReleaseName}}, {{.SecretName}})"
+
+// ChorusConfig is the chart-shipped chorus.yaml file.
+// The chart maintainer ships defaults the operator merges into the Helm install:
+//   - Values: a Helm values overlay (lowest-priority, below user-CR values).
+//   - Credentials.Paths: default credential paths when the WorkspaceService CR
+//     omits them.
+//   - ConnectionInfoTemplate: default surfaced in WorkspaceStatus when the CR
+//     omits it.
+//
+// CR fields always override chorus.yaml fields when set.
+type ChorusConfig struct {
+	Values                 map[string]any           `json:"values,omitempty"`
+	Credentials            *ChorusConfigCredentials `json:"credentials,omitempty"`
+	ConnectionInfoTemplate string                   `json:"connectionInfoTemplate,omitempty"`
+}
+
+// ChorusConfigCredentials carries the chart-shipped credential defaults.
+// SecretName supports template placeholders so a chart can express a stable
+// release-prefixed name (e.g. "{{.ReleaseName}}-creds") without colliding when
+// the same chart is installed twice in the same namespace. The operator falls
+// back to "<release>-creds" when neither chorus.yaml nor the CR sets it.
+type ChorusConfigCredentials struct {
+	SecretName string   `json:"secretName,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+}
+
+// parseChorusConfig reads chart.Files["chorus.yaml"] and strictly unmarshals it.
+// Returns (nil, nil) when the chart ships no chorus.yaml — legacy charts keep
+// working with the WorkspaceService CR carrying everything.
+// Returns an error when the file is present but malformed or contains unknown
+// top-level keys, so a chart-author typo fails loudly at install time.
+func parseChorusConfig(ch chart.Charter) (*ChorusConfig, error) {
+	acc, err := chart.NewAccessor(ch)
+	if err != nil {
+		return nil, fmt.Errorf("opening chart accessor: %w", err)
+	}
+	var raw []byte
+	for _, f := range acc.Files() {
+		if f.Name == chorusConfigFile {
+			raw = f.Data
+			break
+		}
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	cfg := &ChorusConfig{}
+	if err := yaml.UnmarshalStrict(raw, cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", chorusConfigFile, err)
+	}
+	return cfg, nil
+}
+
+// substituteChorusPlaceholders applies the same
+// {{.ReleaseName}}/{{.Namespace}}/{{.SecretName}} substitutions used by
+// evaluateComputedValues and buildServiceStatus to every string leaf in the
+// values tree. Returns an error if any string still contains "{{." after
+// substitution — an unrecognised placeholder that's almost always a typo.
+func substituteChorusPlaceholders(values map[string]any, releaseName, namespace, secretName string) (map[string]any, error) {
+	if len(values) == 0 {
+		return values, nil
+	}
+	replacer := strings.NewReplacer(
+		"{{.Namespace}}", namespace,
+		"{{.ReleaseName}}", releaseName,
+		"{{.SecretName}}", secretName,
+	)
+	out := substituteValueNode(values, replacer).(map[string]any)
+	if err := validateNoUnresolvedPlaceholders(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// substituteValueNode walks the value tree, replacing placeholders in every
+// string leaf. Returns the (possibly substituted) node.
+//
+// CALLERS MUST PASS A FRESH MAP. The function mutates maps and slices in place
+// — map keys are reassigned, slice indices overwritten. The current operator
+// install path satisfies this naturally (chorusCfg is unmarshalled from
+// chorus.yaml on every reconcile and not shared). If a future change ever caches
+// a parsed *ChorusConfig across reconciles, the cached values would be mutated
+// on each call and progressively corrupted; deep-copy before calling in that
+// case.
+func substituteValueNode(v any, replacer *strings.Replacer) any {
+	switch x := v.(type) {
+	case string:
+		return replacer.Replace(x)
+	case map[string]any:
+		for k, val := range x {
+			x[k] = substituteValueNode(val, replacer)
+		}
+		return x
+	case []any:
+		for i, val := range x {
+			x[i] = substituteValueNode(val, replacer)
+		}
+		return x
+	default:
+		return v
+	}
+}
+
+// effectiveSecretName resolves the Secret name to use for a service's
+// credentials. Precedence: CR field → chorus.yaml field → "<release>-creds".
+// Both CR and chorus.yaml values are placeholder-substituted before use, so a
+// chart shipping "{{.ReleaseName}}-creds" stays per-release.
+//
+// {{.SecretName}} cannot reference itself: when resolving the SecretName, the
+// secretName slot of the replacer is empty, which would silently produce a
+// truncated result (e.g. "creds-{{.SecretName}}" → "creds-"). The guard below
+// rejects self-references explicitly so a chart-author mistake fails loudly
+// rather than producing a malformed Secret name at install time.
+func effectiveSecretName(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig, releaseName, namespace string) (string, error) {
+	if svc.Credentials != nil && svc.Credentials.SecretName != "" {
+		if strings.Contains(svc.Credentials.SecretName, "{{.SecretName}}") {
+			return "", fmt.Errorf("CR Credentials.SecretName %q uses {{.SecretName}}: self-reference is not supported", svc.Credentials.SecretName)
+		}
+		return resolvePlaceholders(svc.Credentials.SecretName, releaseName, namespace, "")
+	}
+	if chorusCfg != nil && chorusCfg.Credentials != nil && chorusCfg.Credentials.SecretName != "" {
+		if strings.Contains(chorusCfg.Credentials.SecretName, "{{.SecretName}}") {
+			return "", fmt.Errorf("chorus.yaml credentials.secretName %q uses {{.SecretName}}: self-reference is not supported", chorusCfg.Credentials.SecretName)
+		}
+		return resolvePlaceholders(chorusCfg.Credentials.SecretName, releaseName, namespace, "")
+	}
+	return releaseName + "-creds", nil
+}
+
+// effectiveCredentialPaths returns the credential paths the operator should
+// generate passwords for. CR Paths win when non-empty; otherwise falls through
+// to chorus.yaml's Credentials.Paths. Returns nil when neither side supplies any.
+func effectiveCredentialPaths(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig) []string {
+	if svc.Credentials != nil && len(svc.Credentials.Paths) > 0 {
+		return svc.Credentials.Paths
+	}
+	if chorusCfg != nil && chorusCfg.Credentials != nil {
+		return chorusCfg.Credentials.Paths
+	}
+	return nil
+}
+
+// effectiveConnectionInfoTemplate returns the template surfaced in
+// WorkspaceStatus.services[*].connectionInfo. CR wins when non-empty; otherwise
+// falls through to chorus.yaml's ConnectionInfoTemplate. Returns "" when neither
+// supplies one (status will then carry no connectionInfo).
+func effectiveConnectionInfoTemplate(svc *defaultv1alpha1.WorkspaceService, chorusCfg *ChorusConfig) string {
+	if svc.ConnectionInfoTemplate != "" {
+		return svc.ConnectionInfoTemplate
+	}
+	if chorusCfg != nil {
+		return chorusCfg.ConnectionInfoTemplate
+	}
+	return ""
+}
+
+// resolvePlaceholders applies the standard {{.ReleaseName}}/{{.Namespace}}/{{.SecretName}}
+// substitutions to a single string. Returns an error if the result still contains
+// "{{." (unrecognised placeholder, almost always a typo).
+func resolvePlaceholders(s, releaseName, namespace, secretName string) (string, error) {
+	out := strings.NewReplacer(
+		"{{.Namespace}}", namespace,
+		"{{.ReleaseName}}", releaseName,
+		"{{.SecretName}}", secretName,
+	).Replace(s)
+	if strings.Contains(out, "{{.") {
+		return "", fmt.Errorf(unrecognisedPlaceholderFmt, s)
+	}
+	return out, nil
+}
+
+// validateNoUnresolvedPlaceholders walks the post-substitution value tree and
+// returns an error if any string leaf still contains "{{." — an unrecognised
+// placeholder that didn't match the supported set.
+func validateNoUnresolvedPlaceholders(v any) error {
+	switch x := v.(type) {
+	case string:
+		if strings.Contains(x, "{{.") {
+			return fmt.Errorf(unrecognisedPlaceholderFmt, x)
+		}
+	case map[string]any:
+		for _, val := range x {
+			if err := validateNoUnresolvedPlaceholders(val); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, val := range x {
+			if err := validateNoUnresolvedPlaceholders(val); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

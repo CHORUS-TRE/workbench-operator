@@ -337,7 +337,7 @@ var _ = Describe("controller", Ordered, func() {
 				return err
 			}, 60*time.Second, time.Second).Should(Succeed())
 
-			By("verifying CNP has 3 egress rules (kube-dns + intra-namespace pod + intra-namespace service)")
+			By("verifying CNP has 4 egress rules (kube-dns + node-local-dns + intra-namespace pod + intra-namespace service)")
 			cmd = exec.Command("kubectl", "get", "ciliumnetworkpolicy", "airgapped-ws-netpol",
 				"-n", testNS, "-o", "jsonpath={.spec.egress}")
 			out, err := utils.Run(cmd)
@@ -345,7 +345,7 @@ var _ = Describe("controller", Ordered, func() {
 
 			var egress []map[string]any
 			Expect(json.Unmarshal(out, &egress)).To(Succeed())
-			Expect(egress).To(HaveLen(3))
+			Expect(egress).To(HaveLen(4))
 
 			By("verifying NetworkPolicyReady condition is True")
 			Eventually(func() (string, error) {
@@ -368,7 +368,7 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying CNP has at least 4 egress rules and the FQDN rule contains expected selectors")
+			By("verifying CNP has at least 6 egress rules and the FQDN rule contains expected selectors")
 			Eventually(func() (string, error) {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "fqdn-ws-netpol",
 					"-n", testNS, "-o", "jsonpath={.spec.egress}")
@@ -380,7 +380,7 @@ var _ = Describe("controller", Ordered, func() {
 				if err := json.Unmarshal(out, &egress); err != nil {
 					return "", err
 				}
-				if len(egress) < 4 {
+				if len(egress) < 6 {
 					return "", nil
 				}
 				lastRule := egress[len(egress)-1]
@@ -472,28 +472,7 @@ var _ = Describe("controller", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("waiting for airgapped CNP (3 egress rules)")
-			Eventually(func() (int, error) {
-				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-netpol",
-					"-n", testNS, "-o", "jsonpath={.spec.egress}")
-				out, err := utils.Run(cmd)
-				if err != nil {
-					return 0, err
-				}
-				var egress []map[string]any
-				if err := json.Unmarshal(out, &egress); err != nil {
-					return 0, err
-				}
-				return len(egress), nil
-			}, 60*time.Second, time.Second).Should(Equal(3))
-
-			By("switching workspace to Open")
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
-			cmd.Stdin = workspaceManifest(testNS, "update-ws", "Open", nil)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("verifying CNP is updated to 4 egress rules")
+			By("waiting for airgapped CNP (4 egress rules)")
 			Eventually(func() (int, error) {
 				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-netpol",
 					"-n", testNS, "-o", "jsonpath={.spec.egress}")
@@ -507,6 +486,27 @@ var _ = Describe("controller", Ordered, func() {
 				}
 				return len(egress), nil
 			}, 60*time.Second, time.Second).Should(Equal(4))
+
+			By("switching workspace to Open")
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = workspaceManifest(testNS, "update-ws", "Open", nil)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying CNP is updated to 5 egress rules")
+			Eventually(func() (int, error) {
+				cmd := exec.Command("kubectl", "get", "ciliumnetworkpolicy", "update-ws-netpol",
+					"-n", testNS, "-o", "jsonpath={.spec.egress}")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return 0, err
+				}
+				var egress []map[string]any
+				if err := json.Unmarshal(out, &egress); err != nil {
+					return 0, err
+				}
+				return len(egress), nil
+			}, 60*time.Second, time.Second).Should(Equal(5))
 		})
 	})
 

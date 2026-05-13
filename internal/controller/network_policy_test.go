@@ -43,7 +43,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(es["matchLabels"]).To(BeEmpty())
 
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		// kube-dns + node-local-dns + intra-ns endpoints + intra-ns services
+		Expect(egress).To(HaveLen(4))
 
 		dnsRule := egress[0]
 		dnsEndpoints := dnsRule["toEndpoints"].([]map[string]any)
@@ -59,12 +60,22 @@ var _ = Describe("buildNetworkPolicy", func() {
 		dnsRules := dnsPorts[0]["rules"].(map[string]any)
 		Expect(dnsRules["dns"]).To(ContainElement(HaveKeyWithValue("matchPattern", "*")))
 
-		intraEndpointRule := egress[1]
+		nldnsRule := egress[1]
+		Expect(nldnsRule["toEntities"]).To(Equal([]string{"world"}))
+		nldnsPorts := nldnsRule["toPorts"].([]map[string]any)
+		Expect(nldnsPorts).To(HaveLen(1))
+		Expect(nldnsPorts[0]["ports"].([]map[string]any)).To(ConsistOf(
+			And(HaveKeyWithValue("port", "53"), HaveKeyWithValue("protocol", "UDP")),
+			And(HaveKeyWithValue("port", "53"), HaveKeyWithValue("protocol", "TCP")),
+		))
+		Expect(nldnsPorts[0]).NotTo(HaveKey("rules"))
+
+		intraEndpointRule := egress[2]
 		toEndpoints := intraEndpointRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "workspace-ns"))
 
-		intraServiceRule := egress[2]
+		intraServiceRule := egress[3]
 		toServices := intraServiceRule["toServices"].([]map[string]any)
 		Expect(toServices).To(HaveLen(1))
 		svcSelector := toServices[0]["k8sServiceSelector"].(map[string]any)
@@ -89,11 +100,11 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		// 3 base + 1 FQDN/443 (with serverNames) + 1 FQDN/80 (without)
-		Expect(egress).To(HaveLen(5))
+		// 4 base + 1 FQDN/443 (with serverNames) + 1 FQDN/80 (without)
+		Expect(egress).To(HaveLen(6))
 
 		// Port 443 rule with serverNames SNI filtering
-		httpsRule := egress[3]
+		httpsRule := egress[4]
 		toFQDNs := httpsRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchPattern", "*.corp.internal")))
@@ -106,7 +117,7 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(serverNames).To(ContainElement("*.corp.internal"))
 
 		// Port 80 rule without serverNames
-		httpRule := egress[4]
+		httpRule := egress[5]
 		Expect(httpRule["toFQDNs"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 		httpToPorts := httpRule["toPorts"].([]map[string]any)
 		Expect(httpToPorts).To(HaveLen(1))
@@ -122,9 +133,9 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		spec := cnp.Object["spec"].(map[string]any)
 		egress := spec["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(4))
+		Expect(egress).To(HaveLen(5))
 
-		allowInternetRule := egress[3]
+		allowInternetRule := egress[4]
 		Expect(allowInternetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
 
 		toPorts := allowInternetRule["toPorts"].([]map[string]any)
@@ -146,8 +157,8 @@ var _ = Describe("buildNetworkPolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base only — no FQDN rules emitted when AllowedFQDNs is empty
-		Expect(egress).To(HaveLen(3))
+		// 4 base only — no FQDN rules emitted when AllowedFQDNs is empty
+		Expect(egress).To(HaveLen(4))
 	})
 
 	It("returns an error when called with invalid FQDNs", func() {
@@ -229,10 +240,10 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base rules + 1 ingress-nginx rule (replaces per-service toFQDNs)
-		Expect(egress).To(HaveLen(4))
+		// 4 base rules + 1 ingress-nginx rule (replaces per-service toFQDNs)
+		Expect(egress).To(HaveLen(5))
 
-		ingressNginxRule := egress[3]
+		ingressNginxRule := egress[4]
 		toEndpoints := ingressNginxRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
@@ -255,15 +266,15 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 ingress-nginx + 1 open-internet = 5
-		Expect(egress).To(HaveLen(5))
+		// 4 base + 1 ingress-nginx + 1 open-internet = 6
+		Expect(egress).To(HaveLen(6))
 
-		ingressNginxRule := egress[3]
+		ingressNginxRule := egress[4]
 		toEndpoints := ingressNginxRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
 
-		// Verify the internet rule at [4] is still correct
-		internetRule := egress[4]
+		// Verify the internet rule at [5] is still correct
+		internetRule := egress[5]
 		Expect(internetRule["toCIDR"]).To(ContainElements("0.0.0.0/0", "::/0"))
 		ports := internetRule["toPorts"].([]map[string]any)[0]["ports"].([]map[string]any)
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "80")))
@@ -277,15 +288,15 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 ingress-nginx + 2 allowlist (443 + 80) = 6
-		Expect(egress).To(HaveLen(6))
+		// 4 base + 1 ingress-nginx + 2 allowlist (443 + 80) = 7
+		Expect(egress).To(HaveLen(7))
 
-		ingressNginxRule := egress[3]
+		ingressNginxRule := egress[4]
 		toEndpoints := ingressNginxRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
 
-		// Verify the FQDN allowlist HTTPS rule at [4]
-		allowlistRule := egress[4]
+		// Verify the FQDN allowlist HTTPS rule at [5]
+		allowlistRule := egress[5]
 		toFQDNs := allowlistRule["toFQDNs"].([]map[string]any)
 		Expect(toFQDNs).To(ContainElement(HaveKeyWithValue("matchName", "example.com")))
 	})
@@ -295,7 +306,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		cnp, err := buildNetworkPolicy(ws, nil, netpolTestNS)
 		Expect(err).NotTo(HaveOccurred())
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 	})
 
 	It("emits no extra rules when internal services list is empty", func() {
@@ -303,7 +314,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		cnp, err := buildNetworkPolicy(ws, []InternalService{}, netpolTestNS)
 		Expect(err).NotTo(HaveOccurred())
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 	})
 
 	It("emits toEndpoints for each AllowedEgress namespace when multiple are configured", func() {
@@ -316,9 +327,9 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(4)) // 3 base + 1 ingress-nginx rule
+		Expect(egress).To(HaveLen(5)) // 4 base + 1 ingress-nginx rule
 
-		ingressNginxRule := egress[3]
+		ingressNginxRule := egress[4]
 		toEndpoints := ingressNginxRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(2))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
@@ -335,7 +346,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		Expect(egress).To(HaveLen(3))
+		Expect(egress).To(HaveLen(4))
 	})
 
 	It("emits separate rules for Envoy Gateway and regular namespaces", func() {
@@ -349,10 +360,10 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 envoy rule + 1 regular rule
-		Expect(egress).To(HaveLen(5))
+		// 4 base + 1 envoy rule + 1 regular rule
+		Expect(egress).To(HaveLen(6))
 
-		envoyRule := egress[3]
+		envoyRule := egress[4]
 		toEndpoints := envoyRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "envoy-gateway-system"))
@@ -362,7 +373,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(ports).NotTo(ContainElement(HaveKeyWithValue("port", "443")))
 		Expect(toPorts[0]).To(HaveKey("serverNames"))
 
-		regularRule := egress[4]
+		regularRule := egress[5]
 		toEndpoints = regularRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(1))
 		Expect(toEndpoints[0]["matchLabels"]).To(HaveKeyWithValue("k8s:io.kubernetes.pod.namespace", "ingress-nginx"))
@@ -387,11 +398,11 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 envoy + 1 regular
-		Expect(egress).To(HaveLen(5))
+		// 4 base + 1 envoy + 1 regular
+		Expect(egress).To(HaveLen(6))
 
 		// Envoy rule: TLS entry (10443, with serverNames) and non-TLS entry (10022, no serverNames)
-		envoyToPorts := egress[3]["toPorts"].([]map[string]any)
+		envoyToPorts := egress[4]["toPorts"].([]map[string]any)
 		Expect(envoyToPorts).To(HaveLen(2))
 		Expect(envoyToPorts[0]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "10443")))
 		Expect(envoyToPorts[0]).To(HaveKey("serverNames"))
@@ -399,7 +410,7 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(envoyToPorts[1]).NotTo(HaveKey("serverNames"))
 
 		// Regular rule: TLS entry (443, with serverNames) and non-TLS entry (22, no serverNames)
-		regularToPorts := egress[4]["toPorts"].([]map[string]any)
+		regularToPorts := egress[5]["toPorts"].([]map[string]any)
 		Expect(regularToPorts).To(HaveLen(2))
 		Expect(regularToPorts[0]["ports"].([]map[string]any)).To(ContainElement(HaveKeyWithValue("port", "443")))
 		Expect(regularToPorts[0]).To(HaveKey("serverNames"))
@@ -418,10 +429,10 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 regular rule (both namespaces merged, no envoy rule)
-		Expect(egress).To(HaveLen(4))
+		// 4 base + 1 regular rule (both namespaces merged, no envoy rule)
+		Expect(egress).To(HaveLen(5))
 
-		regularRule := egress[3]
+		regularRule := egress[4]
 		toEndpoints := regularRule["toEndpoints"].([]map[string]any)
 		Expect(toEndpoints).To(HaveLen(2))
 		toPorts := regularRule["toPorts"].([]map[string]any)
@@ -441,10 +452,10 @@ var _ = Describe("buildNetworkPolicy with internal services", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		egress := cnp.Object["spec"].(map[string]any)["egress"].([]map[string]any)
-		// 3 base + 1 envoy rule only
-		Expect(egress).To(HaveLen(4))
+		// 4 base + 1 envoy rule only
+		Expect(egress).To(HaveLen(5))
 
-		envoyRule := egress[3]
+		envoyRule := egress[4]
 		toPorts := envoyRule["toPorts"].([]map[string]any)
 		ports := toPorts[0]["ports"].([]map[string]any)
 		Expect(ports).To(ContainElement(HaveKeyWithValue("port", "10443")))

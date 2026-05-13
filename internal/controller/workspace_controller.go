@@ -388,6 +388,27 @@ func (r *WorkspaceReconciler) setConditionAndUpdateStatus(ctx context.Context, w
 	return nil
 }
 
+// failedServiceStatus builds a Failed WorkspaceStatusService that preserves the
+// SecretName and ConnectionInfo recorded by the previous reconcile (if any).
+// A wholesale-replace of Status.Services[key] would otherwise drop the
+// user-facing Secret reference and connection URL on every transient failure
+// (chorus.yaml parse error, credential conflict, helm install error, etc.),
+// even though the underlying Secret and Service in the cluster are still
+// named the same and reachable.
+func failedServiceStatus(workspace *defaultv1alpha1.Workspace, key, message string) defaultv1alpha1.WorkspaceStatusService {
+	var prevSecret, prevConnInfo string
+	if existing, ok := workspace.Status.Services[key]; ok {
+		prevSecret = existing.SecretName
+		prevConnInfo = existing.ConnectionInfo
+	}
+	return defaultv1alpha1.WorkspaceStatusService{
+		Status:         defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
+		Message:        message,
+		SecretName:     prevSecret,
+		ConnectionInfo: prevConnInfo,
+	}
+}
+
 // reconcileServices reconciles all workspace services defined in spec.services.
 // Returns an error only for fatal infrastructure failures (e.g. Helm config init) that
 // should cause an immediate requeue. Per-service errors are recorded in status instead.
@@ -429,10 +450,28 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 
 		chartRef := fmt.Sprintf("oci://%s/%s", registry, repository)
 
-		secretName := ""
-		if svc.Credentials != nil {
-			secretName = svc.Credentials.SecretName
+		// secretName + connectionInfoTemplate may be refined below from chorus.yaml.
+		// Initialised from the CR; the Running branch reloads them once chorus.yaml is parsed.
+		secretName, err := effectiveSecretName(&svc, nil, releaseName, namespace)
+		if err != nil {
+			logger.Error(err, "Failed to resolve secretName", "service", key)
+			workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+				fmt.Sprintf("Failed to resolve secretName: %s", err.Error()))
+			continue
 		}
+		// If the CR did not pin a SecretName, prefer what a prior Running reconcile
+		// recorded in status (which reflects chorus.yaml's contribution) over the
+		// default. Without this fallback, a Running → Stopped transition would
+		// overwrite status.SecretName with the chorus.yaml-less default even though
+		// the actual Secret in the cluster keeps the chorus.yaml-derived name.
+		// The Running branch re-resolves with chorusCfg, so this only affects the
+		// non-Running paths.
+		if svc.Credentials == nil || svc.Credentials.SecretName == "" {
+			if existing, ok := workspace.Status.Services[key]; ok && existing.SecretName != "" {
+				secretName = existing.SecretName
+			}
+		}
+		connectionInfoTemplate := effectiveConnectionInfoTemplate(&svc, nil)
 
 		desiredState := svc.State
 		if desiredState == "" {
@@ -444,61 +483,99 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			userValues, err := parseServiceValues(&svc)
 			if err != nil {
 				logger.Error(err, "Failed to parse service values", "service", key)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: fmt.Sprintf("Failed to parse service values: %s", err.Error()),
-				}
-				continue
-			}
-
-			credValues, err := reconcileCredentialSecret(ctx, r.Client, namespace, workspace, svc.Credentials)
-			if err != nil {
-				logger.Error(err, "Failed to reconcile credential secret", "service", key)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: fmt.Sprintf("Failed to reconcile credentials: %s", err.Error()),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+					fmt.Sprintf("Failed to parse service values: %s", err.Error()))
 				continue
 			}
 
 			ch, err := locateAndLoadChart(cfg, chartRef, svc.Chart.Tag, namespace)
 			if err != nil {
 				logger.Error(err, "Failed to locate/load chart", "service", key, "chart", chartRef)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: fmt.Sprintf("Failed to load chart: %s", err.Error()),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+					fmt.Sprintf("Failed to load chart: %s", err.Error()))
 				continue
 			}
+
+			chorusCfg, err := parseChorusConfig(ch)
+			if err != nil {
+				logger.Error(err, "Failed to parse chorus.yaml", "service", key)
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+					fmt.Sprintf("Failed to parse chorus.yaml: %s", err.Error()))
+				continue
+			}
+
+			// Resolve chorus.yaml-aware values into branch-locals; promote to the
+			// outer scope at the end of the branch so the post-switch status update
+			// sees the chorus-derived values.
+			runningSecretName, err := effectiveSecretName(&svc, chorusCfg, releaseName, namespace)
+			if err != nil {
+				logger.Error(err, "Failed to resolve secretName", "service", key)
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+					fmt.Sprintf("Failed to resolve secretName: %s", err.Error()))
+				continue
+			}
+			runningConnTpl := effectiveConnectionInfoTemplate(&svc, chorusCfg)
+			effPaths := effectiveCredentialPaths(&svc, chorusCfg)
+
+			var effCreds *defaultv1alpha1.WorkspaceServiceCredentials
+			if len(effPaths) > 0 {
+				effCreds = &defaultv1alpha1.WorkspaceServiceCredentials{
+					SecretName: runningSecretName,
+					Paths:      effPaths,
+				}
+			}
+
+			credValues, err := reconcileCredentialSecret(ctx, r.Client, namespace, workspace, effCreds)
+			if err != nil {
+				logger.Error(err, "Failed to reconcile credential secret", "service", key)
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+					fmt.Sprintf("Failed to reconcile credentials: %s", err.Error()))
+				continue
+			}
+
 			valuesPrefix := autoValuesPrefix(ch, repoLastSegment)
 
-			computedVals, err := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, secretName)
+			var metadataValues map[string]any
+			if chorusCfg != nil && len(chorusCfg.Values) > 0 {
+				metadataValues, err = substituteChorusPlaceholders(chorusCfg.Values, releaseName, namespace, runningSecretName)
+				if err != nil {
+					logger.Error(err, "Invalid placeholder in chorus.yaml values", "service", key)
+					workspace.Status.Services[key] = failedServiceStatus(workspace, key,
+						fmt.Sprintf("Invalid placeholder in chorus.yaml: %s", err.Error()))
+					continue
+				}
+			}
+
+			computedVals, err := evaluateComputedValues(svc.ComputedValues, releaseName, namespace, runningSecretName)
 			if err != nil {
 				logger.Error(err, "Invalid computedValues", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
 				continue
 			}
-			baseVals := mergeMaps(wrapWithPrefix(userValues, valuesPrefix), wrapWithPrefix(credValues, valuesPrefix))
+
+			// Merge order: chorus.yaml → CR values → CR credentials → CR computedValues.
+			// chorus.yaml × CR values uses Helm-style merge (slices wholesale-replace).
+			// CR credentials/computedValues are sparse-path patches and stay element-wise.
+			baseVals := wrapWithPrefix(metadataValues, valuesPrefix)
+			baseVals = mergeMapsReplaceSlices(baseVals, wrapWithPrefix(userValues, valuesPrefix))
+			baseVals = mergeMaps(baseVals, wrapWithPrefix(credValues, valuesPrefix))
 			finalVals := mergeMaps(baseVals, wrapWithPrefix(computedVals, valuesPrefix))
 			if err := helmInstallOrUpgrade(ctx, cfg, namespace, releaseName, ch, finalVals); err != nil {
 				logger.Error(err, "Failed to install/upgrade Helm release", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
 				continue
 			}
+
+			// Promote branch-locals to outer scope only on success — the post-switch
+			// status update needs the chorus-derived values; error paths above use
+			// `continue` so the outer values stay at their pre-switch state.
+			secretName = runningSecretName
+			connectionInfoTemplate = runningConnTpl
 
 		case defaultv1alpha1.WorkspaceServiceStateStopped:
 			if _, err := helmUninstall(cfg, releaseName); err != nil {
 				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
 				continue
 			}
 
@@ -508,10 +585,7 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			releaseDeleted, err := helmUninstall(cfg, releaseName)
 			if err != nil {
 				logger.Error(err, "Failed to uninstall Helm release", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
 				continue
 			}
 			if releaseDeleted {
@@ -522,10 +596,7 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 			pvcCount, err := deleteReleasePVCs(ctx, r.Client, namespace, releaseName)
 			if err != nil {
 				logger.Error(err, "Failed to delete PVCs", "service", key, "release", releaseName)
-				workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-					Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-					Message: err.Error(),
-				}
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
 				continue
 			}
 			if pvcCount > 0 {
@@ -533,20 +604,23 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 				deletedParts = append(deletedParts, fmt.Sprintf("%d PVC(s) deleted", pvcCount))
 			}
 
-			if svc.Credentials != nil {
-				credDeleted, err := deleteCredentialSecret(ctx, r.Client, namespace, svc.Credentials.SecretName)
-				if err != nil {
-					logger.Error(err, "Failed to delete credential secret", "service", key, "secret", svc.Credentials.SecretName)
-					workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-						Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-						Message: err.Error(),
-					}
-					continue
-				}
-				if credDeleted {
-					r.Recorder.Event(workspace, "Normal", "ServiceDeleted", fmt.Sprintf("service %s: credentials secret %s deleted", key, svc.Credentials.SecretName))
-					deletedParts = append(deletedParts, "credentials deleted")
-				}
+			// Use the SecretName recorded in status during the last successful Running
+			// reconcile — that already reflects chorus.yaml's contribution. Fall back
+			// to the CR-or-default name if status was never populated (service went
+			// straight from absent to Deleted).
+			secretToDelete := secretName
+			if existing, ok := workspace.Status.Services[key]; ok && existing.SecretName != "" {
+				secretToDelete = existing.SecretName
+			}
+			credDeleted, err := deleteCredentialSecret(ctx, r.Client, namespace, secretToDelete)
+			if err != nil {
+				logger.Error(err, "Failed to delete credential secret", "service", key, "secret", secretToDelete)
+				workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
+				continue
+			}
+			if credDeleted {
+				r.Recorder.Event(workspace, "Normal", "ServiceDeleted", fmt.Sprintf("service %s: credentials secret %s deleted", key, secretToDelete))
+				deletedParts = append(deletedParts, "credentials deleted")
 			}
 
 			msg := "Deleted"
@@ -564,14 +638,11 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		helmStatus, helmDescription, err := helmReleaseStatus(cfg, releaseName)
 		if err != nil {
 			logger.Error(err, "Failed to get Helm release status", "service", key, "release", releaseName)
-			workspace.Status.Services[key] = defaultv1alpha1.WorkspaceStatusService{
-				Status:  defaultv1alpha1.WorkspaceStatusServiceStatusFailed,
-				Message: err.Error(),
-			}
+			workspace.Status.Services[key] = failedServiceStatus(workspace, key, err.Error())
 			continue
 		}
 
-		svcStatus := buildServiceStatus(helmStatus, helmDescription, svc, releaseName, secretName, workspace)
+		svcStatus := buildServiceStatus(helmStatus, helmDescription, svc, releaseName, secretName, connectionInfoTemplate, workspace)
 
 		// Override status with actual pod health when Helm thinks the release is deployed.
 		// Helm marks a release as "deployed" as soon as manifests are applied, regardless of

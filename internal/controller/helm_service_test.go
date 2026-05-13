@@ -36,15 +36,15 @@ var _ = Describe("parseServiceValues", func() {
 	})
 
 	It("returns the parsed map for valid JSON values", func() {
-		raw, _ := json.Marshal(map[string]interface{}{
-			"storage": map[string]interface{}{"requestedSize": "10Gi"},
+		raw, _ := json.Marshal(map[string]any{
+			"storage": map[string]any{"requestedSize": "10Gi"},
 		})
 		svc := &defaultv1alpha1.WorkspaceService{
 			Values: &apiextensionsv1.JSON{Raw: raw},
 		}
 		result, err := parseServiceValues(svc)
 		Expect(err).NotTo(HaveOccurred())
-		storage, ok := result["storage"].(map[string]interface{})
+		storage, ok := result["storage"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(storage["requestedSize"]).To(Equal("10Gi"))
 	})
@@ -668,14 +668,14 @@ var _ = Describe("checkServicePodsHealth", func() {
 
 var _ = Describe("releaseValuesMatch", func() {
 	It("returns true for equal non-empty maps", func() {
-		a := map[string]interface{}{"key": "value", "num": float64(1)}
-		b := map[string]interface{}{"key": "value", "num": float64(1)}
+		a := map[string]any{"key": "value", "num": float64(1)}
+		b := map[string]any{"key": "value", "num": float64(1)}
 		Expect(releaseValuesMatch(a, b)).To(BeTrue())
 	})
 
 	It("returns false when maps differ", func() {
-		a := map[string]interface{}{"key": "value1"}
-		b := map[string]interface{}{"key": "value2"}
+		a := map[string]any{"key": "value1"}
+		b := map[string]any{"key": "value2"}
 		Expect(releaseValuesMatch(a, b)).To(BeFalse())
 	})
 
@@ -684,25 +684,25 @@ var _ = Describe("releaseValuesMatch", func() {
 	})
 
 	It("returns false when one map is nil and the other is not", func() {
-		Expect(releaseValuesMatch(nil, map[string]interface{}{"k": "v"})).To(BeFalse())
+		Expect(releaseValuesMatch(nil, map[string]any{"k": "v"})).To(BeFalse())
 	})
 
 	It("returns true for nested equal maps", func() {
-		a := map[string]interface{}{"outer": map[string]interface{}{"inner": "val"}}
-		b := map[string]interface{}{"outer": map[string]interface{}{"inner": "val"}}
+		a := map[string]any{"outer": map[string]any{"inner": "val"}}
+		b := map[string]any{"outer": map[string]any{"inner": "val"}}
 		Expect(releaseValuesMatch(a, b)).To(BeTrue())
 	})
 })
 
 var _ = Describe("wrapWithPrefix", func() {
 	It("returns values unchanged when prefix is empty", func() {
-		vals := map[string]interface{}{"k": "v"}
+		vals := map[string]any{"k": "v"}
 		result := wrapWithPrefix(vals, "")
 		Expect(result).To(Equal(vals))
 	})
 
 	It("returns values unchanged when values map is empty", func() {
-		result := wrapWithPrefix(map[string]interface{}{}, "myprefix")
+		result := wrapWithPrefix(map[string]any{}, "myprefix")
 		Expect(result).To(BeEmpty())
 	})
 
@@ -711,7 +711,7 @@ var _ = Describe("wrapWithPrefix", func() {
 	})
 
 	It("wraps values under the prefix key", func() {
-		vals := map[string]interface{}{"settings": map[string]interface{}{"password": "secret"}}
+		vals := map[string]any{"settings": map[string]any{"password": "secret"}}
 		result := wrapWithPrefix(vals, "postgres")
 		Expect(result).To(HaveKey("postgres"))
 		Expect(result["postgres"]).To(Equal(vals))
@@ -733,61 +733,61 @@ var _ = Describe("buildServiceStatus", func() {
 
 	It("populates message from helm description", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "Install complete", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "Install complete", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Message).To(Equal("Install complete"))
 	})
 
 	It("sets empty message when description is empty", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Message).To(BeEmpty())
 	})
 
 	It("returns Running when deployed and state is Running", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusRunning))
 	})
 
 	It("returns Progressing when helm status is pending-install", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("pending-install", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("pending-install", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing when helm status is pending-upgrade", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("pending-upgrade", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("pending-upgrade", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing when helm status is pending-rollback", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("pending-rollback", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("pending-rollback", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Failed when helm status is failed", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("failed", "install failed", svc, "rel", "", workspace)
+		status := buildServiceStatus("failed", "install failed", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusFailed))
 	})
 
 	It("returns Stopped when not-found and state is Stopped", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		status := buildServiceStatus("not-found", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("not-found", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusStopped))
 	})
 
 	It("returns Deleted when not-found and state is Deleted", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
-		status := buildServiceStatus("not-found", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("not-found", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusDeleted))
 	})
 
 	It("returns Progressing as default fallback", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("unknown-state", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("unknown-state", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
@@ -796,8 +796,29 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "host={{.ReleaseName}}.{{.Namespace}} secret={{.SecretName}}",
 		}
-		status := buildServiceStatus("deployed", "", svc, "my-release", "my-secret", workspace)
+		status := buildServiceStatus("deployed", "", svc, "my-release", "my-secret", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.ConnectionInfo).To(Equal("host=my-release.mynamespace secret=my-secret"))
+	})
+
+	It("uses the explicit template parameter, not svc.ConnectionInfoTemplate", func() {
+		// Lock in the contract: the function reads the connectionInfoTemplate parameter
+		// (which the controller resolves from CR + chorus.yaml fallback) and ignores
+		// the field on the WorkspaceService struct.
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
+			ConnectionInfoTemplate: "from-svc-{{.ReleaseName}}",
+		}
+		status := buildServiceStatus("deployed", "", svc, "my-release", "", "from-param-{{.ReleaseName}}", workspace)
+		Expect(status.ConnectionInfo).To(Equal("from-param-my-release"))
+	})
+
+	It("renders an empty connection info when the template parameter is empty even if svc has one", func() {
+		svc := defaultv1alpha1.WorkspaceService{
+			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
+			ConnectionInfoTemplate: "from-svc-{{.ReleaseName}}",
+		}
+		status := buildServiceStatus("deployed", "", svc, "my-release", "", "", workspace)
+		Expect(status.ConnectionInfo).To(BeEmpty())
 	})
 
 	It("does not render connection info when not Running", func() {
@@ -805,31 +826,31 @@ var _ = Describe("buildServiceStatus", func() {
 			State:                  defaultv1alpha1.WorkspaceServiceStateRunning,
 			ConnectionInfoTemplate: "host={{.ReleaseName}}",
 		}
-		status := buildServiceStatus("failed", "", svc, "my-release", "", workspace)
+		status := buildServiceStatus("failed", "", svc, "my-release", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.ConnectionInfo).To(BeEmpty())
 	})
 
 	It("populates SecretName in status", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateRunning}
-		status := buildServiceStatus("deployed", "", svc, "rel", "my-creds", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "my-creds", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.SecretName).To(Equal("my-creds"))
 	})
 
 	It("populates SecretName even when not Running", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", workspace)
+		status := buildServiceStatus("not-found", "", svc, "rel", "my-creds", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.SecretName).To(Equal("my-creds"))
 	})
 
 	It("returns Progressing when deployed but desired state is Stopped", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateStopped}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 
 	It("returns Progressing when deployed but desired state is Deleted", func() {
 		svc := defaultv1alpha1.WorkspaceService{State: defaultv1alpha1.WorkspaceServiceStateDeleted}
-		status := buildServiceStatus("deployed", "", svc, "rel", "", workspace)
+		status := buildServiceStatus("deployed", "", svc, "rel", "", svc.ConnectionInfoTemplate, workspace)
 		Expect(status.Status).To(Equal(defaultv1alpha1.WorkspaceStatusServiceStatusProgressing))
 	})
 })
@@ -895,7 +916,7 @@ var _ = Describe("evaluateComputedValues", func() {
 			"myrel", "myns", "",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		inner, ok := result["a"].(map[string]interface{})
+		inner, ok := result["a"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(inner["host"]).To(Equal("myrel-db"))
 		Expect(inner["port"]).To(Equal("5432"))
@@ -914,14 +935,14 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("handles an array index in the middle of a path", func() {
 		result, err := dotNotationToNestedMap("mlflow.extraVolumes[0].persistentVolumeClaim.claimName", "my-pvc")
 		Expect(err).NotTo(HaveOccurred())
-		mlflow, ok := result["mlflow"].(map[string]interface{})
+		mlflow, ok := result["mlflow"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := mlflow["extraVolumes"].([]interface{})
+		slice, ok := mlflow["extraVolumes"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(1))
-		elem, ok := slice[0].(map[string]interface{})
+		elem, ok := slice[0].(map[string]any)
 		Expect(ok).To(BeTrue())
-		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(pvc).To(HaveKeyWithValue("claimName", "my-pvc"))
 	})
@@ -929,9 +950,9 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("handles an array index as the last segment", func() {
 		result, err := dotNotationToNestedMap("a.items[2]", "val")
 		Expect(err).NotTo(HaveOccurred())
-		a, ok := result["a"].(map[string]interface{})
+		a, ok := result["a"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := a["items"].([]interface{})
+		slice, ok := a["items"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(3))
 		Expect(slice[2]).To(Equal("val"))
@@ -940,14 +961,14 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("creates a slice of the right length for a non-zero index", func() {
 		result, err := dotNotationToNestedMap("a.items[2].name", "val")
 		Expect(err).NotTo(HaveOccurred())
-		a, ok := result["a"].(map[string]interface{})
+		a, ok := result["a"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := a["items"].([]interface{})
+		slice, ok := a["items"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(3))
 		Expect(slice[0]).To(BeNil())
 		Expect(slice[1]).To(BeNil())
-		elem, ok := slice[2].(map[string]interface{})
+		elem, ok := slice[2].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(elem).To(HaveKeyWithValue("name", "val"))
 	})
@@ -955,10 +976,10 @@ var _ = Describe("dotNotationToNestedMap", func() {
 	It("handles an array index at the root level (no leading dot)", func() {
 		result, err := dotNotationToNestedMap("items[0].name", "val")
 		Expect(err).NotTo(HaveOccurred())
-		slice, ok := result["items"].([]interface{})
+		slice, ok := result["items"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(1))
-		elem, ok := slice[0].(map[string]interface{})
+		elem, ok := slice[0].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(elem).To(HaveKeyWithValue("name", "val"))
 	})
@@ -972,21 +993,21 @@ var _ = Describe("dotNotationToNestedMap", func() {
 
 var _ = Describe("buildAtPath", func() {
 	It("merges two calls sharing an array key on the same map", func() {
-		m := make(map[string]interface{})
+		m := make(map[string]any)
 		Expect(buildAtPath(m, []string{"extraVolumes[0]", "name"}, "artifacts")).To(Succeed())
 		Expect(buildAtPath(m, []string{"extraVolumes[1]", "name"}, "config")).To(Succeed())
-		slice, ok := m["extraVolumes"].([]interface{})
+		slice, ok := m["extraVolumes"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(2))
-		Expect(slice[0].(map[string]interface{})).To(HaveKeyWithValue("name", "artifacts"))
-		Expect(slice[1].(map[string]interface{})).To(HaveKeyWithValue("name", "config"))
+		Expect(slice[0].(map[string]any)).To(HaveKeyWithValue("name", "artifacts"))
+		Expect(slice[1].(map[string]any)).To(HaveKeyWithValue("name", "config"))
 	})
 
 	It("merges two calls sharing a map key on the same map", func() {
-		m := make(map[string]interface{})
+		m := make(map[string]any)
 		Expect(buildAtPath(m, []string{"postgres", "host"}, "db-host")).To(Succeed())
 		Expect(buildAtPath(m, []string{"postgres", "port"}, "5432")).To(Succeed())
-		pg, ok := m["postgres"].(map[string]interface{})
+		pg, ok := m["postgres"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(pg).To(HaveKeyWithValue("host", "db-host"))
 		Expect(pg).To(HaveKeyWithValue("port", "5432"))
@@ -995,45 +1016,119 @@ var _ = Describe("buildAtPath", func() {
 
 var _ = Describe("mergeSlices", func() {
 	It("merges two same-length slices of maps element-wise", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}}
-		override := []interface{}{map[string]interface{}{"b": "2"}}
+		base := []any{map[string]any{"a": "1"}}
+		override := []any{map[string]any{"b": "2"}}
 		result := mergeSlices(base, override)
 		Expect(result).To(HaveLen(1))
-		elem := result[0].(map[string]interface{})
+		elem := result[0].(map[string]any)
 		Expect(elem).To(HaveKeyWithValue("a", "1"))
 		Expect(elem).To(HaveKeyWithValue("b", "2"))
 	})
 
 	It("keeps base elements beyond override length", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"}}
-		override := []interface{}{map[string]interface{}{"x": "9"}}
+		base := []any{map[string]any{"a": "1"}, map[string]any{"b": "2"}}
+		override := []any{map[string]any{"x": "9"}}
 		result := mergeSlices(base, override)
 		Expect(result).To(HaveLen(2))
-		Expect(result[0].(map[string]interface{})).To(HaveKeyWithValue("x", "9"))
-		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("b", "2"))
+		Expect(result[0].(map[string]any)).To(HaveKeyWithValue("x", "9"))
+		Expect(result[1].(map[string]any)).To(HaveKeyWithValue("b", "2"))
 	})
 
 	It("appends override elements beyond base length", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}}
-		override := []interface{}{map[string]interface{}{"x": "9"}, map[string]interface{}{"y": "8"}}
+		base := []any{map[string]any{"a": "1"}}
+		override := []any{map[string]any{"x": "9"}, map[string]any{"y": "8"}}
 		result := mergeSlices(base, override)
 		Expect(result).To(HaveLen(2))
-		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("y", "8"))
+		Expect(result[1].(map[string]any)).To(HaveKeyWithValue("y", "8"))
 	})
 
 	It("override wins for non-map scalar elements", func() {
-		base := []interface{}{"old"}
-		override := []interface{}{"new"}
+		base := []any{"old"}
+		override := []any{"new"}
 		result := mergeSlices(base, override)
 		Expect(result[0]).To(Equal("new"))
 	})
 
 	It("keeps base element when override element is nil", func() {
-		base := []interface{}{map[string]interface{}{"a": "1"}, map[string]interface{}{"b": "2"}}
-		override := []interface{}{nil, map[string]interface{}{"c": "3"}}
+		base := []any{map[string]any{"a": "1"}, map[string]any{"b": "2"}}
+		override := []any{nil, map[string]any{"c": "3"}}
 		result := mergeSlices(base, override)
-		Expect(result[0].(map[string]interface{})).To(HaveKeyWithValue("a", "1"))
-		Expect(result[1].(map[string]interface{})).To(HaveKeyWithValue("c", "3"))
+		Expect(result[0].(map[string]any)).To(HaveKeyWithValue("a", "1"))
+		Expect(result[1].(map[string]any)).To(HaveKeyWithValue("c", "3"))
+	})
+})
+
+var _ = Describe("mergeMapsReplaceSlices", func() {
+	It("recursively merges maps", func() {
+		base := map[string]any{
+			"mlflow": map[string]any{"a": 1, "b": 2},
+		}
+		override := map[string]any{
+			"mlflow": map[string]any{"b": 99, "c": 3},
+		}
+		merged := mergeMapsReplaceSlices(base, override)
+		Expect(merged["mlflow"]).To(Equal(map[string]any{"a": 1, "b": 99, "c": 3}))
+	})
+
+	It("wholesale-replaces slices instead of element-wise merging", func() {
+		// chorus.yaml ships extraVolumes[0] = {name: artifacts, persistentVolumeClaim: {...}}
+		// User CR overrides extraVolumes wholesale with a different volume.
+		// Expected: user CR wins entirely, no Frankenstein entry.
+		base := map[string]any{
+			"mlflow": map[string]any{
+				"extraVolumes": []any{
+					map[string]any{
+						"name": "artifacts",
+						"persistentVolumeClaim": map[string]any{
+							"claimName": "release-artifacts",
+						},
+					},
+				},
+			},
+		}
+		override := map[string]any{
+			"mlflow": map[string]any{
+				"extraVolumes": []any{
+					map[string]any{
+						"name":     "data",
+						"hostPath": map[string]any{"path": "/foo"},
+					},
+				},
+			},
+		}
+		merged := mergeMapsReplaceSlices(base, override)
+		mlflow := merged["mlflow"].(map[string]any)
+		slice := mlflow["extraVolumes"].([]any)
+		Expect(slice).To(HaveLen(1))
+		elem0 := slice[0].(map[string]any)
+		Expect(elem0).To(HaveKeyWithValue("name", "data"))
+		Expect(elem0).NotTo(HaveKey("persistentVolumeClaim")) // base entry's field is GONE
+		Expect(elem0).To(HaveKey("hostPath"))
+	})
+
+	It("keeps base slice when override does not set the key", func() {
+		base := map[string]any{
+			"mlflow": map[string]any{
+				"extraVolumes": []any{
+					map[string]any{"name": "artifacts"},
+				},
+			},
+		}
+		override := map[string]any{
+			"mlflow": map[string]any{"image": "x"},
+		}
+		merged := mergeMapsReplaceSlices(base, override)
+		mlflow := merged["mlflow"].(map[string]any)
+		Expect(mlflow["extraVolumes"]).To(HaveLen(1))
+		Expect(mlflow["image"]).To(Equal("x"))
+	})
+
+	It("does not mutate the base map", func() {
+		base := map[string]any{"a": 1, "list": []any{1, 2}}
+		override := map[string]any{"a": 2, "list": []any{9}}
+		_ = mergeMapsReplaceSlices(base, override)
+		Expect(base["a"]).To(Equal(1))
+		Expect(base["list"]).To(Equal([]any{1, 2}))
 	})
 })
 
@@ -1052,13 +1147,13 @@ var _ = Describe("mergeMaps with slice-aware merging", func() {
 			"workspace156-mlflow", "workspace156", "",
 		)
 		merged := mergeMaps(first, second)
-		mlflow := merged["mlflow"].(map[string]interface{})
-		slice := mlflow["extraVolumes"].([]interface{})
+		mlflow := merged["mlflow"].(map[string]any)
+		slice := mlflow["extraVolumes"].([]any)
 		Expect(slice).To(HaveLen(2))
-		elem0 := slice[0].(map[string]interface{})
-		pvc := elem0["persistentVolumeClaim"].(map[string]interface{})
+		elem0 := slice[0].(map[string]any)
+		pvc := elem0["persistentVolumeClaim"].(map[string]any)
 		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
-		elem1 := slice[1].(map[string]interface{})
+		elem1 := slice[1].(map[string]any)
 		Expect(elem1).To(HaveKeyWithValue("name", "extra-vol"))
 	})
 })
@@ -1073,13 +1168,13 @@ var _ = Describe("evaluateComputedValues with array notation", func() {
 			"workspace156-mlflow", "workspace156", "",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		mlflow := result["mlflow"].(map[string]interface{})
-		slice := mlflow["extraVolumes"].([]interface{})
+		mlflow := result["mlflow"].(map[string]any)
+		slice := mlflow["extraVolumes"].([]any)
 		Expect(slice).To(HaveLen(2))
-		elem0 := slice[0].(map[string]interface{})
-		pvc := elem0["persistentVolumeClaim"].(map[string]interface{})
+		elem0 := slice[0].(map[string]any)
+		pvc := elem0["persistentVolumeClaim"].(map[string]any)
 		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
-		elem1 := slice[1].(map[string]interface{})
+		elem1 := slice[1].(map[string]any)
 		Expect(elem1).To(HaveKeyWithValue("name", "extra-vol"))
 	})
 
@@ -1102,14 +1197,14 @@ var _ = Describe("evaluateComputedValues with array notation", func() {
 			"workspace156-mlflow", "workspace156", "",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		mlflow, ok := result["mlflow"].(map[string]interface{})
+		mlflow, ok := result["mlflow"].(map[string]any)
 		Expect(ok).To(BeTrue())
-		slice, ok := mlflow["extraVolumes"].([]interface{})
+		slice, ok := mlflow["extraVolumes"].([]any)
 		Expect(ok).To(BeTrue())
 		Expect(slice).To(HaveLen(1))
-		elem, ok := slice[0].(map[string]interface{})
+		elem, ok := slice[0].(map[string]any)
 		Expect(ok).To(BeTrue())
-		pvc, ok := elem["persistentVolumeClaim"].(map[string]interface{})
+		pvc, ok := elem["persistentVolumeClaim"].(map[string]any)
 		Expect(ok).To(BeTrue())
 		Expect(pvc).To(HaveKeyWithValue("claimName", "workspace156-mlflow-artifacts"))
 	})
@@ -1216,5 +1311,332 @@ var _ = Describe("helmInstallOrUpgrade", func() {
 		// With a correct version field the install must pass the version check.
 		// The fake kube client returns no error, so the whole call succeeds.
 		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+func newChartWithChorusFile(content string) *chartv2.Chart {
+	files := []*chartcommon.File{}
+	if content != "" {
+		files = append(files, &chartcommon.File{Name: "chorus.yaml", Data: []byte(content)})
+	}
+	return &chartv2.Chart{
+		Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"},
+		Files:    files,
+	}
+}
+
+var _ = Describe("parseChorusConfig", func() {
+	It("returns nil when the chart has no chorus.yaml", func() {
+		ch := newChartWithChorusFile("")
+		cfg, err := parseChorusConfig(ch)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).To(BeNil())
+	})
+
+	It("parses a well-formed chorus.yaml", func() {
+		content := `
+values:
+  foo:
+    bar: "{{.ReleaseName}}-x"
+credentials:
+  secretName: "{{.ReleaseName}}-creds"
+  paths:
+    - foo.password
+connectionInfoTemplate: "https://{{.ReleaseName}}.{{.Namespace}}"
+`
+		cfg, err := parseChorusConfig(newChartWithChorusFile(content))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.ConnectionInfoTemplate).To(Equal("https://{{.ReleaseName}}.{{.Namespace}}"))
+		Expect(cfg.Credentials).NotTo(BeNil())
+		Expect(cfg.Credentials.SecretName).To(Equal("{{.ReleaseName}}-creds"))
+		Expect(cfg.Credentials.Paths).To(Equal([]string{"foo.password"}))
+		Expect(cfg.Values).To(HaveKey("foo"))
+	})
+
+	It("rejects malformed YAML", func() {
+		_, err := parseChorusConfig(newChartWithChorusFile("values: [not-a-map"))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("parsing chorus.yaml"))
+	})
+
+	It("rejects unknown top-level keys (strict)", func() {
+		_, err := parseChorusConfig(newChartWithChorusFile("nope: 1\n"))
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("parses a chorus.yaml that contains only empty blocks", func() {
+		cfg, err := parseChorusConfig(newChartWithChorusFile("values: {}\ncredentials: {}\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.Values).To(BeEmpty())
+		Expect(cfg.Credentials).NotTo(BeNil())
+		Expect(cfg.Credentials.Paths).To(BeEmpty())
+		Expect(cfg.Credentials.SecretName).To(BeEmpty())
+	})
+
+	It("parses a chorus.yaml that contains only comments", func() {
+		cfg, err := parseChorusConfig(newChartWithChorusFile("# just a comment\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.Values).To(BeNil())
+		Expect(cfg.Credentials).To(BeNil())
+		Expect(cfg.ConnectionInfoTemplate).To(BeEmpty())
+	})
+
+	It("finds chorus.yaml when it is not the first entry in chart.Files", func() {
+		ch := &chartv2.Chart{
+			Metadata: &chartv2.Metadata{Name: "test", Version: "1.0.0"},
+			Files: []*chartcommon.File{
+				{Name: "decoy-before.yaml", Data: []byte("garbage: [")},
+				{Name: "chorus.yaml", Data: []byte("connectionInfoTemplate: hello\n")},
+				{Name: "decoy-after.yaml", Data: []byte("more: garbage")},
+			},
+		}
+		cfg, err := parseChorusConfig(ch)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg).NotTo(BeNil())
+		Expect(cfg.ConnectionInfoTemplate).To(Equal("hello"))
+	})
+})
+
+var _ = Describe("effectiveSecretName", func() {
+	It("returns the CR field when set", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "explicit-name"},
+		}
+		got, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("explicit-name"))
+	})
+
+	It("substitutes placeholders in the CR field", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "{{.ReleaseName}}-creds"},
+		}
+		got, err := effectiveSecretName(svc, nil, "my-release", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("my-release-creds"))
+	})
+
+	It("falls through to chorus.yaml when CR is empty and substitutes placeholders", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{SecretName: "{{.ReleaseName}}-creds"}}
+		got, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("defaults to <release>-creds when both are empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		got, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("falls through to default when CR has Credentials struct with empty SecretName and chorus.yaml is nil", func() {
+		// Different branch from "Credentials = nil": exercises the empty-string check inside the if.
+		svc := &defaultv1alpha1.WorkspaceService{Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{Paths: []string{"pw"}}}
+		got, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("returns an error when the CR field has an unrecognised placeholder", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "{{.Bogus}}-creds"},
+		}
+		_, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("returns an error when the chorus.yaml field has an unrecognised placeholder", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{SecretName: "{{.Bogus}}-creds"}}
+		_, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("rejects {{.SecretName}} self-reference in the CR field rather than silently truncating", func() {
+		// Without the explicit guard, the replacer maps {{.SecretName}} → "" and
+		// "creds-{{.SecretName}}" silently becomes "creds-". The guard turns this
+		// chart-author mistake into a fail-loud error.
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{SecretName: "creds-{{.SecretName}}"},
+		}
+		_, err := effectiveSecretName(svc, nil, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("self-reference is not supported"))
+	})
+
+	It("rejects {{.SecretName}} self-reference in the chorus.yaml field rather than silently truncating", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{SecretName: "creds-{{.SecretName}}"}}
+		_, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("self-reference is not supported"))
+	})
+
+	It("falls through to default when chorus.yaml has no credentials block", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{} // no Credentials field
+		got, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+
+	It("falls through to default when both CR and chorus.yaml have empty SecretName", func() {
+		svc := &defaultv1alpha1.WorkspaceService{Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{}}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"pw"}}}
+		got, err := effectiveSecretName(svc, cfg, "rel", "ns")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-creds"))
+	})
+})
+
+var _ = Describe("resolvePlaceholders", func() {
+	It("substitutes the three supported placeholders", func() {
+		got, err := resolvePlaceholders("ns={{.Namespace}} rel={{.ReleaseName}} sec={{.SecretName}}", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("ns=ns rel=rel sec=sec"))
+	})
+
+	It("returns the input unchanged when no placeholders are present", func() {
+		got, err := resolvePlaceholders("plain-string", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("plain-string"))
+	})
+
+	It("returns an error when an unrecognised placeholder remains", func() {
+		_, err := resolvePlaceholders("hello {{.Unknown}}", "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("returns the empty string for empty input", func() {
+		got, err := resolvePlaceholders("", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(BeEmpty())
+	})
+
+	It("substitutes the same placeholder multiple times", func() {
+		got, err := resolvePlaceholders("{{.ReleaseName}}-{{.ReleaseName}}", "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("rel-rel"))
+	})
+})
+
+var _ = Describe("effectiveCredentialPaths", func() {
+	It("returns CR paths when non-empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{
+			Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{Paths: []string{"a", "b"}},
+		}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"x"}}}
+		Expect(effectiveCredentialPaths(svc, cfg)).To(Equal([]string{"a", "b"}))
+	})
+
+	It("falls through to chorus.yaml when CR paths are empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{Credentials: &defaultv1alpha1.WorkspaceServiceCredentials{}}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"x"}}}
+		Expect(effectiveCredentialPaths(svc, cfg)).To(Equal([]string{"x"}))
+	})
+
+	It("falls through to chorus.yaml when CR has no Credentials block at all", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{Credentials: &ChorusConfigCredentials{Paths: []string{"x"}}}
+		Expect(effectiveCredentialPaths(svc, cfg)).To(Equal([]string{"x"}))
+	})
+
+	It("returns nil when both are empty", func() {
+		Expect(effectiveCredentialPaths(&defaultv1alpha1.WorkspaceService{}, nil)).To(BeNil())
+	})
+
+	It("returns nil when chorus.yaml has no credentials block", func() {
+		Expect(effectiveCredentialPaths(&defaultv1alpha1.WorkspaceService{}, &ChorusConfig{})).To(BeNil())
+	})
+})
+
+var _ = Describe("effectiveConnectionInfoTemplate", func() {
+	It("returns the CR field when set", func() {
+		svc := &defaultv1alpha1.WorkspaceService{ConnectionInfoTemplate: "from-cr"}
+		cfg := &ChorusConfig{ConnectionInfoTemplate: "from-chorus"}
+		Expect(effectiveConnectionInfoTemplate(svc, cfg)).To(Equal("from-cr"))
+	})
+
+	It("falls through to chorus.yaml when CR is empty", func() {
+		svc := &defaultv1alpha1.WorkspaceService{}
+		cfg := &ChorusConfig{ConnectionInfoTemplate: "from-chorus"}
+		Expect(effectiveConnectionInfoTemplate(svc, cfg)).To(Equal("from-chorus"))
+	})
+
+	It("returns empty string when both are empty", func() {
+		Expect(effectiveConnectionInfoTemplate(&defaultv1alpha1.WorkspaceService{}, nil)).To(BeEmpty())
+	})
+
+	It("returns empty string when chorus.yaml is non-nil but has empty template", func() {
+		Expect(effectiveConnectionInfoTemplate(&defaultv1alpha1.WorkspaceService{}, &ChorusConfig{})).To(BeEmpty())
+	})
+})
+
+var _ = Describe("substituteChorusPlaceholders", func() {
+	It("substitutes placeholders in nested maps and slices", func() {
+		values := map[string]any{
+			"top": "{{.ReleaseName}}-x",
+			"nested": map[string]any{
+				"inner": "ns={{.Namespace}}",
+			},
+			"list": []any{"sec={{.SecretName}}", 42},
+		}
+		out, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out["top"]).To(Equal("rel-x"))
+		Expect(out["nested"].(map[string]any)["inner"]).To(Equal("ns=ns"))
+		Expect(out["list"].([]any)[0]).To(Equal("sec=sec"))
+		Expect(out["list"].([]any)[1]).To(Equal(42))
+	})
+
+	It("returns nil when input is empty", func() {
+		out, err := substituteChorusPlaceholders(nil, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out).To(BeNil())
+	})
+
+	It("returns an error when an unrecognised placeholder remains", func() {
+		_, err := substituteChorusPlaceholders(map[string]any{"k": "{{.Bogus}}"}, "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("propagates the unknown-placeholder error from a nested map", func() {
+		values := map[string]any{
+			"outer": map[string]any{"inner": "{{.Bogus}}"},
+		}
+		_, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("propagates the unknown-placeholder error from inside a slice", func() {
+		values := map[string]any{
+			"list": []any{"ok", "{{.Bogus}}"},
+		}
+		_, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("unrecognised placeholder"))
+	})
+
+	It("leaves non-string scalars and nil values untouched (default case)", func() {
+		values := map[string]any{
+			"int":   42,
+			"bool":  true,
+			"float": 3.14,
+			"nil":   nil,
+		}
+		out, err := substituteChorusPlaceholders(values, "rel", "ns", "sec")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out["int"]).To(Equal(42))
+		Expect(out["bool"]).To(Equal(true))
+		Expect(out["float"]).To(Equal(3.14))
+		Expect(out["nil"]).To(BeNil())
 	})
 })

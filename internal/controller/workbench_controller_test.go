@@ -1686,7 +1686,7 @@ var _ = Describe("patchStatus serialization", func() {
 		// metadata.resourceVersion. If resourceVersion ever appears,
 		// Kubernetes will enforce optimistic concurrency and the
 		// conflict bug will return.
-		var raw map[string]interface{}
+		var raw map[string]any
 		Expect(json.Unmarshal(capturedPatch, &raw)).To(Succeed())
 		Expect(raw).NotTo(HaveKey("metadata"))
 		Expect(raw).To(HaveKey("status"))
