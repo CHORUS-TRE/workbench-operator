@@ -361,19 +361,20 @@ func initJob(ctx context.Context, workbench defaultv1alpha1.Workbench, config Co
 		appContainer.Env = append(appContainer.Env, licenseEnvVars...)
 	}
 
-	// Add kiosk configuration if this is a kiosk app and has kiosk config
-	if strings.Contains(appContainer.Image, "apps/kiosk") && app.KioskConfig != nil {
+	// Inject browser launch config when the app is one of the Chromium-based
+	// launchers (kiosk or browser) and the CR has a KioskConfig set.
+	if (strings.Contains(appContainer.Image, "apps/kiosk") || strings.Contains(appContainer.Image, "apps/browser")) && app.KioskConfig != nil {
 		appContainer.Env = append(appContainer.Env, corev1.EnvVar{
-			Name:  "KIOSK_URL",
+			Name:  "BROWSER_URL",
 			Value: app.KioskConfig.URL,
 		})
 		if app.KioskConfig.JWTURL != nil && *app.KioskConfig.JWTURL != "" && app.KioskConfig.JWTToken != nil && *app.KioskConfig.JWTToken != "" {
 			appContainer.Env = append(appContainer.Env, corev1.EnvVar{
-				Name:  "KIOSK_JWT_URL",
+				Name:  "BROWSER_JWT_URL",
 				Value: *app.KioskConfig.JWTURL,
 			})
 			appContainer.Env = append(appContainer.Env, corev1.EnvVar{
-				Name:  "KIOSK_JWT_TOKEN",
+				Name:  "BROWSER_JWT_TOKEN",
 				Value: *app.KioskConfig.JWTToken,
 			})
 		}
