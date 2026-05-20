@@ -312,46 +312,54 @@ var _ = Describe("initJob", func() {
 		Expect(*job.Spec.TTLSecondsAfterFinished).To(Equal(int32(24 * 3600)))
 	})
 
-	It("adds KIOSK_URL env when app is kiosk and KioskConfig is set", func() {
-		app := makeApp("kiosk", "apps/kiosk", "v1")
-		app.KioskConfig = &defaultv1alpha1.KioskConfig{
-			URL: "https://example.com",
-		}
-		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
-		Expect(err).NotTo(HaveOccurred())
-		var found bool
-		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
-			if env.Name == "KIOSK_URL" {
-				Expect(env.Value).To(Equal("https://example.com"))
-				found = true
-				break
+	DescribeTable("adds BROWSER_URL env when app is a Chromium launcher (kiosk or browser) and KioskConfig is set",
+		func(appName, imagePath string) {
+			app := makeApp(appName, imagePath, "v1")
+			app.KioskConfig = &defaultv1alpha1.KioskConfig{
+				URL: "https://example.com",
 			}
-		}
-		Expect(found).To(BeTrue())
-	})
+			sm := newTestStorageManager(Config{})
+			job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
+			Expect(err).NotTo(HaveOccurred())
+			var found bool
+			for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+				if env.Name == "BROWSER_URL" {
+					Expect(env.Value).To(Equal("https://example.com"))
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue())
+		},
+		Entry("kiosk app", "kiosk", "apps/kiosk"),
+		Entry("browser app", "browser", "apps/browser"),
+	)
 
-	It("adds KIOSK_JWT env vars when KioskConfig has JWT URL and token", func() {
-		jwtURL := "https://jwt.example.com"
-		jwtToken := "mytoken"
-		app := makeApp("kiosk", "apps/kiosk", "v1")
-		app.KioskConfig = &defaultv1alpha1.KioskConfig{
-			URL:      "https://example.com",
-			JWTURL:   &jwtURL,
-			JWTToken: &jwtToken,
-		}
-		sm := newTestStorageManager(Config{})
-		job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
-		Expect(err).NotTo(HaveOccurred())
-		envMap := make(map[string]string)
-		for _, env := range job.Spec.Template.Spec.Containers[0].Env {
-			envMap[env.Name] = env.Value
-		}
-		Expect(envMap).To(HaveKey("KIOSK_JWT_URL"))
-		Expect(envMap["KIOSK_JWT_URL"]).To(Equal(jwtURL))
-		Expect(envMap).To(HaveKey("KIOSK_JWT_TOKEN"))
-		Expect(envMap["KIOSK_JWT_TOKEN"]).To(Equal(jwtToken))
-	})
+	DescribeTable("adds BROWSER_JWT env vars when KioskConfig has JWT URL and token",
+		func(appName, imagePath string) {
+			jwtURL := "https://jwt.example.com"
+			jwtToken := "mytoken"
+			app := makeApp(appName, imagePath, "v1")
+			app.KioskConfig = &defaultv1alpha1.KioskConfig{
+				URL:      "https://example.com",
+				JWTURL:   &jwtURL,
+				JWTToken: &jwtToken,
+			}
+			sm := newTestStorageManager(Config{})
+			job, err := initJob(ctx, wb, Config{}, "uid1", app, svc, sm, nil)
+			Expect(err).NotTo(HaveOccurred())
+			envMap := make(map[string]string)
+			for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+				envMap[env.Name] = env.Value
+			}
+			Expect(envMap).To(HaveKey("BROWSER_JWT_URL"))
+			Expect(envMap["BROWSER_JWT_URL"]).To(Equal(jwtURL))
+			Expect(envMap).To(HaveKey("BROWSER_JWT_TOKEN"))
+			Expect(envMap["BROWSER_JWT_TOKEN"]).To(Equal(jwtToken))
+		},
+		Entry("kiosk app", "kiosk", "apps/kiosk"),
+		Entry("browser app", "browser", "apps/browser"),
+	)
 
 	It("sets HOME and USER env vars from workbench spec", func() {
 		app := makeApp("myapp", "apps/myapp", "v1")
